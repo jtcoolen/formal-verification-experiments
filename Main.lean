@@ -9,7 +9,7 @@ license information.
 -- A runnable demonstration: `lake exe merkleDemo`. Every value printed here is computed by
 -- the Lean kernel from the definitions in the `Merkle` library; nothing is hard-coded.
 
-open Merkle Merkle.Examples
+open Merkle Merkle.Free Merkle.Usage
 
 /-- A depth-three Merkle tree over `Nat`, with digests in the free algebra `Dig Nat`. -/
 def demoTree : Tree Nat 3 :=
@@ -60,5 +60,42 @@ def main : IO Unit := do
   let untouched := Path.left (Path.left (Path.left Path.nil))
   IO.println s!"untouched leaf at {untouched} : {updated.get untouched}"
   IO.println ""
+  IO.println "--- cost accounting (Merkle/Complexity.lean) ---"
+  IO.println s!"full rehash of a depth-3 tree : {demoTree.hashCost} hashes"
+  IO.println s!"  closed form 2^(3+1)-1       : {2 ^ (3 + 1) - 1}"
+  IO.println s!"  2 * leaves - 1              : {2 * demoTree.leaves.length - 1}"
+  IO.println s!"incremental update            : {demoPath.cost} hashes"
+  IO.println s!"proof carries                 : {proof.digestCount} sibling digests"
+  IO.println s!"  = log2 of leaf count        : {Nat.log2 demoTree.leaves.length}"
+  IO.println s!"saving on this tree           : {demoTree.hashCost - demoPath.cost} hashes"
+  IO.println ""
+  IO.println "--- sparse subtrees (Merkle/Usage.lean) ---"
+  let big : Tree Nat 10 := fill 10 0
+  IO.println s!"a depth-10 all-zero tree has {big.leaves.length} leaves"
+  IO.println s!"hashing it leaf by leaf costs {big.hashCost} hashes"
+  IO.println s!"a sparse digest needs 1 leaf + 10 node hashes: {1 + 10}"
+  let sparse := fillHash (α := Nat) (β := Dig Nat) 3 0
+  IO.println s!"sparse == full rehash (depth 3) : {decide (rootHash (β := Dig Nat) (fill 3 0) = sparse)}"
+  IO.println s!"sparse digest : {showDig sparse}"
+  IO.println ""
+  IO.println "--- batch update ---"
+  let batch := updateAll demoTree [(demoPath, 100), (untouched, 200)]
+  IO.println s!"after batch: leaf 5 = {batch.get demoPath}, leaf 0 = {batch.get untouched}"
+  let step1 := demoTree.update demoPath 100
+  let folded := verify (ofTree (β := Dig Nat) step1 untouched) (enc 200)
+  IO.println s!"batch root == folded updates : {decide (rootHash (β := Dig Nat) batch = folded)}"
+  IO.println ""
+  IO.println "--- counting bound (Merkle/Security.lean) ---"
+  IO.println s!"distinct depth-3 Boolean trees : {(Merkle.allTrees 3).length}"
+  IO.println s!"  closed form 2^(2^3)          : {2 ^ (2 ^ 3)}"
+  IO.println s!"distinct depth-4 Boolean trees : {2 ^ (2 ^ 4)}"
+  IO.println s!"a 16-bit digest has 2^16 = {2 ^ (16 : Nat)} values - exactly enough, no slack"
+  IO.println s!"a 15-bit digest must collide on depth-4 trees: {decide (2 ^ (2 ^ 4) > 2 ^ (15 : Nat))}"
+  IO.println s!"a 256-bit digest holds 2^256 values."
+  IO.println s!"depth-9 Boolean trees (512 leaves) need 2^(2^9) = 2^512 of them:"
+  IO.println s!"  2^(2^9) > 2^256, so a 256-bit hash MUST collide: {decide (2 ^ (2 ^ 9) > 2 ^ (256 : Nat))}"
+  IO.println ""
   IO.println "verify_complete, verify_sound and rootHash_update say these outcomes hold"
   IO.println "for every tree, every path, and every collision-free hash algebra."
+  IO.println "not_pow_isBigO_linear says the O(2^n) rehash cost cannot be improved to O(n)."
+  IO.println "digest_cannot_be_small says no compressing collision-free hash can exist."

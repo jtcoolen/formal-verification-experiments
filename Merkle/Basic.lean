@@ -328,7 +328,7 @@ class NodeAlgebra (β : Type) where
   leaf value for another without changing the root;
 * `collFree` - the node combiner has no collisions.
 
-A concrete instantiation must supply proofs of these two fields. See `Merkle/Examples.lean` for
+A concrete instantiation must supply proofs of these two fields. See `Merkle/Free.lean` for
 a fully proved one, and for why a *compressing* collision-free hash cannot be exhibited here and
 can only be assumed. -/
 class MerkleHash (α β : Type) extends NodeAlgebra β where

@@ -1,4 +1,5 @@
 import Merkle
+import Lean.Elab.Command
 
 /-
 Copyright (c) 2026 Formally Verified Examples.
@@ -6,30 +7,42 @@ Licensed under the MIT License. See the file LICENSE in the project root for
 license information.
 -/
 
--- Axiom audit: run `lake env lean Axioms.lean`.
--- Every theorem below should report only `propext` and `Quot.sound` - Lean's standard logical
--- axioms - and never `Classical.choice` or `sorryAx`.
+-- Axiom audit. Run:
+--
+--     lake env lean Axioms.lean
+--
+-- Rather than listing theorem names by hand (which silently rots as the library grows), this
+-- walks every theorem in the `Merkle` namespace in the imported environment and reports any
+-- axiom other than Lean's two standard proof-irrelevance axioms, `propext` and `Quot.sound`.
+--
+-- The point of the check: `sorryAx` would mean a proof is missing, and `Classical.choice` would
+-- mean a proof quietly used excluded middle or decidability of propositional equality. Neither
+-- is acceptable here - the whole value of the library is that the reductions are constructive
+-- and the counting bounds are unconditional.
 
-#print axioms Merkle.rootHash_injective
-#print axioms Merkle.rootHash_eq_iff
-#print axioms Merkle.verify_complete
-#print axioms Merkle.verify_sound
-#print axioms Merkle.no_forgery
-#print axioms Merkle.verify_two_paths
-#print axioms Merkle.rootHash_update
-#print axioms Merkle.rootHash_update_get
-#print axioms Merkle.Proof.pathOf_ofTree
-#print axioms Merkle.Tree.get_injective
-#print axioms Merkle.Tree.get_update_same
-#print axioms Merkle.Tree.get_update_other
-#print axioms Merkle.Tree.update_get_idem
-#print axioms Merkle.Tree.update_update
-#print axioms Merkle.Tree.leaves_length
-#print axioms Merkle.Path.toNat_injective
-#print axioms Merkle.Path.toNat_lt
-#print axioms Merkle.Path.left_ne_right
-#print axioms Merkle.Path.allPaths_complete
-#print axioms Merkle.Path.allPaths_nodup
-#print axioms Merkle.Path.allPaths_length
-#print axioms Merkle.Examples.modThree_notInjective
-#print axioms Merkle.Examples.no_injection_two_into_one
+open Lean Elab Command
+
+-- The two axioms we allow, spelled out so the check does not silently widen.
+private def allowed : List Name := [``propext, ``Quot.sound]
+
+run_cmd do
+  let env ← getEnv
+  let mut count : Nat := 0
+  let mut flagged : Array (Name × Name) := #[]
+  for (nm, ci) in env.constants.toList do
+    if !(`Merkle).isPrefixOf nm then continue
+    match ci with
+    | .thmInfo _ => pure ()
+    | _ => continue
+    count := count + 1
+    let axioms ← liftCoreM <| collectAxioms nm
+    for a in axioms do
+      if !allowed.contains a then
+        flagged := flagged.push (nm, a)
+  logInfo m!"theorems audited in Merkle.*: {count}"
+  if flagged.isEmpty then
+    logInfo "OK - every theorem depends only on propext and Quot.sound"
+    logInfo "      (no sorryAx, no Classical.choice)"
+  else
+    for (nm, a) in flagged do
+      logError m!"{nm} depends on {a}"
