@@ -226,6 +226,22 @@ theorem no_collision_free_sha3_512 : ¬ Nonempty (MerkleHash Bool (BitVec 512)) 
 ```
 
 A 512-bit digest holds `2^512` values; depth-10 Boolean trees number `2^(2^10) = 2^1024`.
+
+### Worked examples over SHA3-512
+
+`Merkle/Sha3/Examples.lean` drives the application layer of `Merkle/Usage.lean` with the real
+hash, and every number it prints is computed by the Lean kernel and pinned with `#guard`:
+
+| Example | What it shows |
+|---|---|
+| `kv` / `kvRoot` | A four-name key-value commitment; the root is pinned against an independent implementation. |
+| `get_update_other` | Overwriting one entry provably leaves every other entry alone. |
+| `sparseTree` / `sroot_fill` | A depth-3 all-default subtree: 15 hashes the naive way, 4 the sparse way, proved equal by induction. |
+| `log` / `logRoot` | A 16-entry append-only log with a pinned root and a pinned leaf digest. |
+| `batch` / `get_updateAll_notMem` | Batch writes; untouched entries provably unchanged. |
+| `cert` / `cert_verifies` / `allVerifyB` | A three-entry multi-inclusion certificate, verified and decidable - a client needs no proof assistant. |
+| `tampered` | A certificate with one forged value is rejected by the decidable check. |
+| `binding_conditional` | Binding, stated under the collision-freeness hypothesis - and `bytesSig_not_collision_free` proves that hypothesis is `False`. |
 Pigeonhole closes the door. So the security theorems stay *conditional* for SHA3 - which is
 precisely the status of every SHA3-based Merkle tree in production, now stated as a theorem
 instead of a caveat.
@@ -258,6 +274,7 @@ Merkle/Signature.lean  MerkleSig / SigCollisionFree - the axiom seam
 Merkle/Security.lean   collision extractor, forgery counts, digest-size barrier
 Merkle/Usage.lean      worked applications: vectors, sparse trees, batches, logs
 Merkle/Sha3.lean       real SHA3-512 (via lean4-hash) installed as a signature
+Merkle/Sha3/Examples.lean  those applications driven by SHA3-512, with pinned digests
 Main.lean              `lake exe merkleDemo`
 Axioms.lean            `lake env lean Axioms.lean` - the axiom audit
 ```

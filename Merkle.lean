@@ -6,6 +6,7 @@ import Merkle.Signature
 import Merkle.Security
 import Merkle.Usage
 import Merkle.Sha3
+import Merkle.Sha3.Examples
 
 /-
 Copyright (c) 2026 Formally Verified Examples.
@@ -31,8 +32,11 @@ The root module of the `Merkle` library. Import this to get everything:
 * `Merkle.Security` - security bounds: the constructive collision extractor
   `collision_of_rootHash_eq`, the exact forgery count `accepting_value_unique`, and the
   information-theoretic barrier `digest_cannot_be_small`.
-* `Merkle.Sha3` - a fixed-width digest (SHA3-256-shaped) installed as a signature: correctness
-  holds with no axioms, and the file proves why collision-freeness cannot be assumed there.
+* `Merkle.Sha3` - real SHA3-512 (via lean4-hash) installed as a signature: correctness holds
+  with no axioms, and the file proves why collision-freeness cannot be assumed there.
+* `Merkle.Sha3.Examples` - worked applications over SHA3-512: key-value commitments, sparse
+  subtrees, a 16-entry append-only log, batch writes, multi-inclusion certificates, and the
+  binding property stated conditionally.
 * `Merkle.Usage` - worked applications: building trees from flat vectors, sparse subtrees,
   batch updates, append-only logs, multi-inclusion certificates, and checked examples.
 -/

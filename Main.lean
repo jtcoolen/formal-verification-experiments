@@ -113,6 +113,23 @@ def main : IO Unit := do
   IO.println "sig_complete and sig_update hold for SHA3-512 with zero axioms;"
   IO.println "no_collision_free_sha3_512 proves the security axioms cannot be satisfied."
   IO.println ""
+  IO.println "--- SHA3-512 worked examples (Merkle/Sha3/Examples.lean) ---"
+  IO.println s!"key-value root (4 names) : {Merkle.Sha3.Examples.kvRoot}"
+  IO.println s!"sparse depth-3 root      : {Merkle.Sha3.Examples.sparseRoot}"
+  IO.println s!"16-entry log root        : {Merkle.Sha3.Examples.logRoot}"
+  IO.println s!"sparse naive cost        : {Merkle.Sha3.Examples.sparseTree.hashCost} hashes"
+  IO.println "sparse cheap cost        : 4 hashes (1 leaf + 3 node)"
+  let lg := Merkle.Sha3.Examples.log
+  let bt := Merkle.Sha3.Examples.batch
+  let pu := Merkle.Sha3.Examples.pUntouched
+  IO.println s!"batch leaves untouched   : {decide (bt.get pu = lg.get pu)}"
+  let root := Sig.root (s := Merkle.Sha3.Examples.bytesSig) lg
+  let okc := Merkle.Sha3.Examples.allVerifyB root Merkle.Sha3.Examples.cert
+  let badc := Merkle.Sha3.Examples.allVerifyB root
+    (Merkle.Sha3.Examples.tampered :: Merkle.Sha3.Examples.cert)
+  IO.println s!"3-entry certificate ok   : {okc}"
+  IO.println s!"tampered certificate ok  : {badc}"
+  IO.println ""
   IO.println "verify_complete, verify_sound and rootHash_update say these outcomes hold"
   IO.println "for every tree, every path, and every collision-free hash algebra."
   IO.println "not_pow_isBigO_linear says the O(2^n) rehash cost cannot be improved to O(n)."

@@ -475,4 +475,61 @@ theorem sha3_256_not_collision_free :
     ¬ Nonempty (MerkleHash Bool (BitVec 256)) :=
   no_collision_free_bitvec 9 256 (by decide)
 
+/-- Relabelling Boolean leaves as `α` is injective whenever the two chosen values are
+distinct, so any leaf type with two distinct values carries at least as many depth-`n` trees
+as `Bool` does. -/
+def relabel {α : Type} (a₀ a₁ : α) : Tree Bool n → Tree α n
+  | Tree.leaf false => Tree.leaf a₀
+  | Tree.leaf true => Tree.leaf a₁
+  | Tree.node l r => Tree.node (relabel a₀ a₁ l) (relabel a₀ a₁ r)
+
+theorem relabel_injective {α : Type} (a₀ a₁ : α) (hne : a₀ ≠ a₁) :
+    ∀ (n : Nat), Function.Injective (relabel (α := α) (n := n) a₀ a₁) := by
+  intro n
+  induction n with
+  | zero =>
+      intro t₁ t₂ he
+      cases t₁ with
+      | leaf b =>
+          cases t₂ with
+          | leaf c =>
+              cases b <;> cases c
+              · rfl
+              · exact absurd (Tree.leaf.inj he) hne
+              · exact absurd (Tree.leaf.inj he).symm hne
+              · rfl
+  | succ n ih =>
+      intro t₁ t₂ he
+      cases t₁ with
+      | node l₁ r₁ =>
+          cases t₂ with
+          | node l₂ r₂ =>
+              obtain ⟨hl, hr⟩ := Tree.node.inj he
+              exact (ih hl) ▸ (ih hr) ▸ rfl
+
+/-- **The barrier does not depend on the leaf type being `Bool`.** Any leaf type with two
+distinct values carries at least `2 ^ (2 ^ n)` different depth-`n` trees, so the counting
+argument applies verbatim. This is what lets the fixed-width impossibility be stated for trees
+over byte strings rather than only over bits. -/
+theorem no_injection_trees_of_two {α : Type} (a₀ a₁ : α) (hne : a₀ ≠ a₁)
+    (n k : Nat) (f : Tree α n → Fin k) (h : k < 2 ^ (2 ^ n)) :
+      ¬ Function.Injective f := by
+  intro hinj
+  have key : Function.Injective
+      (fun t : Tree Bool n => f (relabel (α := α) a₀ a₁ t)) :=
+    fun t₁ t₂ he => relabel_injective a₀ a₁ hne n (hinj he)
+  exact absurd key (no_injection_trees n k (fun t => f (relabel a₀ a₁ t)) h)
+
+/-- `no_collision_free_bitvec`, lifted to any leaf type with two distinct values. -/
+theorem no_collision_free_bitvec_of_two {α : Type} (a₀ a₁ : α) (hne : a₀ ≠ a₁)
+    (n w : Nat) (h : w < 2 ^ n) : ¬ Nonempty (MerkleHash α (BitVec w)) := by
+  rintro ⟨hsh⟩
+  have hp : 2 ^ w < 2 ^ (2 ^ n) := Nat.pow_lt_pow_of_lt (by omega) h
+  have hinj : Function.Injective
+      (fun t : Tree α n => bvToFin w (rootHash (m := hsh) t)) :=
+    fun t₁ t₂ he => rootHash_injective (m := hsh) t₁ t₂ (bvToFin_injective w he)
+  exact absurd hinj
+    (no_injection_trees_of_two a₀ a₁ hne n (2 ^ w)
+      (fun t => bvToFin w (rootHash (m := hsh) t)) hp)
+
 end Merkle
