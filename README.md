@@ -58,6 +58,19 @@ model that counts hash invocations, and the big-O classification is derived from
 | `Merkle.no_injection_trees` | Any map from those trees into `Fin k` with `k < 2^(2^n)` identifies two of them: a collision is **forced**, for any function whatsoever. |
 | `Merkle.digest_cannot_be_small` | **No compressing collision-free hash exists.** A collision-free commitment to `2^n` bits needs at least `2^(2^n)` digest values. |
 | `Merkle.modThree_notInjective` | A concrete compressing candidate, *proved* not to be injective. |
+| `Merkle.no_collision_free_bitvec` | No `MerkleHash Bool (BitVec w)` exists once `w < 2^n`: fixed-width digests are ruled out by counting. |
+| `Merkle.sha3_256_not_collision_free` | SHA3-256 specifically: `256 < 2^9`, so it cannot satisfy the axioms. A theorem, not a gap. |
+
+### The signature layer (Merkle/Signature.lean)
+
+| Theorem | Meaning |
+|---|---|
+| `Merkle.MerkleSig` / `Merkle.NodeSig` | The hash *functions* alone, with no assumptions - the level at which a real fixed-width hash can be installed. |
+| `Merkle.SigCollisionFree` | The two collision assumptions, stated separately as a `Prop`. |
+| `Merkle.Sig.complete` | Completeness over any signature at all, no axioms: `propext` only. |
+| `Merkle.Sig.update` | Incremental update over any signature, no axioms. |
+| `Merkle.merkleHashOfSig` | Adding `SigCollisionFree` recovers a full `MerkleHash`, so every other theorem applies unchanged. |
+| `Merkle.sigRoot_eq_rootHash` | The two layers agree definitionally once the axioms are present - nothing is proved twice in two ways. |
 
 ### Worked applications (Merkle/Usage.lean)
 
@@ -149,6 +162,61 @@ inductive Dig (α : Type) : Type where
 whose two axioms hold by constructor injectivity. This makes the security theorems non-vacuous:
 they apply to a concrete, computable algebra whose collision-freeness is a *theorem*.
 
+## Using a real hash: the signature layer
+
+`MerkleHash` bundles the two hash *functions* with the two collision *assumptions*. That is
+great for stating security theorems and useless for installing SHA3, because the assumptions are
+false for every fixed-width digest - so you could not even *compute* a SHA3 Merkle root.
+`Merkle/Signature.lean` splits the bundle along exactly that seam:
+
+```lean
+class NodeSig (β : Type) where
+  node : β → β → β
+
+class MerkleSig (α β : Type) extends NodeSig β where
+  leaf : α → β
+
+class SigCollisionFree {α β : Type} [s : MerkleSig α β] : Prop where
+  nodeInjective : ∀ {a b c d : β}, s.node a b = s.node c d → a = c ∧ b = d
+  leafInjective : Function.Injective s.leaf
+```
+
+`Sig.root`, `Sig.fold`, `Sig.ofTree`, `Sig.complete` and `Sig.update` live at the signature level
+and hold for **any** pair of functions, with no assumptions - `#print axioms` reports `propext
+only`. `merkleHashOfSig` adds `SigCollisionFree` back to recover a full `MerkleHash`, so nothing
+in `Merkle/Proof.lean` or `Merkle/Security.lean` is duplicated or re-proved differently.
+
+`Merkle/Sha3.lean` then installs a hash with the exact type of
+[`Spec.SHA3_256`](https://github.com/ayhon/sha3.lean) (`Array Bool -> Vector Bool 256`):
+
+```lean
+abbrev Hash256 := Array Bool → Vector Bool 256
+
+def ofHash {α : Type} (enc : α → Array Bool) (h : Hash256) :
+    MerkleSig α (BitVec 256)
+```
+
+Pass `Spec.SHA3_256` as `h` and you have a working Merkle tree over SHA3-256 - root, proofs,
+verification and incremental updates, all correct, all with zero assumptions about the hash.
+That library is not a dependency here (it pins Lean v4.19.0 and pulls in Aeneas and Mathlib; this
+project is zero-dependency on v4.34.1), so the file uses a toy hash of the same type to show the
+bridge computes.
+
+What it deliberately does **not** do is postulate `SigCollisionFree` for a 256-bit digest. That
+would make the theory inconsistent, because the library proves it impossible:
+
+```lean
+theorem no_collision_free_bitvec (n w : Nat) (h : w < 2 ^ n) :
+    ¬ Nonempty (MerkleHash Bool (BitVec w))
+
+theorem sha3_256_not_collision_free :
+    ¬ Nonempty (MerkleHash Bool (BitVec 256)) :=   -- 256 < 2^9
+  no_collision_free_bitvec 9 256 (by decide)
+```
+
+A 256-bit digest holds `2^256` values; depth-9 Boolean trees number `2^(2^9) = 2^512`. Pigeonhole
+closes the door. So the security theorems stay *conditional* for SHA3 - which is precisely the
+status of every SHA3-based Merkle tree in production, now stated as a theorem instead of a caveat.
 ## Axiom audit
 
 `Axioms.lean` does not list theorem names by hand - it walks every theorem in the `Merkle`
@@ -156,7 +224,7 @@ namespace in the compiled environment, so it cannot silently rot as the library 
 
 ```
 $ lake env lean Axioms.lean
-theorems audited in Merkle.*: 230
+theorems audited in Merkle.* / Sha3.*: 243
 OK - every theorem depends only on propext and Quot.sound
       (no sorryAx, no Classical.choice)
 ```
@@ -174,8 +242,10 @@ Merkle/Basic.lean      trees, paths, the hash algebra, rootHash_injective
 Merkle/Proof.lean      authentication paths, verify, verify_sound, rootHash_update
 Merkle/Free.lean       the free algebra Dig - the model that discharges the axioms
 Merkle/Complexity.lean exact cost closed forms, IsBigO, not_pow_isBigO_linear
+Merkle/Signature.lean  MerkleSig / SigCollisionFree - the axiom seam
 Merkle/Security.lean   collision extractor, forgery counts, digest-size barrier
 Merkle/Usage.lean      worked applications: vectors, sparse trees, batches, logs
+Merkle/Sha3.lean       SHA3-256-shaped hash installed as a signature
 Main.lean              `lake exe merkleDemo`
 Axioms.lean            `lake env lean Axioms.lean` - the axiom audit
 ```

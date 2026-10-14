@@ -30,7 +30,7 @@ run_cmd do
   let mut count : Nat := 0
   let mut flagged : Array (Name × Name) := #[]
   for (nm, ci) in env.constants.toList do
-    if !(`Merkle).isPrefixOf nm then continue
+    if !(`Merkle).isPrefixOf nm && !(`Sha3).isPrefixOf nm then continue
     match ci with
     | .thmInfo _ => pure ()
     | _ => continue
@@ -39,7 +39,7 @@ run_cmd do
     for a in axioms do
       if !allowed.contains a then
         flagged := flagged.push (nm, a)
-  logInfo m!"theorems audited in Merkle.*: {count}"
+  logInfo m!"theorems audited in Merkle.* / Sha3.*: {count}"
   if flagged.isEmpty then
     logInfo "OK - every theorem depends only on propext and Quot.sound"
     logInfo "      (no sorryAx, no Classical.choice)"

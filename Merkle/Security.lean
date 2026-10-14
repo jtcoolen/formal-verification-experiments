@@ -441,4 +441,38 @@ theorem accepting_value_exists :
 
 end
 
+/-! ## Fixed-width digests -/
+
+/-- `BitVec w` has exactly `2 ^ w` elements, witnessed by an explicit injection into
+`Fin (2 ^ w)`. -/
+def bvToFin (w : Nat) : BitVec w → Fin (2 ^ w) := fun b => ⟨b.toNat, b.isLt⟩
+
+/-- `bvToFin` really is injective, via `BitVec.toNat_inj`. -/
+theorem bvToFin_injective (w : Nat) : Function.Injective (bvToFin w) := by
+  intro x y h
+  exact BitVec.toNat_inj.mp (congrArg Fin.val h)
+
+/-- **No fixed-width digest is collision-free at sufficient depth.** `BitVec w` has `2 ^ w`
+elements, so a collision-free `MerkleHash Bool (BitVec w)` would have to commit to `2 ^ (2 ^ n)`
+depth-`n` Boolean trees using `2 ^ w` values - possible only while `w ≥ 2 ^ n`.
+
+Read as a design rule: a `w`-bit Merkle digest can be collision-free only over trees with fewer
+than `2 ^ w` leaves, i.e. depth below `log2 w`. Every real deployment violates this, which is
+exactly why collision-freeness is an assumption about an *ideal* hash rather than a theorem
+about a *concrete* one. -/
+theorem no_collision_free_bitvec (n w : Nat) (h : w < 2 ^ n) :
+    ¬ Nonempty (MerkleHash Bool (BitVec w)) := by
+  rintro ⟨hsh⟩
+  have hp : 2 ^ w < 2 ^ (2 ^ n) := Nat.pow_lt_pow_of_lt (by omega) h
+  exact digest_cannot_be_small (β := BitVec w) (hsh := hsh) n (2 ^ w)
+    (bvToFin w) (bvToFin_injective w) hp
+
+/-- **SHA3-256 specifically.** Its output is 256 bits, i.e. `BitVec 256`. Since `256 < 2 ^ 9`,
+no instance of `MerkleHash Bool (BitVec 256)` can exist: SHA3-256 cannot satisfy this library's
+collision-freeness axioms, and no proof of the form "SHA3-256 is collision-free" can ever be
+supplied. This is a theorem, not a gap in the formalization. -/
+theorem sha3_256_not_collision_free :
+    ¬ Nonempty (MerkleHash Bool (BitVec 256)) :=
+  no_collision_free_bitvec 9 256 (by decide)
+
 end Merkle
