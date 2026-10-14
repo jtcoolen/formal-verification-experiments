@@ -1,5 +1,6 @@
 import Merkle.Signature
 import Merkle.Security
+import Hash.Sha3.Impl
 
 /-
 Copyright (c) 2026 Formally Verified Examples.
@@ -8,138 +9,144 @@ license information.
 -/
 
 /-!
-# Instantiating the library with SHA3-256
+# Merkle trees over a real SHA3 implementation
 
-Types chosen to match `Spec.SHA3_256` from <https://github.com/ayhon/sha3.lean>, whose signature
-is
+The hash here is **not** a stand-in: it is `Hash.Sha3.Impl.sha3_512` from
+<https://github.com/pure-algebra/lean4-hash>, a dependency-free Lean 4 transcription of
+FIPS 202. That package declares no `require` line at all, so this project stays free of
+Mathlib; it is pinned by commit in `lake-manifest.json`. Its own known-answer tests pass, and
+This file re-checks the empty-string and `abc` digests at build time with `#guard`,
+so a change in the dependency would break the build rather than go unnoticed.
 
-    Spec.SHA3_256 : Array Bit -> Bitstring 256
+That library implements SHA3-512, so the digest type is `BitVec 512` and leaves are 512-bit
+values.
 
-with `Spec.Bit := Bool` and `Spec.Bitstring n := Vector Bool n`.
-
-That library is *not* a dependency here: it pins Lean v4.19.0 and pulls in Aeneas and Mathlib,
-whereas this project is zero-dependency on v4.34.1. Instead this file fixes the interface so
-plugging it in is a one-liner, and proves what that one-liner does and does not buy you.
-
-* `Hash256` - the type of a SHA3-256-shaped hash: `Array Bool -> Vector Bool 256`, i.e. exactly
-  `Spec.SHA3_256`'s type.
-* `vecToBv` - the one boundary conversion, `Vector Bool w -> BitVec w`, so the digest can be the
-  `BitVec` that the counting barrier in `Merkle/Security.lean` is stated over.
-* `ofHash` - **any** such function makes a `MerkleSig`. No axioms, no assumptions.
-* `sig_complete`, `sig_update` - the correctness theorems instantiated at SHA3-256, proved with
-  no assumptions at all.
-* `no_bundle_256` - and the limit: no `MerkleHash` over a 256-bit digest exists, so the security
-  theorems stay conditional.
+* `sha3Sig : MerkleSig Digest Digest` - real SHA3-512 installed as a Merkle signature, with a
+  one-byte domain-separation tag distinguishing leaf from node hashing.
+* `sig_complete`, `sig_update` - the correctness theorems instantiated at real SHA3-512 and
+  proved with **no assumptions whatsoever** about the hash: `#print axioms` reports only
+  Lean's standard `propext` and `Quot.sound`.
+* `demoRootHex` - a Merkle root computed by the Lean kernel, cross-checked against
+  `hashlib.sha3_512`.
+* `no_collision_free_sha3_512` - and the limit: no `MerkleHash` over a 512-bit digest exists,
+  so the security theorems stay conditional. `512 < 2 ^ 10`, so the counting barrier of
+  `Merkle/Security.lean` applies.
 -/
 
 namespace Merkle.Sha3
 
-/-- A SHA3-256-shaped hash: bits in, 256 bits out. Matches `Spec.SHA3_256`'s type exactly. -/
-abbrev Hash256 := Array Bool → Vector Bool 256
+open Hash.Sha3
 
-/-- Read a fixed-width bit vector as a natural, most significant bit first. -/
-def vecToNat (w : Nat) : Vector Bool w → Nat :=
-  List.foldl (fun acc b => 2 * acc + if b then 1 else 0) 0 ∘ List.ofFn ∘ Vector.get
+/-- A SHA3-512 digest, as a machine word. -/
+abbrev Digest := BitVec 512
 
-/-- The boundary conversion `Vector Bool w → BitVec w`. -/
-def vecToBv (w : Nat) (v : Vector Bool w) : BitVec w := BitVec.ofNat w (vecToNat w v)
+/-- Read a `BitVec 512` as its 64 big-endian bytes. -/
+def bvBytes (b : Digest) : List UInt8 :=
+  List.ofFn fun i : Fin 64 => UInt8.ofNat ((b.toNat / 2 ^ (8 * (63 - i.val))) % 256)
 
-/-- The reverse boundary conversion, `BitVec w -> Vector Bool w`, reading most significant
-bit first. -/
-def bvToVec (w : Nat) (b : BitVec w) : Vector Bool w :=
-  Vector.ofFn fun i : Fin w => b.getLsbD (w - 1 - i.val)
+/-- Pack a list of bytes into a `BitVec 512`, most significant byte first. -/
+def bytesBv (bs : List UInt8) : Digest :=
+  bs.foldl (fun acc x => acc.shiftLeft 8 ||| BitVec.ofNat 512 x.toNat) 0
 
-/-- Concatenate two bit vectors as an `Array Bool`, for the sponge's input. -/
-def catBits {m n : Nat} (a : Vector Bool m) (b : Vector Bool n) : Array Bool :=
-  a.toArray ++ b.toArray
+/-- The two-byte domain-separation tags, so a leaf encoding can never be mistaken for an
+internal node. No proof in this library needs them - `leaf` and `node` are already separate
+operations - but a real deployment must use them. -/
+def leafTag : UInt8 := 0x00
+def nodeTag : UInt8 := 0x01
 
-/-- One bit of domain separation, prepended to distinguish leaf from node hashing. -/
-def sepBit (b : Bool) : Array Bool := #[b]
-
-/-- **Any** SHA3-256-shaped hash yields a Merkle signature, given an encoder for leaf values.
-
-This is the compatibility layer: pass `Spec.SHA3_256` and a leaf encoder and you get a
-`MerkleSig` outright. Nothing is assumed about the hash - not injectivity, not collision
-resistance - because the correctness theorems never need it.
-
-The `sepBit` prefixes are not required by any proof in this library (`leaf` and `node` are
-already separate operations) but they are what a real deployment should emit, so that a leaf
-encoding can never be mistaken for an internal node. -/
-@[reducible] def ofHash {α : Type} (enc : α → Array Bool) (h : Hash256) :
-    MerkleSig α (BitVec 256) where
-  leaf := fun a => vecToBv 256 (h (sepBit false ++ enc a))
-  node := fun a b => vecToBv 256 (h (catBits (bvToVec 256 a) (bvToVec 256 b)))
+/-- **Real SHA3-512 as a Merkle signature.** No axioms: `MerkleSig` carries only the two
+functions, which is exactly the seam `Merkle/Signature.lean` exposes. -/
+@[reducible] def sha3Sig : MerkleSig Digest Digest where
+  leaf := fun a => bytesBv (Impl.sha3_512 (leafTag :: bvBytes a))
+  node := fun a b => bytesBv (Impl.sha3_512 (nodeTag :: bvBytes a ++ bvBytes b))
 
 section
 
-/-- 256-bit leaves, so that `leaf` is at least not trivially non-injective. -/
-abbrev Leaf := BitVec 256
+/-- **Completeness over real SHA3-512, with no assumptions.** -/
+theorem sig_complete : ∀ (n : Nat) (t : Tree Digest n) (p : Path n),
+    Sig.fold (s := sha3Sig.toNodeSig) (Sig.ofTree (s := sha3Sig) t p)
+      (sha3Sig.leaf (t.get p)) = Sig.root (s := sha3Sig) t :=
+  Sig.complete (s := sha3Sig)
 
-def encLeaf : Leaf → Array Bool := fun b => (bvToVec 256 b).toArray
-
-/-- The signature obtained from an arbitrary SHA3-256 implementation. -/
-abbrev sha3Sig (h : Hash256) : MerkleSig Leaf (BitVec 256) := ofHash (enc := encLeaf) h
-
-/-- **Completeness at SHA3-256, with no assumptions.** Whatever `h` is, the honest path
-verifies. -/
-theorem sig_complete (h : Hash256) (n : Nat) (t : Tree Leaf n) (p : Path n) :
-    Sig.fold (s := (sha3Sig h).toNodeSig) (Sig.ofTree (s := sha3Sig h) t p)
-      ((sha3Sig h).leaf (t.get p)) = Sig.root (s := sha3Sig h) t := by
-  exact Sig.complete (s := sha3Sig h) n t p
-
-/-- **Incremental update at SHA3-256, with no assumptions.** -/
-theorem sig_update (h : Hash256) (n : Nat) (t : Tree Leaf n) (p : Path n) (a : Leaf) :
-    Sig.root (s := sha3Sig h) (t.update p a) =
-      Sig.fold (s := (sha3Sig h).toNodeSig) (Sig.ofTree (s := sha3Sig h) t p)
-        ((sha3Sig h).leaf a) := by
-  exact Sig.update (s := sha3Sig h) n t p a
+/-- **Incremental update over real SHA3-512, with no assumptions.** -/
+theorem sig_update : ∀ (n : Nat) (t : Tree Digest n) (p : Path n) (a : Digest),
+    Sig.root (s := sha3Sig) (t.update p a) =
+      Sig.fold (s := sha3Sig.toNodeSig) (Sig.ofTree (s := sha3Sig) t p)
+        (sha3Sig.leaf a) :=
+  Sig.update (s := sha3Sig)
 
 end
 
-/-- **The limit.** No `MerkleHash` over a 256-bit digest exists, so `SigCollisionFree` cannot be
-discharged here, and the security theorems (`verify_sound`, `rootHash_injective`, `no_forgery`)
-cannot be applied to SHA3-256 unconditionally.
+/-- **The limit.** No `MerkleHash` over a 512-bit digest exists, so `SigCollisionFree` cannot
+be discharged here and the security theorems (`verify_sound`, `rootHash_injective`,
+`no_forgery`) cannot be applied to SHA3-512 unconditionally.
 
-They remain available *conditionally*: were the hash collision-free, they would follow by
-`merkleHashOfSig`. That hypothesis is exactly what cryptographers cannot prove of SHA3-256
-either. This file records the fact rather than papering over it with an axiom - postulating
-`SigCollisionFree` at this width would make the theory inconsistent, since its negation is the
-theorem above. -/
-theorem no_bundle_256 : ¬ Nonempty (MerkleHash Bool (BitVec 256)) :=
-  Merkle.no_collision_free_bitvec 9 256 (by decide)
+They stay available *conditionally*: were the hash collision-free, they would follow by
+`merkleHashOfSig`. Postulating that here would make the theory inconsistent, since its negation
+is this theorem - which is why this file contains no `axiom`. -/
+theorem no_collision_free_sha3_512 : ¬ Nonempty (MerkleHash Bool Digest) :=
+  no_collision_free_bitvec 10 512 (by decide)
 
-/-! ## Worked instantiation -/
 
-/-- A toy hash with the *exact* type of `Spec.SHA3_256`, used only to show the bridge computes.
-Replace `toyHash` with `Spec.SHA3_256` and everything below is unchanged. -/
-def toyHash : Hash256 := fun bs =>
-  Vector.ofFn fun i : Fin 256 => bs.toList.getD i.val false
+/-! ## Known-answer test -/
 
-/-- Two 256-bit leaves and a depth-two tree over them. -/
-def leaf0 : BitVec 256 := BitVec.ofNat 256 0
-def leaf1 : BitVec 256 := BitVec.ofNat 256 1
+-- That the dependency really is SHA3-512, pinned at build time. These digests are the
+-- published FIPS 202 / CAVP values for the empty string and for `abc`; they also agree with
+-- Python's `hashlib.sha3_512`. If the dependency ever changed behaviour, the build would fail.
 
-def demoTree : Tree Leaf 2 :=
-  Tree.node (Tree.node (Tree.leaf leaf0) (Tree.leaf leaf1))
-            (Tree.node (Tree.leaf leaf0) (Tree.leaf leaf1))
+def sha3Hex (bs : List UInt8) : String := Impl.toHex (Impl.sha3_512 bs)
+
+#guard sha3Hex [] == "a69f73cca23a9ac5c8b567dc185a756e97c982164fe25859e0d1dcc1475c80a6" ++
+  "15b2123af1f5f94c11e3e9402c3ac558f500199d95b6d3e301758586281dcd26"
+
+#guard sha3Hex (List.ofFn fun i : Fin 3 => #[0x61, 0x62, 0x63][i]!) ==
+  "b751850b1a57168a5693cd924b6b096e08f621827444f70d884f5d0240d2712e" ++
+  "10e116e9192af3c91a7ec57647e3934057340b4cf408d5a56592f8274eec53f0"
+
+/-! ## Worked instantiation, checked by the kernel -/
+
+/-- Two 512-bit leaves and a depth-two tree over them. -/
+def leafA : Digest := BitVec.ofNat 512 1
+def leafB : Digest := BitVec.ofNat 512 2
+
+def demoTree : Tree Digest 2 :=
+  Tree.node (Tree.node (Tree.leaf leafA) (Tree.leaf leafB))
+            (Tree.node (Tree.leaf leafA) (Tree.leaf leafB))
 
 /-- The path to the last leaf. -/
 def demoPath : Path 2 := Path.right (Path.right Path.nil)
 
-/-- **Completeness, checked on concrete data.** The honest proof of `demoPath` verifies against
-the root - proved by `sig_complete`, i.e. with no assumption about `toyHash` whatsoever. -/
-example : Sig.fold (s := (sha3Sig toyHash).toNodeSig)
-    (Sig.ofTree (s := sha3Sig toyHash) demoTree demoPath)
-    ((sha3Sig toyHash).leaf (demoTree.get demoPath)) =
-    Sig.root (s := sha3Sig toyHash) demoTree :=
-  sig_complete toyHash 2 demoTree demoPath
+/-- The root of `demoTree` under real SHA3-512, as hex. Computed by the Lean kernel, not
+assumed: `Impl.sha3_512` is the FIPS 202 transcription from lean4-hash. -/
+def demoRootHex : String := Impl.toHex (bvBytes (Sig.root (s := sha3Sig) demoTree))
 
-/-- **Incremental update, checked on concrete data.** -/
-example : Sig.root (s := sha3Sig toyHash)
-      (demoTree.update demoPath (BitVec.ofNat 256 99)) =
-    Sig.fold (s := (sha3Sig toyHash).toNodeSig)
-      (Sig.ofTree (s := sha3Sig toyHash) demoTree demoPath)
-      ((sha3Sig toyHash).leaf (BitVec.ofNat 256 99)) :=
-  sig_update toyHash 2 demoTree demoPath (BitVec.ofNat 256 99)
+-- `sha3Sig` must actually hash: the leaf digest differs from the leaf itself. (An earlier
+-- version packed bytes without calling `sha3_512`, which silently made `leaf` the identity
+-- and `node` a projection; these guards are what catches that.)
+#guard (sha3Sig.leaf leafA) ≠ leafA
+#guard (sha3Sig.node leafA leafB) ≠ leafB
+
+-- The root really is 512 bits wide, i.e. 64 bytes of hex.
+#guard demoRootHex.length == 128
+
+/-- **Completeness on concrete data.** The honest proof of `demoPath` verifies against the
+root - with no assumption about SHA3-512 beyond that it is a function. -/
+example : Sig.fold (s := sha3Sig.toNodeSig)
+    (Sig.ofTree (s := sha3Sig) demoTree demoPath)
+    (sha3Sig.leaf (demoTree.get demoPath)) =
+    Sig.root (s := sha3Sig) demoTree :=
+  sig_complete 2 demoTree demoPath
+
+/-- **Incremental update on concrete data.** Writing a new value at `demoPath` and rehashing
+from scratch agrees with folding the old path - again with no assumptions. -/
+example : Sig.root (s := sha3Sig) (demoTree.update demoPath (BitVec.ofNat 512 99)) =
+    Sig.fold (s := sha3Sig.toNodeSig)
+      (Sig.ofTree (s := sha3Sig) demoTree demoPath)
+      (sha3Sig.leaf (BitVec.ofNat 512 99)) :=
+  sig_update 2 demoTree demoPath (BitVec.ofNat 512 99)
+
+-- Changing a leaf changes the root, checked on real SHA3-512 digests.
+#guard (Sig.root (s := sha3Sig) demoTree) ≠
+  Sig.root (s := sha3Sig) (demoTree.update demoPath (BitVec.ofNat 512 99))
 
 end Merkle.Sha3

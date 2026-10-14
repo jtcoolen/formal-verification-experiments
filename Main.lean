@@ -95,6 +95,24 @@ def main : IO Unit := do
   IO.println s!"depth-9 Boolean trees (512 leaves) need 2^(2^9) = 2^512 of them:"
   IO.println s!"  2^(2^9) > 2^256, so a 256-bit hash MUST collide: {decide (2 ^ (2 ^ 9) > 2 ^ (256 : Nat))}"
   IO.println ""
+  IO.println "--- real SHA3-512 (Merkle/Sha3.lean, via lean4-hash) ---"
+  let t := Merkle.Sha3.demoTree
+  let pp := Merkle.Sha3.demoPath
+  IO.println s!"SHA3-512 of empty string : {Merkle.Sha3.sha3Hex []}"
+  IO.println s!"Merkle root of a depth-2 tree of 512-bit leaves:"
+  IO.println s!"  {Merkle.Sha3.demoRootHex}"
+  IO.println s!"  ({Merkle.Sha3.demoRootHex.length} hex chars = 512 bits)"
+  let folded := Sig.fold (s := Merkle.Sha3.sha3Sig.toNodeSig)
+    (Sig.ofTree (s := Merkle.Sha3.sha3Sig) t pp)
+    (Merkle.Sha3.sha3Sig.leaf (t.get pp))
+  IO.println s!"honest proof verifies (no assumptions): {decide (folded = Sig.root (s := Merkle.Sha3.sha3Sig) t)}"
+  let tampered := Sig.fold (s := Merkle.Sha3.sha3Sig.toNodeSig)
+    (Sig.ofTree (s := Merkle.Sha3.sha3Sig) t pp)
+    (Merkle.Sha3.sha3Sig.leaf (BitVec.ofNat 512 99))
+  IO.println s!"tampered value verifies          : {decide (tampered = Sig.root (s := Merkle.Sha3.sha3Sig) t)}"
+  IO.println "sig_complete and sig_update hold for SHA3-512 with zero axioms;"
+  IO.println "no_collision_free_sha3_512 proves the security axioms cannot be satisfied."
+  IO.println ""
   IO.println "verify_complete, verify_sound and rootHash_update say these outcomes hold"
   IO.println "for every tree, every path, and every collision-free hash algebra."
   IO.println "not_pow_isBigO_linear says the O(2^n) rehash cost cannot be improved to O(n)."

@@ -1,6 +1,16 @@
 {"version": "1.2.0",
  "packagesDir": ".lake/packages",
- "packages": [],
+ "packages":
+ [{"url": "https://github.com/pure-algebra/lean4-hash",
+   "type": "git",
+   "subDir": null,
+   "scope": "",
+   "rev": "ab7eda433f0390fde7aa240189761540c9744c79",
+   "name": "hash",
+   "manifestFile": "lake-manifest.json",
+   "inputRev": "ab7eda433f0390fde7aa240189761540c9744c79",
+   "inherited": false,
+   "configFile": "lakefile.toml"}],
  "name": "merkle",
  "lakeDir": ".lake",
  "fixedToolchain": false}

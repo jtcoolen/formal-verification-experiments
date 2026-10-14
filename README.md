@@ -1,7 +1,11 @@
 # Formally verified Merkle trees in Lean 4
 
-A from-scratch, machine-checked development of binary Merkle trees in **Lean 4 with no
-dependencies** - pure Lean core, no Mathlib, no `sorry`, no custom axioms.
+A from-scratch, machine-checked development of binary Merkle trees in **Lean 4 on pure core
+only** - no Mathlib, no `sorry`, no custom axioms.
+
+The only dependency is [lean4-hash](https://github.com/pure-algebra/lean4-hash), a proved
+FIPS 202 SHA3-512 used by `Merkle/Sha3.lean` to demonstrate the library over a real hash
+function. lean4-hash declares no dependencies of its own, so Mathlib stays out of the build.
 
 ```bash
 lake build          # compiles the whole library in a few seconds
@@ -186,37 +190,45 @@ and hold for **any** pair of functions, with no assumptions - `#print axioms` re
 only`. `merkleHashOfSig` adds `SigCollisionFree` back to recover a full `MerkleHash`, so nothing
 in `Merkle/Proof.lean` or `Merkle/Security.lean` is duplicated or re-proved differently.
 
-`Merkle/Sha3.lean` then installs a hash with the exact type of
-[`Spec.SHA3_256`](https://github.com/ayhon/sha3.lean) (`Array Bool -> Vector Bool 256`):
+`Merkle/Sha3.lean` installs a **real** hash: `Hash.Sha3.Impl.sha3_512` from
+[lean4-hash](https://github.com/pure-algebra/lean4-hash), a dependency-free Lean 4 transcription
+of FIPS 202, pinned by commit in `lake-manifest.json`.
 
 ```lean
-abbrev Hash256 := Array Bool → Vector Bool 256
+abbrev Digest := BitVec 512
 
-def ofHash {α : Type} (enc : α → Array Bool) (h : Hash256) :
-    MerkleSig α (BitVec 256)
+@[reducible] def sha3Sig : MerkleSig Digest Digest where
+  leaf := fun a => bytesBv (Impl.sha3_512 (leafTag :: bvBytes a))
+  node := fun a b => bytesBv (Impl.sha3_512 (nodeTag :: bvBytes a ++ bvBytes b))
 ```
 
-Pass `Spec.SHA3_256` as `h` and you have a working Merkle tree over SHA3-256 - root, proofs,
-verification and incremental updates, all correct, all with zero assumptions about the hash.
-That library is not a dependency here (it pins Lean v4.19.0 and pulls in Aeneas and Mathlib; this
-project is zero-dependency on v4.34.1), so the file uses a toy hash of the same type to show the
-bridge computes.
+That gives a working Merkle tree over SHA3-512 - root, proofs, verification, incremental
+updates - with **zero assumptions about the hash**. `sig_complete` and `sig_update` audit to
+`propext` and `Quot.sound` only.
 
-What it deliberately does **not** do is postulate `SigCollisionFree` for a 256-bit digest. That
+Two things keep the dependency honest at build time. The SHA3-512 known-answer vectors for the
+empty string and for `abc` are pinned with `#guard`, so a change in the dependency fails the
+build rather than going unnoticed; and the file guards that `sha3Sig` actually hashes
+(`leaf a ≠ a`, `node a b ≠ b`), which caught a real bug during development - an earlier version
+packed bytes into `BitVec 512` without calling `sha3_512`, silently making `leaf` the identity
+and `node` a projection. The computed Merkle root also agrees byte-for-byte with Python's
+`hashlib.sha3_512` under the same tagging scheme.
+
+What it deliberately does **not** do is postulate `SigCollisionFree` for a 512-bit digest. That
 would make the theory inconsistent, because the library proves it impossible:
 
 ```lean
 theorem no_collision_free_bitvec (n w : Nat) (h : w < 2 ^ n) :
     ¬ Nonempty (MerkleHash Bool (BitVec w))
 
-theorem sha3_256_not_collision_free :
-    ¬ Nonempty (MerkleHash Bool (BitVec 256)) :=   -- 256 < 2^9
-  no_collision_free_bitvec 9 256 (by decide)
+theorem no_collision_free_sha3_512 : ¬ Nonempty (MerkleHash Bool (BitVec 512)) :=   -- 512 < 2^10
+  no_collision_free_bitvec 10 512 (by decide)
 ```
 
-A 256-bit digest holds `2^256` values; depth-9 Boolean trees number `2^(2^9) = 2^512`. Pigeonhole
-closes the door. So the security theorems stay *conditional* for SHA3 - which is precisely the
-status of every SHA3-based Merkle tree in production, now stated as a theorem instead of a caveat.
+A 512-bit digest holds `2^512` values; depth-10 Boolean trees number `2^(2^10) = 2^1024`.
+Pigeonhole closes the door. So the security theorems stay *conditional* for SHA3 - which is
+precisely the status of every SHA3-based Merkle tree in production, now stated as a theorem
+instead of a caveat.
 ## Axiom audit
 
 `Axioms.lean` does not list theorem names by hand - it walks every theorem in the `Merkle`
@@ -245,7 +257,7 @@ Merkle/Complexity.lean exact cost closed forms, IsBigO, not_pow_isBigO_linear
 Merkle/Signature.lean  MerkleSig / SigCollisionFree - the axiom seam
 Merkle/Security.lean   collision extractor, forgery counts, digest-size barrier
 Merkle/Usage.lean      worked applications: vectors, sparse trees, batches, logs
-Merkle/Sha3.lean       SHA3-256-shaped hash installed as a signature
+Merkle/Sha3.lean       real SHA3-512 (via lean4-hash) installed as a signature
 Main.lean              `lake exe merkleDemo`
 Axioms.lean            `lake env lean Axioms.lean` - the axiom audit
 ```
