@@ -159,6 +159,23 @@ def demoShor : IO Unit := do
   IO.println "    decrypt(encrypt m) = m for every one of the 33 messages (Shor.rsa_roundtrip_33)"
   IO.println "  ECDLP recovery: r = 7, measured (c,d) = (6,3) gives k = 5 (Shor.ECDLP.recovered_7)"
 
+/-- Verified optimization passes applied to the Shor circuits themselves: the order-finding
+unitary and the QFT ladder are ordinary circuits in the verified language, so the engine
+optimizes them and the independent checker certifies the result exactly as for any other
+input. -/
+def demoShorOpt : IO Unit := do
+  IO.println (String.replicate 78 '=')
+  IO.println "Shor circuits through the optimizer (each result certified independently)"
+  demoWith fastConfig "Shor S1: QFT2 ; QFT2-inverse  ->  identity"
+    (Circuit.seq Shor.QFT.qft2 Shor.QFT.iqft2 : Circuit 2)
+  demoWith rotationConfig
+    "Shor S2: CP(pi/4) ; CP(pi/4)  ->  CP(pi/2) (the QFT phase ladder fuses)"
+    (Circuit.seq (Shor.QFT.cphase Shor.QFT.j1 Shor.QFT.j0 (by decide) 1)
+      (Shor.QFT.cphase Shor.QFT.j1 Shor.QFT.j0 (by decide) 1) : Circuit 2)
+  demoWith fastConfig
+    "Shor S3: the order-finding unitary for a = 2, N = 3 (which IS SWAP) applied twice"
+    (Circuit.seq (Circuit.gate (Gate.swap Shor.ModMul.j0 Shor.ModMul.j1 Shor.ModMul.hne))
+      (Circuit.gate (Gate.swap Shor.ModMul.j0 Shor.ModMul.j1 Shor.ModMul.hne)) : Circuit 2)
 def main (args : List String) : IO Unit := do
   let sel := args.headD ""
   IO.println "Proof-producing quantum circuit optimizer (Lean 4 + Mathlib + OptiSat)"
@@ -201,7 +218,9 @@ def main (args : List String) : IO Unit := do
       "Bug regression 1: Rz(10^17) ; Rz(pi) ; Rz(-10^17)  =  Rz(pi), NOT identity"
       (sg [Gate.rz i0 big, Gate.rz i0 Angle.pi, Gate.rz i0 (-big)] : Circuit 1)
   if only sel "P" then demoSpecialize
-  if only sel "R" then demoShor
+  if only sel "R" then
+    demoShor
+    demoShorOpt
   if only sel "N" then
     demoReject "Negative test: wrong final circuit"
       (sg [Gate.h i0, Gate.h i0] : Circuit 1) (sg [Gate.h i0] : Circuit 1)

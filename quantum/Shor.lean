@@ -17,3 +17,4 @@ import Shor.Arith
 import Shor.RSA
 import Shor.ECDLP
 import Shor.QFT
+import Shor.ModMul

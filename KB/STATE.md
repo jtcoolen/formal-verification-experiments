@@ -10,6 +10,12 @@
   write to a file with `IO.FS.withFile path Mode.append (fun h => h.putStrLn m)`.
 
 ## Green state (this round)
+* `cd quantum && lake build` → "Build completed successfully (4451 jobs)", exit 0.
+* `lake exe quantum` → 209 lines, exit 0, 18 ACCEPTS + 5 negative-test REJECTS.
+* `lake exe proptests` → all metamorphic properties held.
+* `lake env lean Axioms.lean` → 49 theorems audited, only propext / Classical.choice / Quot.sound.
+
+(older notes below)
 * `cd quantum && lake build` → "Build completed successfully (4447 jobs)", exit 0.
 * `lake exe quantum` → 183 lines, exit 0, 15 ACCEPTS + 5 negative-test REJECTS (`quantum/demo_output.txt`).
 * `lake exe proptests` → "all metamorphic properties held"; 0 unaccepted certificates,
@@ -75,6 +81,32 @@ cost-decreasing steps only) cannot move, the saturating engine reaches identity.
 * `List.get?` is not available; use `.drop i |>.head?`.  `IO.FS.appendText` does not exist.
 * Embedding Lean text with backticks into JS template literals breaks; write files with
   `fs.writeFileSync` from arrays of single-quoted JS strings, or use heredocs.
+
+## Round 6-7 additions
+* **`Quantum/Invariants.lean` (NEW, 15 theorems)**: the whole §E chain instantiated at
+  QOp n / PhaseOp n — `Quadruple`, `addCircuit_uf_wf`, `ofCircuit_uf_wf`, `empty_quadruple`,
+  `insert_preserves`, `merge_preserves`, `congruence_preserves`, `rebuild_preserves`,
+  `saturation_preserves`, `addCircuit_quadruple`, `initial_quadruple` (semantic consistency
+  of the initial graph: the class of c has value pquot (denote c)), `addCircuit_bestNodeInv`,
+  `initial_bestNodeInv`, `optimizeF_eq`, `extraction_value`, `extraction_value_initial`,
+  `saturation_preserves_initial`.
+* **`Shor/ModMul.lean` (NEW)**: the order-finding unitary for a=2, N=3 proved to BE SWAP.
+  `val2` (little-endian), `modMul2_3`, `modMul2_3_val` (x↦2x mod 3 on group elements),
+  `modMul2_3_fixes_three` (non-group state fixed, per the documented convention),
+  `modMul2_3_involution`, `modMul2_3_bijective`, generic `permMat` + `permMat_mul` +
+  `permMat_id` + `permMat_self_inverse` + `permMat_conjTranspose_self`,
+  **`denote_swap_eq_permMat`** (entrywise, from the independent semantics),
+  `isUnitaryM_permMat_modMul2_3` (inherited from denoteGate_isUnitary), `order_2_3`,
+  **`unitary_order_eq_order`**, `denote_swap_pow_order`.
+* **BUG FIXED: `anglesOf` did not list `Gate.cp`.**  Controlled-phase angles therefore never
+  entered `candidateArgs`, so no `cp_add`/`cp_zero` instance with a non-zero angle was ever
+  generated and CP fusion was impossible.  Symptom: `CP(pi/4);CP(pi/4)` optimized to
+  itself.  After the fix the engine extracts `CP(pi/2)` with a 1-step accepted certificate.
+  Lesson: when a gate is added to the syntax, every traversal in Optimizer.lean must be
+  extended — `index1?/index2?`, `Gate.arity`, `Gate.mat2`, `anglesOf`, `gatesOf`.
+* **Demo keys**: `quantum R` now also runs `demoShorOpt` (S1 QFT2;QFT2† → identity in 1
+  certified step; S2 CP fusion; S3 the a=2,N=3 order-finding unitary squared → identity).
+* `Config` gained `rounds : Nat := 3`; `Diag.lean` gained S1/S2 probes and rule-name tracing.
 
 ## Remaining priorities
 1. ~~Reach identity with the engine on E and F~~ DONE (iterated rounds + alphabet bound).

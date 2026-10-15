@@ -318,3 +318,36 @@ wrongly accepted), 12 s.
 
 **Remaining** — a third saturation round in one pass still explodes; `Quantum/Invariants.lean`
 (spec §E); Shor quantum half; Toffoli.
+
+## Round 6-7 — e-graph invariants in-project, the Shor order-finding unitary, and a real bug
+
+**Implemented**
+* `Quantum/Invariants.lean` (new): the §E invariant chain restated at `QOp n`/`PhaseOp n`.
+* `Shor/ModMul.lean` (new): permutation matrices, and the proof that SWAP *is* the
+  order-finding unitary for a = 2, N = 3.
+* `Quantum/Optimizer.lean`: **`anglesOf` was missing `Gate.cp`** — a genuine search bug;
+  controlled-phase angles never reached `candidateArgs`, so no `cp_add` instance with a
+  non-zero angle was ever generated.
+* `Main.lean`: `demoShorOpt` (S1/S2/S3) wired to key R.  `Shor.lean` imports ModMul.
+* `Diag.lean`: rule-name and alphabet tracing, S1/S2 probes.
+
+**Verified**
+* Invariants: `ofCircuit_uf_wf`, `empty_quadruple`, `insert_preserves`, `merge_preserves`,
+  `congruence_preserves`, `rebuild_preserves`, `saturation_preserves`,
+  `addCircuit_quadruple`, `initial_quadruple`, `initial_bestNodeInv`, `optimizeF_eq`,
+  `extraction_value`, `extraction_value_initial`, `saturation_preserves_initial`.
+* Shor: `modMul2_3_val`, `modMul2_3_fixes_three`, `modMul2_3_involution`,
+  `modMul2_3_bijective`, `permMat_mul`, `permMat_self_inverse`,
+  `permMat_conjTranspose_self`, `denote_swap_eq_permMat`, `isUnitaryM_permMat_modMul2_3`,
+  `order_2_3`, `unitary_order_eq_order`, `denote_swap_pow_order`.
+
+**Compiled** — `lake build` → 4451 jobs, exit 0.
+
+**Tested** — `lake exe quantum` 209 lines / exit 0 / 18 ACCEPTS.  Key R now shows:
+S1 `H ; CP(1,0,1/2pi) ; H ; SWAP ; SWAP ; H ; CP(1,0,-1/2pi) ; H` (8 gates, 4 two-qubit)
+→ identity, 1 certified step; S2 `CP(pi/4) ; CP(pi/4)` → `CP(pi/2)` (2g/2q → 1g/1q), 1
+certified `cp_add` step — this only works after the `anglesOf` fix; S3 SWAP;SWAP → identity.
+proptests: all metamorphic properties held.  Axiom audit: 49 theorems, standard axioms only.
+
+**Remaining** — QFT₃ entrywise = DFT₃; Toffoli CCX/CCZ for the ECDSA.Fail Q×T metric;
+modular-multiplication oracles for larger N (needs a reversible adder).

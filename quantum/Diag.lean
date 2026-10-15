@@ -6,6 +6,7 @@ Stage diagnostics for the optimizer pipeline, selected by command-line argument:
   diag all  [f i r]    saturation + extraction + certificate searches
 -/
 import Quantum
+import Shor
 
 open Quantum Quantum.Opt Quantum.EG LambdaSat
 
@@ -16,6 +17,8 @@ def trace (m : String) : IO Unit :=
   IO.FS.withFile "/tmp/diag_trace.txt" IO.FS.Mode.append fun h => h.putStrLn m
 
 def i0 : Fin 1 := ⟨0, by decide⟩
+def jj0 : Fin 2 := ⟨0, by decide⟩
+def jj1 : Fin 2 := ⟨1, by decide⟩
 def k0 : Fin 3 := ⟨0, by decide⟩
 def k1 : Fin 3 := ⟨1, by decide⟩
 def k2 : Fin 3 := ⟨2, by decide⟩
@@ -61,6 +64,7 @@ def iso {n : Nat} (label : String) (c : Circuit n) : IO Unit := do
 
 def one {n : Nat} (f it rf : Nat) (label : String) (c : Circuit n) (mode : String) : IO Unit := do
   trace (label ++ ": alphabet=" ++ toString ((kindClosure c).length) ++ " rules=" ++ toString ((quantumRules c).length))
+  trace (label ++ ": names " ++ toString ((quantumRules c).map fun r => r.rule.name))
   let (root, g0) := ofCircuit c
   let t0 ← IO.monoMsNow
   let gSat := saturateF f it rf g0 ((quantumRules c).map fun psr => psr.rule)
@@ -108,3 +112,6 @@ def main (args : List String) : IO Unit := do
   one f it rf "F" cF mode
   one f it rf "E" cE mode
   one f it rf "I" cI mode
+  one f it rf "S2" (sg [Gate.cp jj1 jj0 (by decide) (Angle.piMul (1 / 4)),
+    Gate.cp jj1 jj0 (by decide) (Angle.piMul (1 / 4))] : Circuit 2) mode
+  one f it rf "S1" (Circuit.seq Shor.QFT.qft2 Shor.QFT.iqft2 : Circuit 2) mode

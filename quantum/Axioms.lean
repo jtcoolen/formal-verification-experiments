@@ -51,3 +51,9 @@ import Shor
 #print axioms Quantum.Invariants.initial_bestNodeInv
 #print axioms Quantum.Invariants.extraction_value_initial
 #print axioms Quantum.Invariants.saturation_preserves_initial
+#print axioms Shor.ModMul.modMul2_3_val
+#print axioms Shor.ModMul.denote_swap_eq_permMat
+#print axioms Shor.ModMul.isUnitaryM_permMat_modMul2_3
+#print axioms Shor.ModMul.unitary_order_eq_order
+#print axioms Shor.ModMul.denote_swap_pow_order
+#print axioms Shor.ModMul.permMat_mul

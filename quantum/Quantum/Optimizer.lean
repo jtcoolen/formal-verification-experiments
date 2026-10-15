@@ -30,6 +30,7 @@ def anglesOf : Circuit n -> List Angle
   | Circuit.gate (Gate.rx _ a) => [a]
   | Circuit.gate (Gate.ry _ a) => [a]
   | Circuit.gate (Gate.crz _ _ _ a) => [a]
+  | Circuit.gate (Gate.cp _ _ _ a) => [a]
   | Circuit.gate _ => []
   | Circuit.seq a b => anglesOf a ++ anglesOf b
 
