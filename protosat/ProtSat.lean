@@ -3,4 +3,7 @@ import ProtSat.CNF
 import ProtSat.Attacker
 import ProtSat.Protocol
 import ProtSat.Operational
+import ProtSat.Bounded
 import ProtSat.DPLL
+import ProtSat.OneHot
+import ProtSat.Encode
