@@ -323,6 +323,12 @@ theorem rw_swapswap {i j : Fin n} (h : i ≠ j) :
   show embed2 SWAP4 i j * embed2 SWAP4 i j = 1
   rw [embed2_mul (hij := h), SWAP4_mul_SWAP4, embed2_one h]
 
+theorem rw_crz_zero {i j : Fin n} (h : i ≠ j) :
+    PhaseEquivalent (Circuit.gate (Gate.crz i j h 0)) Circuit.one := by
+  refine phase_of_eq ?_
+  show embed2 (CRz4 (Angle.val 0)) i j = 1
+  rw [Angle.val_zero, CRz4_zero, embed2_one h]
+
 theorem rw_crz_add {i j : Fin n} (h : i ≠ j) (s t : Angle) :
     PhaseEquivalent (Circuit.seq (Circuit.gate (Gate.crz i j h s))
       (Circuit.gate (Gate.crz i j h t))) (Circuit.gate (Gate.crz i j h (s + t))) := by
@@ -453,6 +459,22 @@ theorem rw_disjoint {g₁ g₂ : Gate n} (h : g₁.disjoint g₂ = true) :
             (by rw [Gate.qubits_of_index2? hkl]; simp)
         rw [denoteGate_embed2 hij, denoteGate_embed2 hkl, embed2_embed2_comm h1 h2 h3 h4])
 
+/-- A circuit followed by its uncomputation is the identity, *exactly*.  This is the
+uncomputation / dead-code law used by reversible-circuit optimizers: a compute block and the
+matching uncompute block annihilate. -/
+theorem rw_uncompute {n : Nat} (c : Circuit n) :
+    PhaseEquivalent (Circuit.seq (Circuit.inv c) c) Circuit.one := by
+  refine phase_of_eq ?_
+  show denote c * denote (Circuit.inv c) = 1
+  exact denote_mul_inv c
+
+/-- The same annihilation in the other order. -/
+theorem rw_uncompute2 {n : Nat} (c : Circuit n) :
+    PhaseEquivalent (Circuit.seq c (Circuit.inv c)) Circuit.one := by
+  refine phase_of_eq ?_
+  show denote (Circuit.inv c) * denote c = 1
+  exact denote_inv_mul c
+
 /-! ### Matchers for rule arguments -/
 
 def oneQ : List (Arg n) -> Option (Fin n)
@@ -542,6 +564,12 @@ def ruleSelfInv2 (f : (a b : Fin n) -> a ≠ b -> Gate n) (name : String)
       (Circuit.gate (f p.val.1 p.val.2 p.property)))
     (fun _ => Circuit.one) (fun p => h (hij := p.property))
 
+/-- A controlled rotation by the zero angle disappears. -/
+def ruleCrzZero (n : Nat) : Rule n :=
+  mkRule (n := n) "crz_zero" twoQne
+    (fun p => Circuit.gate (Gate.crz p.val.1 p.val.2 p.property 0)) (fun _ => Circuit.one)
+    (fun p => rw_crz_zero (h := p.property))
+
 /-- Adding two controlled-rotation angles. -/
 def ruleAddRot2 (f : (a b : Fin n) -> a ≠ b -> Angle -> Gate n) (name : String)
     (h : ∀ {i j : Fin n} (hij : i ≠ j) (s t : Angle),
@@ -592,9 +620,29 @@ def ruleAssoc (n : Nat) : Rule n :=
 
 /-! ### The rule library -/
 
+/-- Matches a pair of circuits that are mutual inverses: `seq (inv c) c`. -/
+def circInvPair : List (Arg n) -> Option (Circuit n)
+  | [Arg.c a, Arg.c b] => if a = Circuit.inv b then some b else none
+  | _ => none
+
+/-- Matches a pair of circuits that are mutual inverses: `seq c (inv c)`. -/
+def circPairInv : List (Arg n) -> Option (Circuit n)
+  | [Arg.c a, Arg.c b] => if b = Circuit.inv a then some a else none
+  | _ => none
+
+/-- Circuit-level uncomputation: `inv c ; c = I` (exactly). -/
+def ruleUncompute (n : Nat) : Rule n :=
+  mkRule (n := n) "uncompute" circInvPair (fun c => Circuit.seq (Circuit.inv c) c)
+    (fun _ => Circuit.one) (fun c => rw_uncompute c)
+
+/-- Circuit-level uncomputation the other way round: `c ; inv c = I` (exactly). -/
+def ruleUncompute2 (n : Nat) : Rule n :=
+  mkRule (n := n) "uncompute2" circPairInv (fun c => Circuit.seq c (Circuit.inv c))
+    (fun _ => Circuit.one) (fun c => rw_uncompute2 c)
+
 /-- The complete rewrite library for n-qubit circuits. -/
 def rules (n : Nat) : List (Rule n) :=
-  [ ruleIdL n, ruleIdR n, ruleAssoc n,
+  [ ruleIdL n, ruleIdR n, ruleAssoc n, ruleUncompute n, ruleUncompute2 n,
     ruleSelfInv Gate.h "hh" rw_hh,
     ruleSelfInv Gate.x "xx" rw_xx,
     ruleSelfInv Gate.y "yy" rw_yy,
@@ -620,6 +668,7 @@ def rules (n : Nat) : List (Rule n) :=
     ruleSelfInv2 Gate.cz "czcz" rw_czcz,
     ruleSelfInv2 Gate.swap "swapswap" rw_swapswap,
     ruleAddRot2 (fun i j h => Gate.crz i j h) "crz_add" rw_crz_add,
+    ruleCrzZero n,
     mkRule (n := n) "rz_pi_z" oneQ (fun i => gc (fun k => Gate.rz k Angle.pi) i)
       (fun i => gc Gate.z i) (fun i => rw_rz_pi_z i),
     mkRule (n := n) "rz_halfPi_s" oneQ

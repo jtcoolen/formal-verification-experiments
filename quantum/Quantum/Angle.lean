@@ -25,7 +25,7 @@ namespace Quantum
 structure Angle where
   rat : ℚ
   piQ : ℚ
-deriving DecidableEq, Inhabited
+deriving DecidableEq, Inhabited, Repr
 
 namespace Angle
 
@@ -53,6 +53,12 @@ instance : SMul ℚ Angle := ⟨smulRat⟩
 @[simp] theorem neg_piQ (a : Angle) : (-a).piQ = -a.piQ := rfl
 @[simp] theorem smul_rat (q : ℚ) (a : Angle) : (q • a).rat = q * a.rat := rfl
 @[simp] theorem smul_piQ (q : ℚ) (a : Angle) : (q • a).piQ = q * a.piQ := rfl
+
+/-- Negation is an involution: exact angles have no rounding, so a double negation is
+literally the same pair of rationals. -/
+theorem neg_neg (a : Angle) : -(-a) = a := by
+  cases a with
+  | mk r p => show Angle.neg (Angle.neg ⟨r, p⟩) = ⟨r, p⟩; simp [Angle.neg]
 
 /-- Exact angle of a rational number of radians (e.g. a decimal literal parsed as ℚ). -/
 def ofRat (q : ℚ) : Angle := ⟨q, 0⟩
@@ -96,6 +102,15 @@ theorem isZero.mp {a : Angle} (h : isZero a = true) : val a = 0 := by
   have ha : a = 0 := by simpa [isZero] using h
   subst ha
   exact val_zero
+
+/-- Angle equality reduces to equality of the two exact rational components. -/
+theorem eq_iff (a b : Angle) : a = b ↔ a.rat = b.rat ∧ a.piQ = b.piQ := by
+  cases a with
+  | mk r p => cases b with | mk r' p' => simp [Angle.mk.injEq]
+
+/-- Prove an angle equality by normalizing both rational components. -/
+theorem eq_of_components (a b : Angle) (h1 : a.rat = b.rat) (h2 : a.piQ = b.piQ) : a = b :=
+  (eq_iff a b).mpr ⟨h1, h2⟩
 
 /-- Decidable equality of angles; it implies equality of the denoted reals. -/
 def beq (a b : Angle) : Bool := a = b

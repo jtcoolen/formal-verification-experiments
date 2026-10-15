@@ -148,6 +148,138 @@ theorem denote_gates {n : Nat} (c : Circuit n) : denote (Circuit.ofGates c.gates
 theorem denote_normalize {n : Nat} (c : Circuit n) : denote (Circuit.normalize c) = denote c :=
   denote_gates c
 
+/-! ### Inverses -/
+
+/-- Exact cancellation of an angle with its negation, in the *exact* symbolic sense: the
+underlying real numbers sum to zero.  `ring` closes it after expanding the angle -/
+theorem val_neg_add_self (a : Angle) : Angle.val (-a) + Angle.val a = 0 := by
+  rw [Angle.val_neg]; ring
+
+theorem val_add_neg_self (a : Angle) : Angle.val a + Angle.val (-a) = 0 := by
+  rw [Angle.val_neg]; ring
+
+/-- A primitive gate followed by its inverse denotes the identity. -/
+theorem denoteGate_inv_mul {n : Nat} (g : Gate n) :
+    denoteGate (Gate.inv g) * denoteGate g = 1 := by
+  cases g with
+  | h i =>
+    show embed1 H2 i * embed1 H2 i = 1
+    rw [embed1_mul, H2_mul_H2, embed1_one]
+  | x i =>
+    show embed1 X2 i * embed1 X2 i = 1
+    rw [embed1_mul, X2_mul_X2, embed1_one]
+  | y i =>
+    show embed1 Y2 i * embed1 Y2 i = 1
+    rw [embed1_mul, Y2_mul_Y2, embed1_one]
+  | z i =>
+    show embed1 Z2 i * embed1 Z2 i = 1
+    rw [embed1_mul, Z2_mul_Z2, embed1_one]
+  | s i =>
+    show embed1 S2Dag i * embed1 S2 i = 1
+    rw [embed1_mul, S2Dag_mul_S2, embed1_one]
+  | t i =>
+    show embed1 T2Dag i * embed1 T2 i = 1
+    rw [embed1_mul, T2Dag_mul_T2, embed1_one]
+  | sDag i =>
+    show embed1 S2 i * embed1 S2Dag i = 1
+    rw [embed1_mul, S2_mul_S2Dag, embed1_one]
+  | tDag i =>
+    show embed1 T2 i * embed1 T2Dag i = 1
+    rw [embed1_mul, T2_mul_T2Dag, embed1_one]
+  | rz i a =>
+    show embed1 (Rz2 (Angle.val (-a))) i * embed1 (Rz2 (Angle.val a)) i = 1
+    rw [embed1_mul, Rz2_mul, val_neg_add_self, Rz2_zero, embed1_one]
+  | rx i a =>
+    show embed1 (Rx2 (Angle.val (-a))) i * embed1 (Rx2 (Angle.val a)) i = 1
+    rw [embed1_mul, Rx2_mul, val_neg_add_self, Rx2_zero, embed1_one]
+  | ry i a =>
+    show embed1 (Ry2 (Angle.val (-a))) i * embed1 (Ry2 (Angle.val a)) i = 1
+    rw [embed1_mul, Ry2_mul, val_neg_add_self, Ry2_zero, embed1_one]
+  | cx i j hij =>
+    show embed2 CNOT4 i j * embed2 CNOT4 i j = 1
+    rw [embed2_mul (hij := hij), CNOT4_mul_CNOT4, embed2_one hij]
+  | cz i j hij =>
+    show embed2 CZ4 i j * embed2 CZ4 i j = 1
+    rw [embed2_mul (hij := hij), CZ4_mul_CZ4, embed2_one hij]
+  | swap i j hij =>
+    show embed2 SWAP4 i j * embed2 SWAP4 i j = 1
+    rw [embed2_mul (hij := hij), SWAP4_mul_SWAP4, embed2_one hij]
+  | crz i j hij a =>
+    show embed2 (CRz4 (Angle.val (-a))) i j * embed2 (CRz4 (Angle.val a)) i j = 1
+    rw [embed2_mul (hij := hij), CRz4_mul, val_neg_add_self, CRz4_zero, embed2_one hij]
+
+/-- A primitive gate preceded by its inverse denotes the identity. -/
+theorem denoteGate_mul_inv {n : Nat} (g : Gate n) :
+    denoteGate g * denoteGate (Gate.inv g) = 1 := by
+  cases g with
+  | h i =>
+    show embed1 H2 i * embed1 H2 i = 1
+    rw [embed1_mul, H2_mul_H2, embed1_one]
+  | x i =>
+    show embed1 X2 i * embed1 X2 i = 1
+    rw [embed1_mul, X2_mul_X2, embed1_one]
+  | y i =>
+    show embed1 Y2 i * embed1 Y2 i = 1
+    rw [embed1_mul, Y2_mul_Y2, embed1_one]
+  | z i =>
+    show embed1 Z2 i * embed1 Z2 i = 1
+    rw [embed1_mul, Z2_mul_Z2, embed1_one]
+  | s i =>
+    show embed1 S2 i * embed1 S2Dag i = 1
+    rw [embed1_mul, S2_mul_S2Dag, embed1_one]
+  | t i =>
+    show embed1 T2 i * embed1 T2Dag i = 1
+    rw [embed1_mul, T2_mul_T2Dag, embed1_one]
+  | sDag i =>
+    show embed1 S2Dag i * embed1 S2 i = 1
+    rw [embed1_mul, S2Dag_mul_S2, embed1_one]
+  | tDag i =>
+    show embed1 T2Dag i * embed1 T2 i = 1
+    rw [embed1_mul, T2Dag_mul_T2, embed1_one]
+  | rz i a =>
+    show embed1 (Rz2 (Angle.val a)) i * embed1 (Rz2 (Angle.val (-a))) i = 1
+    rw [embed1_mul, Rz2_mul, val_add_neg_self, Rz2_zero, embed1_one]
+  | rx i a =>
+    show embed1 (Rx2 (Angle.val a)) i * embed1 (Rx2 (Angle.val (-a))) i = 1
+    rw [embed1_mul, Rx2_mul, val_add_neg_self, Rx2_zero, embed1_one]
+  | ry i a =>
+    show embed1 (Ry2 (Angle.val a)) i * embed1 (Ry2 (Angle.val (-a))) i = 1
+    rw [embed1_mul, Ry2_mul, val_add_neg_self, Ry2_zero, embed1_one]
+  | cx i j hij =>
+    show embed2 CNOT4 i j * embed2 CNOT4 i j = 1
+    rw [embed2_mul (hij := hij), CNOT4_mul_CNOT4, embed2_one hij]
+  | cz i j hij =>
+    show embed2 CZ4 i j * embed2 CZ4 i j = 1
+    rw [embed2_mul (hij := hij), CZ4_mul_CZ4, embed2_one hij]
+  | swap i j hij =>
+    show embed2 SWAP4 i j * embed2 SWAP4 i j = 1
+    rw [embed2_mul (hij := hij), SWAP4_mul_SWAP4, embed2_one hij]
+  | crz i j hij a =>
+    show embed2 (CRz4 (Angle.val a)) i j * embed2 (CRz4 (Angle.val (-a))) i j = 1
+    rw [embed2_mul (hij := hij), CRz4_mul, val_add_neg_self, CRz4_zero, embed2_one hij]
+
+/-- The inverse circuit really is a two-sided inverse of the denotation.  This is the
+"uncomputation" law: a computation followed by its uncomputation is the identity, and it is
+an *exact* matrix identity, not merely an identity up to global phase. -/
+theorem denote_inv_mul {n : Nat} (c : Circuit n) : denote (Circuit.inv c) * denote c = 1 := by
+  induction c with
+  | one =>
+    show (1 : Operator n) * 1 = 1
+    rw [Matrix.one_mul]
+  | gate g => exact denoteGate_inv_mul g
+  | seq a b iha ihb =>
+    show denote (Circuit.inv (Circuit.seq a b)) * (denote b * denote a) = 1
+    simp only [Circuit.inv, denote_seq]
+    rw [Matrix.mul_assoc,
+      ← Matrix.mul_assoc (denote (Circuit.inv b)) (denote b) (denote a),
+      ihb, Matrix.one_mul, iha]
+
+/-- The other side: running a circuit and then its uncomputation is also the identity. -/
+theorem denote_mul_inv {n : Nat} (c : Circuit n) : denote c * denote (Circuit.inv c) = 1 := by
+  have h := denote_inv_mul (Circuit.inv c)
+  simpa [Circuit.inv_inv] using h
+
+
 /-! ### Realizing the specified action of the primitive gates -/
 
 /-- Two basis states are equal exactly when they agree outside one qubit and coincide on it. -/

@@ -182,4 +182,54 @@ theorem checkCertificate_sound {n : Nat} (a b : Circuit n) (cert : Certificate n
 theorem applyStep_flip' {n : Nat} {c c' : Circuit n} (s : Step n)
     (h : applyStep c s = some c') : applyStep c' (Step.flip s) = some c := applyStep_flip s h
 
+/-! ### Proving certificates accepted without kernel reduction of angle arithmetic -/
+
+/-- Exact syntactic application of one step, given the rule that `findRule` resolves to.
+This is the way to *prove* a step applies when the rule instantiation contains angle
+expressions whose rational arithmetic the kernel will not reduce: nothing here evaluates
+rational numbers, it only matches circuits against the recomputed left-hand side. -/
+theorem step_of {n : Nat} (c c' : Circuit n) (s : Step n) (r : Rule n)
+    (hfind : findRule n s.ruleId = some r) (hs : r.side s.args = true)
+    (h1 : Ctx.fill s.ctx (stepTerms s r).1 = c) (h2 : Ctx.fill s.ctx (stepTerms s r).2 = c') :
+    applyStep c s = some c' := by
+  classical
+  unfold applyStep
+  rw [hfind, Option.bind_some, if_pos hs, if_pos h1, h2]
+
+/-- A step whose recomputed left-hand side does not occur at the claimed position is refused. -/
+theorem step_none {n : Nat} (c : Circuit n) (s : Step n) (r : Rule n)
+    (hfind : findRule n s.ruleId = some r) (hs : r.side s.args = true)
+    (h1 : ¬ Ctx.fill s.ctx (stepTerms s r).1 = c) : applyStep c s = none := by
+  classical
+  unfold applyStep
+  rw [hfind, Option.bind_some, if_pos hs, if_neg h1]
+
+theorem step_none_of_side_false {n : Nat} (c : Circuit n) (s : Step n) (r : Rule n)
+    (hfind : findRule n s.ruleId = some r) (hs : r.side s.args = false) :
+    applyStep c s = none := by
+  classical
+  unfold applyStep
+  rw [hfind, Option.bind_some, if_neg (by simpa using hs)]
+
+/-- Extending a derivation by one accepted step. -/
+theorem walk_cons_ok {n : Nat} (a mid fin : Circuit n) (s : Step n) (ss : Certificate n)
+    (h1 : applyStep a s = some mid) (h2 : walk mid ss = some fin) : walk a (s :: ss) = some fin := by
+  classical
+  rw [walk_cons, h1, Option.bind_some, h2]
+
+/-- A derivation that walks to `b` is accepted. -/
+theorem checkCertificate_of_walk {n : Nat} (a b : Circuit n) (cert : Certificate n)
+    (h : walk a cert = some b) : checkCertificate a b cert = true := by
+  classical
+  show (match walk a cert with | some b' => decide (b' = b) | none => false) = true
+  rw [h]
+  simp
+
+/-- A derivation that gets stuck is refused. -/
+theorem checkCertificate_none {n : Nat} (a b : Circuit n) (cert : Certificate n)
+    (h : walk a cert = none) : checkCertificate a b cert = false := by
+  classical
+  show (match walk a cert with | some b' => decide (b' = b) | none => false) = false
+  rw [h]
+
 end Quantum

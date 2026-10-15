@@ -29,7 +29,7 @@ inductive Gate (n : Nat) : Type where
   | cz : (c : Fin n) -> (t : Fin n) -> c ≠ t -> Gate n
   | swap : (a : Fin n) -> (b : Fin n) -> a ≠ b -> Gate n
   | crz : (c : Fin n) -> (t : Fin n) -> c ≠ t -> Angle -> Gate n
-deriving DecidableEq
+deriving DecidableEq, Repr
 
 /-- The sort of a gate, used by the architecture specification and by the cost model. -/
 inductive GateKind : Type where
@@ -42,7 +42,7 @@ inductive Circuit (n : Nat) : Type where
   | one : Circuit n
   | seq : Circuit n -> Circuit n -> Circuit n
   | gate : Gate n -> Circuit n
-deriving DecidableEq
+deriving DecidableEq, Repr
 
 namespace Gate
 
@@ -89,6 +89,31 @@ def touches (g : Gate n) (i : Fin n) : Bool := g.qubits.contains i
 
 end Gate
 
+/-! ### Inverses -/
+
+/-- The primitive gate that undoes a primitive gate.  Every gate is its own inverse except
+that 'S', 'T' and the rotations flip sign / take the dagger, so 'inv' is an involution on
+gates and 'denote (inv g) * denote g = 1' (proved in Quantum/Semantics.lean). -/
+def Gate.inv : Gate n -> Gate n
+  | h i => h i
+  | x i => x i
+  | y i => y i
+  | z i => z i
+  | s i => sDag i
+  | t i => tDag i
+  | sDag i => s i
+  | tDag i => t i
+  | rz i a => rz i (-a)
+  | rx i a => rx i (-a)
+  | ry i a => ry i (-a)
+  | cx i j hij => cx i j hij
+  | cz i j hij => cz i j hij
+  | swap i j hij => swap i j hij
+  | crz i j hij a => crz i j hij (-a)
+
+theorem Gate.inv_inv (g : Gate n) : Gate.inv (Gate.inv g) = g := by
+  cases g <;> simp [Gate.inv, Angle.neg_neg]
+
 namespace Circuit
 
 infixl:70 " ; " => Circuit.seq
@@ -122,6 +147,32 @@ def depth : Circuit n -> Nat
   | gate _ => 0
   | seq a b => max a.depth b.depth + 1
 
+/-- The circuit that undoes 'c': the gate list is reversed and every gate is inverted. -/
+def inv : Circuit n -> Circuit n
+  | one => one
+  | gate g => gate (Gate.inv g)
+  | seq a b => seq b.inv a.inv
+
+/-- The gate list of an inverse circuit: the reverse of the gate list, each gate inverted. -/
+theorem gates_inv (c : Circuit n) : c.inv.gates = c.gates.reverse.map Gate.inv := by
+  induction c with
+  | one => rfl
+  | gate g => rfl
+  | seq a b ih₁ ih₂ =>
+    simp only [Circuit.inv, Circuit.gates, ih₁, ih₂, List.reverse_append, List.map_append]
+
+/-- Inverting twice is the identity. -/
+theorem inv_inv (c : Circuit n) : Circuit.inv (Circuit.inv c) = c := by
+  induction c with
+  | one => rfl
+  | gate g =>
+    show Circuit.gate (Gate.inv (Gate.inv g)) = Circuit.gate g
+    rw [Gate.inv_inv]
+  | seq a b ih₁ ih₂ => simp only [Circuit.inv, ih₁, ih₂]
+
+/-- The number of gates is preserved by inversion. -/
+theorem gates_length_inv (c : Circuit n) : c.inv.gates.length = c.gates.length := by
+  rw [gates_inv, List.length_map, List.length_reverse]
 /-- The normal form of a circuit: the right-nested gate list.  'Circuit.normalize' is
     proved semantics-preserving in 'Quantum.Semantics' (exact equality, not just up to
     global phase). -/

@@ -1,0 +1,16 @@
+/-! ### 14. Cost model agrees with the returned implementation -/
+
+theorem cost_two_qubit :
+    (Cost.of (sg [Gate.cx j0 j1 (by decide), Gate.t i0] : Circuit 2)).twoQubitCount = 1 :=
+  by decide
+
+theorem cost_tcount :
+    (Cost.of (sg [Gate.t i0, Gate.tDag i0, Gate.s i0] : Circuit 1)).tCount = 2 := by decide
+
+theorem cost_identity_zero : (Cost.of (Circuit.one : Circuit 1)).gateCount = 0 := by decide
+
+theorem cost_additive (gs hs : List (Gate 1)) :
+    Cost.ofGates (gs ++ hs) = Cost.ofGates gs + Cost.ofGates hs := Cost.ofGates_append gs hs
+
+end BugRegression
+end Quantum
