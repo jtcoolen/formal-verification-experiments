@@ -29,3 +29,7 @@ globs = ["LambdaSat", "LambdaSat.+"]
 name = "Shor"
 roots = ["Shor"]
 globs = ["Shor", "Shor.+", "Shor.**"]
+
+[[lean_exe]]
+name = "proptests"
+root = "PropertyTests"
