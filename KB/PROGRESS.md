@@ -229,3 +229,30 @@ theorem, including all of Shor.QFT.
 Next: the modular-multiplication / EC point-addition oracles as circuits and running the
 optimizer over a real Shor circuit; Toffoli (CCX/CCZ) with an embed3 semantics; live-search
 tuning (derivation reconstruction from e-graph provenance).
+
+## Round 2 (end) - property-test harness, demo regenerated
+
+* Tools/PropertyTests.lean + PropertyTests.lean and a lake exe target proptests: a deterministic
+  LCG generates a population of 2-qubit circuits (H/X/Z/S/T/T-dag/Rz(pi/4)/CX/CZ, lengths 2..8)
+  and the harness checks, per circuit:
+    - every rewrite the search proposes is accepted by the checker's own applyStep
+      (the executable content of oneStepRewrites_apply);
+    - the reflexive certificate is accepted;
+    - a zero-budget configuration still returns a certified result (fail-closed);
+    - a certificate mutated by appending an unrelated step is rejected.
+  Actual output of lake exe proptests:
+    runs = 12; circuits whose steps all check out = 12; total accepted one-step rewrites = 39;
+    UNACCEPTED certificates = 0; reflexive certificates accepted = 12; zero-budget failures = 0;
+    mutated certificates rejected = 12; wrongly accepted = 0.
+    RESULT: all metamorphic properties held on the generated population.
+* The full demo (lake exe quantum, no arguments) now terminates: the deep live searches for the
+  multi-step examples are opt-in (keys E, F, K) and the default run prints the kernel-checked
+  library certificates instead. Captured in quantum/demo_output.txt (138 lines).
+* lake build -> Build completed successfully (4447 jobs), exit 0.
+
+**Performance note (real blocker for the live search).** optimize on generated circuits with the
+default budget (maxSteps 8, searchBudget 4000) takes minutes: oneStepRewrites enumerates
+37 rules x candidateArgs x contexts x orientations and is called once per explored circuit. The
+fix is to reconstruct derivations from the e-graph instead of searching for them (which needs
+merge provenance, absent in the vendored OptiSat), or to index the rule instances by the
+subcircuit they match. Tracked as remaining work.

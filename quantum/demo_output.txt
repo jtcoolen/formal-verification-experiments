@@ -53,14 +53,14 @@ Example A: H(0) ; H(0)  ->  identity
   input : H ; H   [gates=2 2q=0 T=0]
   output:    [gates=0 2q=0 T=0]
   certificate: 1 step(s); independent checker: 
-    ACCEPTS   (search took 0 ms)
+    ACCEPTS   (search took 1 ms)
     step hh
 ==============================================================================
 Example B: CNOT(0,1) ; CNOT(0,1)  ->  identity
   input : CX(0,1) ; CX(0,1)   [gates=2 2q=2 T=0]
   output:    [gates=0 2q=0 T=0]
   certificate: 1 step(s); independent checker: 
-    ACCEPTS   (search took 1 ms)
+    ACCEPTS   (search took 0 ms)
     step cxcx
 ==============================================================================
 Example C1: S(0) ; S(0)  ->  Z(0)
@@ -74,20 +74,20 @@ Example C2: T(0) ; T(0)  ->  S(0)
   input : T ; T   [gates=2 2q=0 T=2]
   output: S   [gates=1 2q=0 T=0]
   certificate: 1 step(s); independent checker: 
-    ACCEPTS   (search took 1 ms)
+    ACCEPTS   (search took 0 ms)
     step tt
 ==============================================================================
 Example D: X(0) ; Z(1)  <->  Z(1) ; X(0) (cost-neutral commutation)
   input : X ; Z   [gates=2 2q=0 T=0]
   output: X ; Z   [gates=2 2q=0 T=0]
   certificate: 0 step(s); independent checker: 
-    ACCEPTS   (search took 189 ms)
+    ACCEPTS   (search took 119 ms)
 ==============================================================================
 Example H: T T T T  ->  Z (T-count 4 -> 0)
   input : T ; T ; T ; T   [gates=4 2q=0 T=4]
   output: S ; S   [gates=2 2q=0 T=0]
   certificate: 3 step(s); independent checker: 
-    ACCEPTS   (search took 3 ms)
+    ACCEPTS   (search took 7 ms)
     step tt
     step assoc (backward)
     step tt
@@ -96,14 +96,30 @@ Example I: CNOT(0,1) ; X(2) ; CNOT(0,1)  ->  X(2) (two-qubit count 2 -> 0)
   input : CX(0,1) ; X ; CX(0,1)   [gates=3 2q=2 T=0]
   output: CX(0,1) ; X ; CX(0,1)   [gates=3 2q=2 T=0]
   certificate: 0 step(s); independent checker: 
-    ACCEPTS   (search took 21 ms)
+    ACCEPTS   (search took 24 ms)
 ==============================================================================
 Example J: a block followed by its own uncomputation  ->  identity
   input : H ; CX(0,1) ; S ; S-dag ; CX(0,1) ; H   [gates=6 2q=2 T=0]
   output:    [gates=0 2q=0 T=0]
   certificate: 1 step(s); independent checker: 
-    ACCEPTS   (search took 265 ms)
+    ACCEPTS   (search took 314 ms)
     step uncompute2
+==============================================================================
+Pass: classical-control constant propagation (exact specialization)
+  guarded ladder   : CX(0,1) ; X ; H
+    static cost: gates=4  Toffoli=2
+  after propagation: CX(0,1) ; X ; H
+    specialized cost: gates=3  Toffoli=1
+  both circuits denote the SAME unitary (theorem ladder_exact)
+==============================================================================
+Shor: order-finding post-processing (theorems Shor.factor_15, Shor.factor_21)
+  order of 2 mod 15 = 4;  y = 2^(order/2) = 4
+  gcd(y-1, 15) = 3  ->  15 = 3 * 5
+  order of 2 mod 21 = 6;  y = 2^(order/2) = 8
+  gcd(y-1, 21) = 7  ->  21 = 3 * 7
+  RSA n = 33 = 3*11, e = 3, d = 7:
+    decrypt(encrypt m) = m for every one of the 33 messages (Shor.rsa_roundtrip_33)
+  ECDLP recovery: r = 7, measured (c,d) = (6,3) gives k = 5 (Shor.ECDLP.recovered_7)
 ==============================================================================
 Negative test: wrong final circuit
   independent checker: REJECTS (as required)
