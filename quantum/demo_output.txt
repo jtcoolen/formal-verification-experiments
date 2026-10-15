@@ -1,0 +1,122 @@
+Proof-producing quantum circuit optimizer (Lean 4 + Mathlib + OptiSat)
+Every optimization below is justified by a certificate that the INDEPENDENT
+checker (Quantum/Certificates.lean) re-verifies step by step.
+==============================================================================
+Example E (certificate from Quantum/Examples.lean, theorem Examples.checkE)
+  from: T ; T ; T ; T ; S ; S
+  to:   
+  8 step(s); independent checker:     ACCEPTS
+    step ss
+    step assoc (backward)
+    step tt
+    step assoc (backward)
+    step tt
+    step assoc (backward)
+    step ss
+    step zz
+==============================================================================
+Example F/G (Examples.checkFG): X Z X Z -> identity, via a cost-neutral step
+  from: X ; Z ; X ; Z
+  to:   
+  5 step(s); independent checker:     ACCEPTS
+    step xz
+    step assoc (backward)
+    step zz
+    step idL
+    step xx
+==============================================================================
+Example H (Examples.checkH): T T T T -> Z, T-count 4 -> 0
+  from: T ; T ; T ; T
+  to:   Z
+  4 step(s); independent checker:     ACCEPTS
+    step tt
+    step assoc (backward)
+    step tt
+    step ss
+==============================================================================
+Example I (Examples.checkI): CNOT X CNOT -> X, two-qubit count 2 -> 0
+  from: CX(0,1) ; X ; CX(0,1)
+  to:   X
+  4 step(s); independent checker:     ACCEPTS
+    step disjoint
+    step assoc (backward)
+    step cxcx
+    step idL
+==============================================================================
+Example J (Examples.checkJ): compute ; uncompute -> identity (exactly)
+  from: H ; CX(0,1) ; S ; S-dag ; CX(0,1) ; H
+  to:   
+  1 step(s); independent checker:     ACCEPTS
+    step uncompute2
+==============================================================================
+Example A: H(0) ; H(0)  ->  identity
+  input : H ; H   [gates=2 2q=0 T=0]
+  output:    [gates=0 2q=0 T=0]
+  certificate: 1 step(s); independent checker: 
+    ACCEPTS   (search took 0 ms)
+    step hh
+==============================================================================
+Example B: CNOT(0,1) ; CNOT(0,1)  ->  identity
+  input : CX(0,1) ; CX(0,1)   [gates=2 2q=2 T=0]
+  output:    [gates=0 2q=0 T=0]
+  certificate: 1 step(s); independent checker: 
+    ACCEPTS   (search took 1 ms)
+    step cxcx
+==============================================================================
+Example C1: S(0) ; S(0)  ->  Z(0)
+  input : S ; S   [gates=2 2q=0 T=0]
+  output: Z   [gates=1 2q=0 T=0]
+  certificate: 1 step(s); independent checker: 
+    ACCEPTS   (search took 0 ms)
+    step ss
+==============================================================================
+Example C2: T(0) ; T(0)  ->  S(0)
+  input : T ; T   [gates=2 2q=0 T=2]
+  output: S   [gates=1 2q=0 T=0]
+  certificate: 1 step(s); independent checker: 
+    ACCEPTS   (search took 1 ms)
+    step tt
+==============================================================================
+Example D: X(0) ; Z(1)  <->  Z(1) ; X(0) (cost-neutral commutation)
+  input : X ; Z   [gates=2 2q=0 T=0]
+  output: X ; Z   [gates=2 2q=0 T=0]
+  certificate: 0 step(s); independent checker: 
+    ACCEPTS   (search took 189 ms)
+==============================================================================
+Example H: T T T T  ->  Z (T-count 4 -> 0)
+  input : T ; T ; T ; T   [gates=4 2q=0 T=4]
+  output: S ; S   [gates=2 2q=0 T=0]
+  certificate: 3 step(s); independent checker: 
+    ACCEPTS   (search took 3 ms)
+    step tt
+    step assoc (backward)
+    step tt
+==============================================================================
+Example I: CNOT(0,1) ; X(2) ; CNOT(0,1)  ->  X(2) (two-qubit count 2 -> 0)
+  input : CX(0,1) ; X ; CX(0,1)   [gates=3 2q=2 T=0]
+  output: CX(0,1) ; X ; CX(0,1)   [gates=3 2q=2 T=0]
+  certificate: 0 step(s); independent checker: 
+    ACCEPTS   (search took 21 ms)
+==============================================================================
+Example J: a block followed by its own uncomputation  ->  identity
+  input : H ; CX(0,1) ; S ; S-dag ; CX(0,1) ; H   [gates=6 2q=2 T=0]
+  output:    [gates=0 2q=0 T=0]
+  certificate: 1 step(s); independent checker: 
+    ACCEPTS   (search took 265 ms)
+    step uncompute2
+==============================================================================
+Negative test: wrong final circuit
+  independent checker: REJECTS (as required)
+==============================================================================
+Negative test: unknown rule id
+  independent checker: REJECTS (as required)
+==============================================================================
+Negative test: wrong qubit index in the rule instantiation
+  independent checker: REJECTS (as required)
+==============================================================================
+Negative test: tampered (reversed) derivation order
+  independent checker: REJECTS (as required)
+==============================================================================
+Negative test: CNOT control/target exchanged in the output
+  independent checker: REJECTS (as required)
+==============================================================================

@@ -299,14 +299,16 @@ def structIdR (n : Nat) : PatternSoundRule (QOp n) (PhaseOp n) where
   lhs_wf := wf_pSeqP _ _ (wf_pVar 0) wf_pOne
   rhs_wf := wf_pVar 0
 
-/-- The structural rules in both orientations.  Re-associating is cost-neutral but is what
-exposes adjacent gate pairs to the cancelling rules, which is exactly the non-greedy behaviour
-equality saturation is for. -/
+/-- The structural rules.  Associativity is supplied in *both* orientations: re-associating is
+cost-neutral but is what exposes adjacent gate pairs to the cancelling rules, which is exactly
+the non-greedy behaviour equality saturation is for.  The identity rules are supplied only in
+the *deleting* orientation: the reverse direction (inserting `one` in front of every class)
+grows the graph without ever helping, and made saturation blow up. -/
 def structRules (n : Nat) : List (PatternSoundRule (QOp n) (PhaseOp n)) :=
   let a := structAssoc n
   let l := structIdL n
   let r := structIdR n
-  [a, psrFlip a, l, psrFlip l, r, psrFlip r]
+  [a, psrFlip a, l, r]
 
 /-- All sound rule instances whose left-hand side *or* right-hand side occurs as a
 subcircuit of the input, in both orientations, as OptiSat rules, together with the schematic

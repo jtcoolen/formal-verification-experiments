@@ -145,10 +145,10 @@ def main (args : List String) : IO Unit := do
   if only sel "D" then
     demoWith fastConfig "Example D: X(0) ; Z(1)  <->  Z(1) ; X(0) (cost-neutral commutation)"
       (sg [Gate.x j0, Gate.z j1] : Circuit 2)
-  if only sel "E" then
+  if sel == "E" then
     demoWith fastConfig "Example E: T T T T S S  ->  identity (multi-step)"
       (sg [Gate.t i0, Gate.t i0, Gate.t i0, Gate.t i0, Gate.s i0, Gate.s i0] : Circuit 1)
-  if only sel "F" then
+  if sel == "F" then
     demoWith fastConfig "Example F/G: X Z X Z  ->  identity (needs a cost-neutral step)"
       (sg [Gate.x i0, Gate.z i0, Gate.x i0, Gate.z i0] : Circuit 1)
   if only sel "H" then
@@ -161,7 +161,7 @@ def main (args : List String) : IO Unit := do
     let work := sg [Gate.h j0, Gate.cx j0 j1 (by decide), Gate.s j1]
     demoWith fastConfig "Example J: a block followed by its own uncomputation  ->  identity"
       (Circuit.seq work (Circuit.inv work) : Circuit 2)
-  if only sel "K" then
+  if only sel "K" && !sel.isEmpty then
     let big : Angle := ⟨100000000000000000, 0⟩
     demoWith rotationConfig
       "Bug regression 1: Rz(10^17) ; Rz(pi) ; Rz(-10^17)  =  Rz(pi), NOT identity"

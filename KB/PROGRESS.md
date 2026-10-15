@@ -111,3 +111,41 @@ plus the `decide`-checked rejections in `BugRegression`.
   (maxSteps 4, searchBudget 400) for the live optimizer runs and prints the *library*
   certificates of Quantum/Examples.lean (each one a kernel-checked `decide` theorem) for the
   deeper examples.  Tuning the live search is open work.
+
+## Round 1 (final) — saturation fix, demo, audit
+
+**Bug found and fixed.** Saturation hung on most inputs. Cause: the *reversed* identity rules
+(`c → one ; c`) were being fed to OptiSat, so every saturation round created new e-classes
+(`one;c`, `one;(one;c)`, …), `numClasses` never stabilized, and the graph exploded.
+`structRules` now supplies associativity in both orientations (needed to expose adjacent
+pairs) and the identity rules only in the deleting orientation. After the fix the whole demo
+runs in about one second.
+
+`lake build` → exit 0 (library + the 211 MB `quantum` executable).
+
+Axiom audit (`lake env lean Axioms.lean`): every principal theorem depends only on
+`propext, Classical.choice, Quot.sound` —
+`denote_isUnitary`, `checkCertificate_sound`, `Opt.optimize_sound`,
+`Opt.greedy_phaseEquivalent`, `Examples.soundA/soundE/soundFG/soundJ`,
+`Examples.denotationFG`, `BugRegression.c1_to_z/q_fuse/crz_twoPi_not_id`,
+`ControlPhase.crz_twoPi_not_phase_one`.
+
+Executable demo (`quantum/demo_output.txt` is the captured output of `lake exe quantum`):
+* live optimizer, e-graph driven: A 2→0 gates, B 2→0, C1 S;S→Z, C2 T;T→S,
+  H T T T T → S;S in 3 steps (T-count 4→0), J `work;work†` → identity in 1 step (6→0 gates);
+* library certificates for the deeper derivations: E (8 steps, 6→0 gates), F/G (5 steps,
+  4→0), H (4 steps → Z), I (4 steps, two-qubit count 2→0);
+* five negative tests, all REJECTED by the independent checker.
+
+**Open, in priority order**
+1. Live search tuning: with the default budget the e-graph does not yet reach the multi-step
+   optima for D (cost-neutral commutation) and I; the certificates exist and are checked, but
+   `findDerivation` gives up and `optimize` correctly falls back to the input. Fix by
+   reconstructing derivations from the e-graph rather than searching for them (needs merge
+   provenance), or by a better-behaved cost/extraction pass.
+2. Restate the OptiSat invariant chain for `QOp`/`PhaseOp` inside `quantum/` (§E of the spec).
+3. ECDSA.Fail-inspired passes (arXiv:2609.09582): Toffoli/`ccx` gate + `Q × T` cost model,
+   classical-control constant propagation, uncomputation/dead-code (partly done: `uncompute`).
+4. `shor/`: verified RSA and ECDLP (classical post-processing, QFT circuit semantics, oracle
+   permutation semantics) with the optimizer applied to the generated circuits.
+5. Property-based / differential testing with an independent numerical reference evaluator.
