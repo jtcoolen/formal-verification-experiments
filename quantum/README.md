@@ -38,20 +38,21 @@ afterwards linking takes seconds.
 | Module | Contents |
 |---|---|
 | `Quantum/Angle.lean` | exact symbolic angles: `Angle := ℚ × ℚ` interpreted as `rat + piQ·π`; `eq_iff`, `eq_of_components`, `neg_neg`, `val_congr`. No floating point anywhere. |
-| `Quantum/Syntax.lean` | `Gate n` (H, X, Y, Z, S, T, S†, T†, Rz, Rx, Ry, CX, CZ, SWAP, CRZ) indexed by `Fin n`, two-qubit gates carrying distinctness proofs; `Circuit n = one | seq | gate`; `Gate.inv`, `Circuit.inv`, `gates`, `subcircuits`, `normalize`, decidable equality. |
+| `Quantum/Syntax.lean` | `Gate n` (H, X, Y, Z, S, T, S†, T†, Rz, Rx, Ry, CX, CZ, SWAP, CRZ, CP) indexed by `Fin n`, two-qubit gates carrying distinctness proofs; `Circuit n = one | seq | gate`; `Gate.inv`, `Circuit.inv`, `gates`, `subcircuits`, `normalize`, decidable equality. |
 | `Quantum/Gates.lean` | the 2×2 and 4×4 gate matrices, the exact eighth root `ω = (1+i)/√2` with `ω_mul_ω`, `normSq_ω`; identities `H2_mul_H2`, `S2_mul_S2`, `T2_mul_T2`, `X2_mul_Z2_phase`, …; unitarity `isUnitary_H2`, … |
 | `Quantum/Embed.lean` | `embed1`/`embed2`: a gate matrix acting on chosen qubits inside an `n`-qubit register; `embed1_mul`, `embed2_mul`, `embed1_one`, `embed1_embed1_comm`, `embed1_embed2_comm`, `embed2_embed2_comm`. |
 | `Quantum/Rotations.lean` | `Rz2`, `Rx2`, `Ry2`, `CRz4` with exact real-angle semantics: `Rz2_mul`, `Rz2_zero`, `Rz2_twoPi`, `Rz2_pi_Z2`, `CRz4_mul`, unitarity of all. |
 | `Quantum/Semantics.lean` | `denote : Circuit n → Operator n` with `denote (seq a b) = denote b * denote a`; `denote_isUnitary`; `denote_gates`/`denote_normalize`; the specified actions `denote_x_action`, `denote_z_action`, `denote_cx_action`, `denote_swap_action`; the uncomputation laws `denote_inv_mul`, `denote_mul_inv`. |
 | `Quantum/Equivalence.lean` | `PhaseEquivalent` (∃ unit-modulus λ with `denote a = λ • denote b`) and `EqExact`; `refl`, `symm`, `trans`, `pre`, `post`, `of_eqExact`, `phaseSetoid`. |
 | `Quantum/Contexts.lean` | one-hole sequential contexts `Ctx`, `fill`, `comp`, contextual congruence `Ctx.congr` (phase) and `Ctx.congrEq` (exact). |
-| `Quantum/Rewrites.lean` | the rule library: `Rule n` = stable id + lhs/rhs instantiation + decidable side condition + proved soundness; 35 rules; `rules n`, `findRule`, `findRule_sound`. |
+| `Quantum/Rewrites.lean` | the rule library: `Rule n` = stable id + lhs/rhs instantiation + decidable side condition + proved soundness; 37 rules (incl. cp_add, cp_zero, uncompute, uncompute2); `rules n`, `findRule`, `findRule_sound`. |
 | `Quantum/Certificates.lean` | **the independent checker**: `Step`, `Certificate`, `stepTerms`, `applyStep`, `walk`, `checkCertificate`; `applyStep_sound`, `walk_some`, **`checkCertificate_sound`**; reflection helpers `step_of`, `step_none`, `walk_cons_ok`, `checkCertificate_of_walk`, `checkCertificate_none`. |
 | `Quantum/Cost.lean` | `Cost` = (gateCount, twoQubitCount, tCount); `Cost.ofGate/of/ofGates`; `ofGates_append`, `of_gates`; lexicographic policy `CostConfig`, `Cost.le/lt`. |
 | `Quantum/QuantumEGraph.lean` | OptiSat adapter: `QOp n` e-nodes, the phase quotient `PhaseOp n` with `pquot_op_mul_assoc`, `pquot_op_mul_one`, `pquot_op_one_mul`; the `NodeSemantics`, `Extractable`, `EvalExpr` instances; `extractableSound_qop`; `ofCircuit`. |
 | `Quantum/Optimizer.lean` | schematic + instantiated rules (`quantumRules`, `structAssoc`, `structIdL`, `structIdR`, `toPatternSoundRuleFlip`), bounded saturation (`saturateF` → `computeCostsF` → `extractAuto`), certificate synthesis (`oneStepRewrites`, `oneStepRewrites_apply`, `oneStepRewrites_sound`, `findDerivation`), the greedy baseline (`greedy`, `greedy_phaseEquivalent`), `Config`, `finish`, `optimizeFrom`, `optimize`. |
 | `Quantum/Correctness.lean` | `finish_spec`, `optimizeFrom_spec`, **`optimize_sound`**, `optimize_isSome`. |
 | `Quantum/ControlPhase.lean` | why global phase may not be moved under a control: `rz_twoPi_phase_one`, `rz_twoPi_ne_one`, `crz_twoPi_not_phase_one`, `cz_cz_eq_one`. |
+| `Shor/QFT.lean` | the quantum Fourier transform as a circuit in the verified language: `qft2` (Hadamards + controlled phases + reversal), `iqft2 = Circuit.inv qft2`, `qft2_unitary`, `qft2_inverse_exact` (exact, not merely up to phase), `cp_zero_certified` (accepted by the independent checker), `two_cphases` (CP(pi/2);CP(pi/2) = CP(pi), via exact rational arithmetic). | |
 | `Quantum/Examples.lean` | the machine-checked examples A–J. |
 | `Quantum/BugRegression.lean` | the adversarial suite (documented compiler bugs as theorems). |
 | `LambdaSat/` | vendored OptiSat (see `KB/papers/optisat.md`); unmodified. |

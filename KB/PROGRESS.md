@@ -201,3 +201,31 @@ Executable demo (`quantum/demo_output.txt` is the captured output of `lake exe q
   paper's own gate costs.
 * Live-search tuning: reconstruct derivations from e-graph provenance instead of searching.
 * Restate the OptiSat invariant chain for QOp/PhaseOp inside quantum/.
+
+## Round 2 (continued) - controlled phase, QFT circuit, 37 rules
+
+* Added a **CP (controlled phase)** gate to the language: "Gate.cp c t (h : c ≠ t) θ" with the
+  exact matrix CP4 θ = diag(1, 1, 1, e^{iθ}) (Quantum/Rotations.lean: CP4_mul, CP4_zero,
+  CP4_conjTranspose, isUnitary_CP4), wired through Syntax (kind, qubits, index2?, Gate.inv),
+  Semantics (denoteGate, the two inverse-cancellation lemmas) and Rewrites (rules "cp_add" and
+  "cp_zero", theorems rw_cp_add / rw_cp_zero). The library is now 37 rules.
+  CP is what the quantum Fourier transform is built from, and it is a *primitive* precisely so
+  that no "control an arbitrary circuit" constructor is needed (Quantum/ControlPhase.lean
+  proves why that would be unsound for phase equivalence).
+* New "Shor/QFT.lean": the two-qubit QFT circuit "qft2 = H ; CP(π/2) ; H ; SWAP" and its
+  syntactic inverse "iqft2", with
+  qft2_unitary, qft2_inverse_exact / qft2_inverse_exact' (exact matrix identities),
+  qft2_compose_phase, cp_zero_certified (the independent checker accepts the one-step
+  certificate), cp_cost / cp_width (the Q × T bookkeeping on a QFT ladder gate), cphase_sum
+  (exact rational arithmetic by norm_num) and two_cphases (CP(π/2);CP(π/2) ≈ CP(π)).
+* Architecture: CP counts as one Toffoli-equivalent on the reference architecture and is
+  refused by the Clifford-only one.
+* Main.lean prints CP gates; Axioms.lean extended.
+
+lake build -> Build completed successfully (4447 jobs), exit 0.
+lake env lean Axioms.lean -> only propext, Classical.choice, Quot.sound for every principal
+theorem, including all of Shor.QFT.
+
+Next: the modular-multiplication / EC point-addition oracles as circuits and running the
+optimizer over a real Shor circuit; Toffoli (CCX/CCZ) with an embed3 semantics; live-search
+tuning (derivation reconstruction from e-graph provenance).
