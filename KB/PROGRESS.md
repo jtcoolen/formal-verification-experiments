@@ -374,3 +374,64 @@ modular-multiplication oracles for larger N (needs a reversible adder).
 
 **Remaining** — Toffoli CCX/CCZ (needs `isUnitaryM_embedList` for 3-element supports);
 QFT₃ = DFT₃ entrywise; modular-multiplication oracles for larger N.
+
+## ProtSat round 1 (host date 2026-10-15) — package bootstrap and the formalised core
+
+Started the new project required by the objective: *a formally verified, proof-producing
+SAT-based cryptographic protocol analyser in Lean 4*.  New Lake package protosat/
+(Lean 4.34.1 + Mathlib v4.34.1; Mathlib oleans fetched with
+MATHLIB_CACHE_DIR=$PWD/.mathlibcache lake exe cache get — the default cache directory
+~/.cache/mathlib is outside the workspace and is denied by the sandbox).
+
+**Implemented and machine-checked this round** (lake build ProtSat → "Build completed
+successfully (694 jobs)"; no sorry, no axiom, no partial def anywhere in ProtSat/):
+
+* ProtSat/Syntax.lean — the message algebra of §1: Key, Term in normal form
+  (agent/nonce/key/pair/encS/encA/hash), size, depth, subterms with a per-constructor
+  @[simp] membership API, size_le_of_subterms, size_lt_of_subterms,
+  eq_of_subterms_of_size_le, depth_le_of_subterms, the finite-universe builders
+  poolStep/pool with the four constructor-closure theorems (pool_closed_pair,
+  pool_closed_encS, pool_closed_encA, pool_closed_hash) and the subterm-closure theorem
+  subtermClosure_subterms that the attacker-completeness and encoding-soundness proofs
+  rest on.
+* ProtSat/CNF.lean — the propositional layer: Lit/Clause/CNF/Assignment/Sat and the
+  combinators the encoding composes: atLeastOne, atMostOne, exactlyOne with
+  sat_atLeastOne, sat_atMostOne and sat_exactlyOne (the ∃! characterisation every decoder
+  starts from), plus Tseitin definitional gates notDef/andDef/orDef/impDef each with a
+  sat_* iff theorem (§5 "compositional CNF translation with proved correctness").
+* ProtSat/Attacker.lean — §2: the inductive Dolev-Yao relation Ded (replay, names, public
+  keys, pairing, projections, symmetric and asymmetric encryption and decryption,
+  hashing), monotonicity ded_mono/ded_cons/ded_grow (§2.3), the constructor/destructor
+  correctness laws encS_then_decS, encA_then_decA, pair_then_proj (§2.4), the freshness
+  theorem no_fresh_nonces with the negative consequences nonce_not_deducible and
+  encS_nonce_not_deducible, and the single-step relation OneStep with oneStep_ded and
+  oneStep_mono.
+* ProtSat/Protocol.lean — §3 DSL: Expr with destructors and the partial evaluator
+  Expr.eval : Expr → store → Option Term (a stuck destructor disables the action, which is
+  how a failed equality test is modelled), Action (fresh/send/recv/assign/check/secret/
+  claim/commit), Role, Session, SessState, Secret (closed expressions and session-store
+  variables), AuthProp, and the Protocol record with actionAt, roleLen, compromisedKeys,
+  initKn, closedSecretTerms, sessionVars.
+* ProtSat/Operational.lean — §3/§4 independent small-step semantics: Cfg, Ev
+  (idle / ded t / act q m d), the successor functions succAdvance/succStore/succSend/
+  succDed with their frame lemmas, the inductive transition relation Rel with ten
+  introduction rules, Runs/Trace/runs_length, the violation predicates Leak, AuthBreak
+  (non-injective agreement via authOfStep/claimsOf/commitsOf) and Attack.  It does not
+  import the CNF/DPLL/Encode modules, which is how the "semantics must not depend on the
+  encoding" constraint is enforced by the module graph.
+* ProtSat/DPLL.lean — §6 core: the substitution presentation of DPLL (assign,
+  madeTrue/madeFalse, any_filter, and the two-directional key lemmas satList_assign and
+  satList_assign_back), findUnit, unit_forced, and structurally terminating unit
+  propagation propagate.  The search itself and the 8D/8E theorems are the next round.
+
+**Not yet done** (ordered list in KB/PROTOSAT.md): Theory.lean (raw syntax + equational
+theory + convergent rewriter), Deduce.lean (executable saturation over the finite
+universe, §2.1/§2.2), Bounded.lean, Encode.lean (the §8A/§8B correspondence — the
+principal objective), the rest of DPLL.lean, Certificate.lean, Analyzer.lean, the six
+protocol examples, the executable, the axiom audit and the READMEs.
+
+**Environment notes recorded**: Finset.any does not exist in this Mathlib; Finset.biUnion
+is in Mathlib.Data.Finset.Union; List.Mem is an inductive (use List.mem_cons);
+Bool.or_eq_true.mp is not a valid name (rewrite then rcases); "!x = true" after ∧ in a
+statement parses as Prop negation (write Bool.not x = true); partial applications defeat
+simp only [def] inside List.filter (eta-expand).  Full list in [PROTOSAT.md](PROTOSAT.md).

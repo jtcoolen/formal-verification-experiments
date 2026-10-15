@@ -16,6 +16,8 @@ Living reference material for this repository. Two kinds of document:
 
 | Document | Contents |
 |---|---|
+| [PROTOSAT.md](PROTOSAT.md) | **durable state snapshot of the protosat/ package** (SAT-based protocol analyser): environment, module map, design decisions, known traps, pending work |
+| [papers/protocol-verification.md](papers/protocol-verification.md) | Dolev-Yao, Needham-Schroeder/Lowe, bounded model checking of security protocols (Rushby's Brute, Comon-Korshev), verified DPLL solvers, and how they map onto ProtSat |
 | [papers/optisat.md](papers/optisat.md) | OptiSat / LambdaSat: the verified equality-saturation engine vendored into `quantum/` |
 | [papers/equality-saturation-quantum.md](papers/equality-saturation-quantum.md) | Equality saturation and superoptimization for quantum circuits (Quartz, Sqale, PyZX, VOQC) |
 | [papers/quantum-compiler-bugs.md](papers/quantum-compiler-bugs.md) | The documented numerical-soundness failures that drive `Quantum/BugRegression.lean` |
