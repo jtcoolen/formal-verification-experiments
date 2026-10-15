@@ -11,29 +11,28 @@ import ProtSat.OneHot
 
 ## What is encoded
 
-For a protocol P, bounds B = (L steps, rounds of closure) and universe U = Bounded.univ
-P B, the CNF "encode P B" is satisfiable exactly when P has a bounded attack within
-those bounds.  The Boolean variables are grouped by the semantic role they play:
+For a protocol P, bounds B = (L steps, rounds of closure) and universe
+U = Bounded.univ P B, the CNF encode P B is satisfiable exactly when P has a bounded
+attack within those bounds.  The Boolean variables are grouped by the semantic role
+they play:
 
     pc  i q c      session q's program counter at step i is c
-    st  i q x u    session q's variable x holds value u at step i
-    kn  i u        the attacker knows U[u] at step i
-    ev  i k        the event at step i is the k-th alternative
-                   (idle, "session q acts", or "attacker derives U[u]")
+    st  i q x u    session q's variable x holds value number u at step i
+    kn  i u        the attacker knows the message with number u at step i
+    ev  i k        the event at step i is alternative k
+                   (0 = idle, 1+q = session q acts, 1+nS+u = attacker derives U[u])
     dl  i q u      the message delivered to session q at step i is U[u]
-    fr  i q d      the nonce value session q picks at step i is D[d]
-    xe  i q c e u  at step i, session q with pc c, subexpression e of that action
-                   has value u
-    ob  i q c u    session q acts at step i with pc c and publishes U[u]
+    fr  i q d      the nonce session q picks at step i is D[d]
+    xe  i q e u    at step i, session q's evaluation of expression-table entry e is u
 
-The clause groups are:
+The clause groups (ProtSat.Encode.clauses) are:
 
-* oneHotClauses    - each group is one-hot (exactly one value selected);
+* oneHotClauses    - each group above is one-hot;
 * initClauses      - step 0 is the initial configuration;
 * frameClauses     - a session that does not act keeps its pc and store; knowledge is
   monotone;
-* stepClauses      - the transition clauses: if session q acts while its pc is c, the
-  successor is the one the operational semantics prescribes for the action at (q, c);
+* stepClauses      - if session q acts while its pc is c, the successor is the one the
+  operational semantics prescribes for the action at (q, c);
 * evalClauses      - Tseitin definitional clauses for expression evaluation, one group
   of clauses per subexpression, so the encoding is linear in the size of the protocol
   rather than exponential in the number of variables;
@@ -42,14 +41,14 @@ The clause groups are:
   specification section 2);
 * knSupportClauses - knowledge at step i+1 is either already known, or published by a
   send at step i, or the conclusion of a derive event at step i.  This is what makes the
-  decoded knowledge *justified* rather than guessed (specification 8A);
+  decoded knowledge justified rather than guessed (specification 8A);
 * freshClauses     - the fresh value belongs to the nonce domain and is unused;
 * violationClauses - at least one declared violation occurs.
 
 ## Why this is not trace enumeration
 
 Specification section 5 forbids enumerating all traces and encoding a precomputed
-answer.  Here the search space is the product of the per-step choices (which session
+answer.  The search space here is the product of the per-step choices (which session
 acts, which message is delivered, which nonce is picked, which term the attacker
 derives), and the formula only says that the sequence of states is a run of the
 transition system.  The solver, not the encoder, decides which trace (if any) exists:
@@ -57,10 +56,10 @@ the encoder never evaluates the transition relation on a complete trace.
 
 ## Indexing
 
-Variables are allocated by a linear (base-expansion) encoding: group g occupies the
+Variables are allocated by positional (base-expansion) codes: group g occupies the
 half-open interval [base_g, base_g + size_g), and inside a group the index is a
-positional code in the group's own ranges.  The generic injectivity lemmas lin_inj2 and
-lin_inj3 do the bookkeeping once, so no group can alias another and no two distinct
+positional code in the group's own strides.  The generic injectivity lemmas lin_inj2
+and lin_inj3 do the bookkeeping once, so no group can alias another and no two distinct
 domain elements share a variable.
 -/
 
@@ -83,8 +82,7 @@ theorem lin_inj2 {a b a' b' K : Nat} (hK : 0 < K) (hb : b < K) (hb' : b' < K)
   have hc : b = b' := by
     rw [<- h1, <- h2, h]
   subst hc
-  have hk : a * K = a' * K := Nat.add_right_cancel h
-  exact ⟨Nat.eq_of_mul_eq_mul_right hK hk, rfl⟩
+  exact ⟨Nat.eq_of_mul_eq_mul_right hK (Nat.add_right_cancel h), rfl⟩
 
 /-- Three-level positional code is injective below the strides. -/
 theorem lin_inj3 {a b c a' b' c' K M : Nat} (hK : 0 < K) (hM : 0 < M)
@@ -94,12 +92,99 @@ theorem lin_inj3 {a b c a' b' c' K M : Nat} (hK : 0 < K) (hM : 0 < M)
   obtain ⟨h2, h3⟩ := lin_inj2 hK hb hb' h1
   exact ⟨h2, h3, hc2⟩
 
+/-! ### Small helpers -/
+
+/-- The maximum of a list of naturals, with a lower bound. -/
+def maxNat : List Nat -> Nat -> Nat
+  | [], lo => lo
+  | x :: xs, lo => max x (maxNat xs lo)
+
+theorem le_maxNat (l : List Nat) (lo : Nat) : lo ≤ maxNat l lo := by
+  induction l with
+  | nil => exact Nat.le_refl _
+  | cons x xs ih => exact Nat.le_trans ih (Nat.le_max_right _ _)
+
+/-- The index of the first occurrence of a in l, or 0 when a is absent.  Written by hand
+rather than with List.idxOf so that its unfolding is available to the proofs below. -/
+def pos [BEq α] (a : α) : List α -> Nat
+  | [] => 0
+  | x :: xs => if x == a then 0 else pos a xs + 1
+
+/-- Reading the head of a list at index 0. -/
+theorem rget_zero {α : Type} (x : α) (xs : List α) : rget (x :: xs) 0 = some x := rfl
+
+/-- Reading past the head shifts the index. -/
+theorem rget_succ {α : Type} (x : α) (xs : List α) (n : Nat) :
+    rget (x :: xs) (n + 1) = rget xs n := rfl
+
+/-- Reading at the length of a list gives none. -/
+theorem rget_len : ∀ (l : List α), rget l l.length = none := by
+  intro l
+  induction l with
+  | nil => rfl
+  | cons x xs ih => exact ih
+
+/-- Any index at or beyond the length reads as none. -/
+theorem rget_oob_ge : ∀ (l : List α) (i : Nat), i ≥ l.length -> rget l i = none := by
+  intro l
+  induction l with
+  | nil => intro i _; rfl
+  | cons x xs ih =>
+      intro i hi
+      cases i with
+      | zero =>
+          have h : 0 < List.length (x :: xs) := by simp
+          omega
+      | succ i =>
+          show rget xs i = none
+          exact ih i (by simp [List.length_cons] at hi; omega)
+
+/-- The first occurrence of an element reads back as that element. -/
+theorem rget_pos [BEq α] [LawfulBEq α] : ∀ (l : List α) (a : α),
+    a ∈ l -> rget l (pos a l) = some a := by
+  intro l
+  induction l with
+  | nil => intro a h; cases h
+  | cons x xs ih =>
+      intro a h
+      by_cases hx : x == a
+      · rw [pos, if_pos hx]
+        exact LawfulBEq.eq_of_beq hx ▸ rget_zero x xs
+      · rw [pos, if_neg hx, rget_succ]
+        rw [List.mem_cons] at h
+        rcases h with rfl | h'
+        · exact absurd (by simp) hx
+        · exact ih a h'
+
+/-! ### The expression table -/
+
+/-- All subexpressions occurring in any action of any role, deduplicated.  Every
+subexpression of a member of this list is again a member, which is what makes the
+Tseitin clauses below close. -/
+def allExprs (P : Protocol) : List Expr :=
+  (P.roles.flatMap fun r =>
+    r.acts.flatMap fun a =>
+      match a with
+      | Action.fresh _ _ => []
+      | Action.send _ e => Expr.subexpressions e
+      | Action.recv _ _ => []
+      | Action.assign _ e => Expr.subexpressions e
+      | Action.check e1 e2 => Expr.subexpressions e1 ++ Expr.subexpressions e2
+      | Action.secret e => Expr.subexpressions e
+      | Action.claim _ peer v => Expr.subexpressions peer ++ Expr.subexpressions v
+      | Action.commit _ peer v => Expr.subexpressions peer ++ Expr.subexpressions v).eraseDups
+
+/-- The index of an expression in the expression table. -/
+def eIdx (P : Protocol) (e : Expr) : Nat := pos e (allExprs P)
+
+/-- The expression at a given table index. -/
+def eAt (P : Protocol) (k : Nat) : Expr := (rget (allExprs P) k).getD (Expr.agent 0)
+
 /-! ### The shape of an encoding -/
 
-/-- The data an encoding needs about a protocol and its bounds.  Everything is a plain
-Nat or List so that index arithmetic stays simple and the allocation is computable.
-The "1" fields are maxima, so every stride below is a successor and therefore strictly
-positive - which is what makes the positional codes injective without extra hypotheses. -/
+/-- The data an encoding needs about a protocol and its bounds.  The "1" fields are
+maxima, so every stride below is a successor and therefore strictly positive - which is
+what makes the positional codes injective without extra hypotheses. -/
 structure Shape where
   /-- One less than the number of sessions. -/
   nS1 : Nat
@@ -113,6 +198,8 @@ structure Shape where
   D : List NonceName
   /-- The step bound L. -/
   steps : Nat
+  /-- The number of distinct subexpressions over all roles. -/
+  nE1 : Nat
 
 /-- Stride: number of sessions. -/
 def shS (sh : Shape) : Nat := sh.nS1 + 1
@@ -124,6 +211,8 @@ def shV (sh : Shape) : Nat := sh.nV1 + 1
 def shVal (sh : Shape) : Nat := sh.U.length + 1
 /-- Stride: number of nonce choices (a dummy slot when the domain is empty). -/
 def shD (sh : Shape) : Nat := sh.D.length + 1
+/-- Stride: number of expression-table entries (a dummy slot when there are none). -/
+def shE (sh : Shape) : Nat := sh.nE1 + 1
 /-- Stride: number of event alternatives: idle, one per session, one per universe
 message. -/
 def shEv (sh : Shape) : Nat := 1 + shS sh + sh.U.length
@@ -134,19 +223,10 @@ theorem shPc_pos (sh : Shape) : 0 < shPc sh := Nat.succ_pos _
 theorem shV_pos (sh : Shape) : 0 < shV sh := Nat.succ_pos _
 theorem shVal_pos (sh : Shape) : 0 < shVal sh := Nat.succ_pos _
 theorem shD_pos (sh : Shape) : 0 < shD sh := Nat.succ_pos _
+theorem shE_pos (sh : Shape) : 0 < shE sh := Nat.succ_pos _
 theorem shEv_pos (sh : Shape) : 0 < shEv sh := by
   simp only [shEv]
   omega
-
-/-- The maximum of a list of naturals, with a lower bound. -/
-def maxNat : List Nat -> Nat -> Nat
-  | [], lo => lo
-  | x :: xs, lo => max x (maxNat xs lo)
-
-theorem le_maxNat (l : List Nat) (lo : Nat) : lo ≤ maxNat l lo := by
-  induction l with
-  | nil => exact Nat.le_refl _
-  | cons x xs ih => exact Nat.le_trans ih (Nat.le_max_right _ _)
 
 /-- The shape of a protocol under the given bounds. -/
 def shapeOf (P : Protocol) (B : Bounds) : Shape :=
@@ -156,15 +236,8 @@ def shapeOf (P : Protocol) (B : Bounds) : Shape :=
                      maxNat (P.sessionVars q) 0) 0,
     U := Bounded.univ P B,
     D := P.nonceDomain,
-    steps := B.steps }
-
-/-- Session indices, program counters and variable indices are within their strides. -/
-theorem q_lt_shS (sh : Shape) (q : Nat) (h : q ≤ sh.nS1) : q < shS sh := by
-  simp [shS]; omega
-theorem c_lt_shPc (sh : Shape) (c : Nat) (h : c ≤ sh.nPc1) : c < shPc sh := by
-  simp [shPc]; omega
-theorem x_lt_shV (sh : Shape) (x : Nat) (h : x ≤ sh.nV1) : x < shV sh := by
-  simp [shV]; omega
+    steps := B.steps,
+    nE1 := (allExprs P).length }
 
 /-! ### Group sizes and bases -/
 
@@ -175,6 +248,7 @@ def szKn (sh : Shape) : Nat := (sh.steps + 1) * shVal sh
 def szEv (sh : Shape) : Nat := (sh.steps + 1) * shEv sh
 def szDl (sh : Shape) : Nat := sh.steps * shS sh * shVal sh
 def szFr (sh : Shape) : Nat := sh.steps * shS sh * shD sh
+def szXe (sh : Shape) : Nat := (sh.steps + 1) * shS sh * shE sh * shVal sh
 
 /-- Bases: each group occupies a disjoint block of variables. -/
 def bsPc (sh : Shape) : Nat := 0
@@ -183,39 +257,44 @@ def bsKn (sh : Shape) : Nat := bsSt sh + szSt sh
 def bsEv (sh : Shape) : Nat := bsKn sh + szKn sh
 def bsDl (sh : Shape) : Nat := bsEv sh + szEv sh
 def bsFr (sh : Shape) : Nat := bsDl sh + szDl sh
-def bsTotal (sh : Shape) : Nat := bsFr sh + szFr sh
-
-/-! ### Index functions -/
-
-/-- The variable saying "session q's program counter at step i is c". -/
-def vpc (sh : Shape) (i q c : Nat) : Nat :=
-  bsPc sh + ((i * shS sh + q) * shPc sh + c)
-
-/-- The variable saying "session q's variable x holds value number u at step i". -/
-def vst (sh : Shape) (i q x u : Nat) : Nat :=
-  bsSt sh + (((i * shS sh + q) * shV sh + x) * shVal sh + u)
-
-/-- The variable saying "the attacker knows value number u at step i". -/
-def vkn (sh : Shape) (i u : Nat) : Nat :=
-  bsKn sh + (i * shVal sh + u)
-
-/-- The variable saying "the event at step i is alternative k". -/
-def vev (sh : Shape) (i k : Nat) : Nat :=
-  bsEv sh + (i * shEv sh + k)
-
-/-- The variable saying "the message delivered to session q at step i is value u". -/
-def vdl (sh : Shape) (i q u : Nat) : Nat :=
-  bsDl sh + ((i * shS sh + q) * shVal sh + u)
-
-/-- The variable saying "session q picks nonce number d at step i". -/
-def vfr (sh : Shape) (i q d : Nat) : Nat :=
-  bsFr sh + ((i * shS sh + q) * shD sh + d)
+def bsXe (sh : Shape) : Nat := bsFr sh + szFr sh
+def bsTotal (sh : Shape) : Nat := bsXe sh + szXe sh
 
 /-- The total number of variables used by the shape. -/
 def nVars (sh : Shape) : Nat := bsTotal sh
 
-/-- Each index function is injective in its value coordinate.  These four lemmas are
-what makes the one-hot groups well defined. -/
+/-! ### Index functions -/
+
+/-- "Session q's program counter at step i is c". -/
+def vpc (sh : Shape) (i q c : Nat) : Nat :=
+  bsPc sh + ((i * shS sh + q) * shPc sh + c)
+
+/-- "Session q's variable x holds value number u at step i". -/
+def vst (sh : Shape) (i q x u : Nat) : Nat :=
+  bsSt sh + (((i * shS sh + q) * shV sh + x) * shVal sh + u)
+
+/-- "The attacker knows value number u at step i". -/
+def vkn (sh : Shape) (i u : Nat) : Nat :=
+  bsKn sh + (i * shVal sh + u)
+
+/-- "The event at step i is alternative k". -/
+def vev (sh : Shape) (i k : Nat) : Nat :=
+  bsEv sh + (i * shEv sh + k)
+
+/-- "The message delivered to session q at step i is value u". -/
+def vdl (sh : Shape) (i q u : Nat) : Nat :=
+  bsDl sh + ((i * shS sh + q) * shVal sh + u)
+
+/-- "Session q picks nonce number d at step i". -/
+def vfr (sh : Shape) (i q d : Nat) : Nat :=
+  bsFr sh + ((i * shS sh + q) * shD sh + d)
+
+/-- "At step i, session q's evaluation of expression-table entry e has value number u". -/
+def vxe (sh : Shape) (i q e u : Nat) : Nat :=
+  bsXe sh + ((((i * shS sh + q) * shE sh + e) * shVal sh) + u)
+
+/-! ### Injectivity of the index functions -/
+
 theorem vpc_inj {sh : Shape} {i q c c' : Nat} (hc : c < shPc sh) (hc' : c' < shPc sh)
     (h : vpc sh i q c = vpc sh i q c') : c = c' := by
   unfold vpc bsPc at h
@@ -241,10 +320,15 @@ theorem vfr_inj {sh : Shape} {i q d d' : Nat} (hd : d < shD sh) (hd' : d' < shD 
   unfold vfr bsFr at h
   exact (lin_inj2 (shD_pos sh) hd hd' (Nat.add_left_cancel h)).2
 
+theorem vxe_inj {sh : Shape} {i q e u u' : Nat} (hu : u < shVal sh) (hu' : u' < shVal sh)
+    (h : vxe sh i q e u = vxe sh i q e u') : u = u' := by
+  unfold vxe bsXe at h
+  exact (lin_inj2 (shVal_pos sh) hu hu' (Nat.add_left_cancel h)).2
+
 /-! ### The one-hot groups -/
 
-/-- Build the one-hot group of a positional code: the domain is the range of the
-stride, and the variable map is injective because the positional code is. -/
+/-- Build the one-hot group of a positional code: the domain is the range of the stride,
+and the variable map is injective because the positional code is. -/
 def ohOf (f : Nat -> Nat) (K : Nat) (hK : 0 < K)
     (f_inj : ∀ x y, x < K -> y < K -> f x = f y -> x = y) : Oh Nat :=
   { vals := List.range K,
@@ -279,59 +363,12 @@ def dlOh (sh : Shape) (i q : Nat) : Oh Nat :=
 def frOh (sh : Shape) (i q : Nat) : Oh Nat :=
   ohOf (fun d => vfr sh i q d) (shD sh) (shD_pos sh) (fun x y hx hy h => vfr_inj hx hy h)
 
+/-- The evaluation group at step i, session q, table entry e. -/
+def xeOh (sh : Shape) (i q e : Nat) : Oh Nat :=
+  ohOf (fun u => vxe sh i q e u) (shVal sh) (shVal_pos sh)
+    (fun a b ha hb h => vxe_inj ha hb h)
+
 /-! ### Values -/
-
-/-- Reading past the end of a list gives none. -/
-theorem rget_oob : ∀ (l : List α), rget l l.length = none := by
-  intro l
-  induction l with
-  | nil => rfl
-  | cons x xs ih => exact ih
-
-/-- Any index beyond the length reads as none. -/
-theorem rget_oob_ge : ∀ (l : List α) (i : Nat), i ≥ l.length -> rget l i = none := by
-  intro l
-  induction l with
-  | nil => intro i _; rfl
-  | cons x xs ih =>
-      intro i hi
-      cases i with
-      | zero =>
-          have : 0 < List.length (x :: xs) := by simp
-          omega
-      | succ i =>
-          show rget xs i = none
-          exact ih i (by simp [List.length_cons] at hi; omega)
-
-/-- Reading the head of a list at index 0. -/
-theorem rget_zero {α : Type} (x : α) (xs : List α) : rget (x :: xs) 0 = some x := rfl
-
-/-- Reading past the head shifts the index. -/
-theorem rget_succ {α : Type} (x : α) (xs : List α) (n : Nat) :
-    rget (x :: xs) (n + 1) = rget xs n := rfl
-
-/-- The index of the first occurrence of a in l, or 0 when a is absent.  Written by hand
-rather than with List.idxOf so that its unfolding is available to the proofs below. -/
-def pos [BEq α] (a : α) : List α -> Nat
-  | [] => 0
-  | x :: xs => if x == a then 0 else pos a xs + 1
-
-/-- The first occurrence of an element reads back as that element. -/
-theorem rget_pos [BEq α] [LawfulBEq α] : ∀ (l : List α) (a : α),
-    a ∈ l -> rget l (pos a l) = some a := by
-  intro l
-  induction l with
-  | nil => intro a h; cases h
-  | cons x xs ih =>
-      intro a h
-      by_cases hx : x == a
-      · rw [pos, if_pos hx]
-        exact LawfulBEq.eq_of_beq hx ▸ rget_zero x xs
-      · rw [pos, if_neg hx, rget_succ]
-        rw [List.mem_cons] at h
-        rcases h with rfl | h'
-        · exact absurd (by simp) hx
-        · exact ih a h'
 
 /-- The value with number u: the u-th message of the universe, or unset when u is out of
 range (the last index is reserved for "unset"). -/
@@ -344,7 +381,7 @@ def uIdx (sh : Shape) : Val -> Nat
 
 /-- valAt of the unset index is unset. -/
 @[simp] theorem valAt_uIdx_none (sh : Shape) : valAt sh (uIdx sh none) = none :=
-  rget_oob sh.U
+  rget_len sh.U
 
 /-- valAt inverts uIdx on universe messages. -/
 theorem valAt_uIdx_some (sh : Shape) {t : Term} (ht : t ∈ sh.U) :
@@ -361,8 +398,7 @@ theorem uIdx_lt (sh : Shape) (v : Val) (hv : v ∈ sh.U.map some ++ [none]) :
       rcases hv with h | h
       · obtain ⟨u, hu, hut⟩ := h
         have hut' : u = t := Option.some.inj hut
-        have h1 : rget sh.U (pos t sh.U) = some t :=
-          hut' ▸ rget_pos sh.U u hu
+        have h1 : rget sh.U (pos t sh.U) = some t := hut' ▸ rget_pos sh.U u hu
         have hlt : pos t sh.U < sh.U.length := by
           by_contra e
           have h2 : rget sh.U (pos t sh.U) = none := rget_oob_ge sh.U _ (by omega)
@@ -371,6 +407,19 @@ theorem uIdx_lt (sh : Shape) (v : Val) (hv : v ∈ sh.U.map some ++ [none]) :
         have : shVal sh = sh.U.length + 1 := rfl
         omega
       · exact absurd h (by simp)
+
+/-! ### Event alternatives -/
+
+/-- Event alternative codes. -/
+def evIdle (sh : Shape) (i : Nat) : Nat := vev sh i 0
+def evAct (sh : Shape) (i q : Nat) : Nat := vev sh i (1 + q)
+def evDed (sh : Shape) (i u : Nat) : Nat := vev sh i (1 + shS sh + u)
+
+theorem evAct_lt (sh : Shape) (i q : Nat) (hq : q < shS sh) : 1 + q < shEv sh := by
+  simp [shEv]; omega
+theorem evDed_lt (sh : Shape) (i u : Nat) (hu : u < sh.U.length) :
+    1 + shS sh + u < shEv sh := by
+  simp [shEv]; omega
 
 /-! ### Decoding a configuration from an assignment -/
 
@@ -386,7 +435,7 @@ def decodeStore (sh : Shape) (a : Assignment) (i q : Nat) : List (Var × Term) :
 /-- The attacker's knowledge at step i. -/
 def decodeKn (sh : Shape) (a : Assignment) (i : Nat) : List Term :=
   (List.range sh.U.length).filterMap fun u =>
-    if a (vkn sh i u) then some (rget sh.U u |>.getD (Term.nonce 0)) else none
+    if a (vkn sh i u) then some ((rget sh.U u).getD (Term.nonce 0)) else none
 
 /-- The program counter of session q at step i. -/
 def decodePc (sh : Shape) (a : Assignment) (i q : Nat) : Nat :=
