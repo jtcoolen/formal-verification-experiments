@@ -7,6 +7,7 @@ audit — nothing here contains `sorry`, `admit`, `unsafe` or user-declared axio
 | Project | What is verified | Depends on | Documentation |
 |---|---|---|---|
 | **Merkle trees** | Indexed binary Merkle trees: collision resistance of the root digest, authentication-path completeness and soundness, no-forgery, incremental-update correctness, complexity bounds, and a signature layer instantiated at SHA3-512. | Lean core + [lean4-hash](https://github.com/pure-algebra/lean4-hash) (no Mathlib) | [`Merkle/README.md`](Merkle/README.md) |
+| **Quantum circuit optimizer** | Deeply embedded quantum circuits with an independent matrix semantics over `Matrix (Fin n → Bool) (Fin n → Bool) ℂ`; equivalence modulo global phase; 35 machine-checked rewrite rules; an OptiSat equality-saturation engine; an **independent executable certificate checker** with a proved soundness theorem; end-to-end `optimize_sound`; a bug-regression suite built from documented quantum-compiler defects. | Lean core + Mathlib `v4.26.0` + vendored OptiSat | [`quantum/README.md`](quantum/README.md) |
 | **Dijkstra shortest paths** | Dijkstra's algorithm on finite directed `ℕ`-weighted graphs: termination, relaxation correctness, finalization (cut) correctness, global optimality against an independent `WithTop ℕ` specification, path reconstruction, and determinism of the answer. | Lean core + Mathlib `v4.34.1` | [`dijkstra/README.md`](dijkstra/README.md) |
 
 ## Layout
@@ -17,13 +18,20 @@ audit — nothing here contains `sorry`, `admit`, `unsafe` or user-declared axio
 ├── Merkle/            # Merkle library: Basic, Proof, Complexity, Security,
 │   │                  #   Signature, Sha3, Usage, Free
 │   └── README.md      # ← Merkle documentation, theorem table, demo output
+├── quantum/           # Quantum circuit optimizer package (its own Lake project)
+│   ├── Quantum/       #   Syntax, Angle, Gates, Embed, Rotations, Semantics, Equivalence,
+│   │                  #   Contexts, Rewrites, Certificates, Cost, QuantumEGraph, Optimizer,
+│   │                  #   Correctness, ControlPhase, Examples, BugRegression
+│   ├── LambdaSat/     #   vendored OptiSat (unmodified)
+│   ├── Main.lean      #   command-line demonstration
+│   └── README.md      # ← quantum documentation, theorem inventory, trust boundary
 └── dijkstra/          # Dijkstra package (its own Lake project)
     ├── lakefile.toml, Main.lean, Axioms.lean, lean-toolchain
     ├── Dijkstra/      # Graph, Paths, Algorithm, Correctness, Examples
     └── README.md      # ← Dijkstra documentation, theorem table, build steps
 ```
 
-The two projects deliberately do **not** share a build: Merkle is a pure-core development
+The three projects deliberately do **not** share a build: Merkle is a pure-core development
 (Mathlib would slow it down for no benefit), while Dijkstra uses Mathlib's order, `Finset`
 and `WithTop` theory.  Each directory therefore has its own `lean-toolchain` and lakefile.
 
@@ -71,3 +79,10 @@ each verified guarantee.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Knowledge base
+
+See [`KB/README.md`](KB/README.md): pinned notes on OptiSat, equality saturation for quantum
+circuits, the documented quantum-compiler bugs that drive the regression suite, formal
+verification of Shor/RSA/ECDLP, and the phase-by-phase development log in
+[`KB/PROGRESS.md`](KB/PROGRESS.md).

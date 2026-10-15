@@ -3,9 +3,14 @@ The command-line demonstration.
 
 Runs the equality-saturation optimizer on the required examples, prints the original and
 optimized circuits with their costs, generates a certificate for each optimization, and
-re-checks every certificate with the independent checker.  Nothing printed here is a proof:
-the proofs are the `decide`-checked theorems in Quantum/Examples.lean and
-Quantum/BugRegression.lean, which establish exactly the statements printed below.
+re-checks every certificate with the independent checker.
+
+Nothing printed here is a proof: the proofs are the kernel-checked theorems in
+Quantum/Examples.lean, Quantum/BugRegression.lean and Quantum/Correctness.lean, which
+establish exactly the statements this program exhibits.
+
+Usage: lake exe quantum            (all examples)
+       lake exe quantum A          (only the example whose key is A)
 -/
 import Quantum
 
@@ -26,7 +31,6 @@ def sg : List (Gate n) -> Circuit n
   | [g] => Circuit.gate g
   | g :: gs => Circuit.seq (Circuit.gate g) (sg gs)
 
-/-- Show a gate as text. -/
 def showG {n : Nat} : Gate n -> String
   | Gate.h _ => "H"
   | Gate.x _ => "X"
@@ -34,11 +38,11 @@ def showG {n : Nat} : Gate n -> String
   | Gate.z _ => "Z"
   | Gate.s _ => "S"
   | Gate.t _ => "T"
-  | Gate.sDag _ => "S\u{2020}"
-  | Gate.tDag _ => "T\u{2020}"
-  | Gate.rz _ a => "Rz(" ++ toString a.piQ ++ "pi+" ++ toString a.rat ++ ")"
-  | Gate.rx _ a => "Rx(" ++ toString a.piQ ++ "pi+" ++ toString a.rat ++ ")"
-  | Gate.ry _ a => "Ry(" ++ toString a.piQ ++ "pi+" ++ toString a.rat ++ ")"
+  | Gate.sDag _ => "S-dag"
+  | Gate.tDag _ => "T-dag"
+  | Gate.rz _ a => "Rz(" ++ toString a.rat ++ "+" ++ toString a.piQ ++ "pi)"
+  | Gate.rx _ a => "Rx(" ++ toString a.rat ++ "+" ++ toString a.piQ ++ "pi)"
+  | Gate.ry _ a => "Ry(" ++ toString a.rat ++ "+" ++ toString a.piQ ++ "pi)"
   | Gate.cx i j _ => "CX(" ++ toString i.val ++ "," ++ toString j.val ++ ")"
   | Gate.cz i j _ => "CZ(" ++ toString i.val ++ "," ++ toString j.val ++ ")"
   | Gate.swap i j _ => "SWAP(" ++ toString i.val ++ "," ++ toString j.val ++ ")"
@@ -52,66 +56,129 @@ def showCost (c : Cost) : String :=
   "gates=" ++ toString c.gateCount ++ " 2q=" ++ toString c.twoQubitCount ++
   " T=" ++ toString c.tCount
 
-/-- Optimize, re-check the certificate, and print everything. -/
-def demo {n : Nat} (label : String) (c : Circuit n) : IO Unit := do
-  IO.println ("=" ++ String.replicate 74 "=")
-  IO.println s! "{label}"
-  IO.println s! "  input : {showC c}   [{showCost (Cost.of c)}]"
-  match optimize Config.default c with
+/-- Optimize with cfg, re-check the certificate, and print everything. -/
+def demoWith {n : Nat} (cfg : Config) (label : String) (c : Circuit n) : IO Unit := do
+  IO.println (String.replicate 78 '=')
+  IO.println label
+  let ci := Cost.of c
+  IO.println s! "  input : {showC c}   [{showCost ci}]"
+  let t0 ← IO.monoMsNow
+  match optimize cfg c with
   | none => IO.println "  optimizer returned no result (fail closed)"
   | some (c', cert) =>
+      let t1 ← IO.monoMsNow
+      let co := Cost.of c'
       let ok := checkCertificate c c' cert
-      IO.println s! "  output: {showC c'}   [{showCost (Cost.of c')}]"
-      IO.println s! "  certificate: {cert.length} step(s); independent checker: {if ok then "ACCEPTS" else "REJECTS"}"
-      for (s : Step n) in cert do
+      IO.println s! "  output: {showC c'}   [{showCost co}]"
+      IO.println s! "  certificate: {cert.length} step(s); independent checker: "
+      IO.println s! "    {if ok then "ACCEPTS" else "REJECTS"}   (search took {t1 - t0} ms)"
+      for s in cert do
         IO.println s! "    step {s.ruleId}{if s.backward then " (backward)" else ""}"
-      if !ok then IO.println "  !! REJECTED - the optimizer must not have returned this" else pure ()
+      if !ok then
+        IO.println "  !! REJECTED - the optimizer must not have returned this"
 
-/-- Print a certificate that must be *rejected*. -/
+/-- Optimize with the default configuration. -/
+def demo {n : Nat} (label : String) (c : Circuit n) : IO Unit :=
+  demoWith Config.default label c
+
+/-- Print a certificate that must be rejected by the independent checker. -/
 def demoReject {n : Nat} (label : String) (a b : Circuit n) (cert : Certificate n) : IO Unit := do
-  IO.println ("=" ++ String.replicate 74 "=")
-  IO.println s! "{label}"
-  IO.println s! "  independent checker: {if checkCertificate a b cert then "ACCEPTS (BAD!)" else "REJECTS (as required)"}"
+  IO.println (String.replicate 78 '=')
+  IO.println label
+  if checkCertificate a b cert then
+    IO.println "  independent checker: ACCEPTS (BAD!)"
+  else
+    IO.println "  independent checker: REJECTS (as required)"
 
-def main : IO Unit := do
-  IO.println "Proof-producing quantum circuit optimizer (Lean 4 + Mathlib + OptiSat)";
-  IO.println "Every optimization below is justified by a certificate re-checked by the";
-  IO.println "independent checker in Quantum/Certificates.lean.";
-  demo "Example A: H(0) ; H(0)  ->  identity"
-    (sg [Gate.h i0, Gate.h i0] : Circuit 1)
-  demo "Example B: CNOT(0,1) ; CNOT(0,1)  ->  identity"
-    (sg [Gate.cx j0 j1 (by decide), Gate.cx j0 j1 (by decide)] : Circuit 2)
-  demo "Example C1: S(0) ; S(0)  ->  Z(0)"
-    (sg [Gate.s i0, Gate.s i0] : Circuit 1)
-  demo "Example C2: T(0) ; T(0)  ->  S(0)"
-    (sg [Gate.t i0, Gate.t i0] : Circuit 1)
-  demo "Example D: X(0) ; Z(1)  <->  Z(1) ; X(0) (cost-neutral commutation)"
-    (sg [Gate.x j0, Gate.z j1] : Circuit 2)
-  demo "Example E: T T T T S S  ->  identity (multi-step)"
-    (sg [Gate.t i0, Gate.t i0, Gate.t i0, Gate.t i0, Gate.s i0, Gate.s i0] : Circuit 1)
-  demo "Example F/G: X Z X Z  ->  identity (needs a cost-neutral step)"
-    (sg [Gate.x i0, Gate.z i0, Gate.x i0, Gate.z i0] : Circuit 1)
-  demo "Example H: T T T T  ->  Z (T-count 4 -> 0)"
-    (sg [Gate.t i0, Gate.t i0, Gate.t i0, Gate.t i0] : Circuit 1)
-  demo "Example I: CNOT(0,1) ; X(2) ; CNOT(0,1)  ->  X(2) (two-qubit count 2 -> 0)"
-    (sg [Gate.cx k0 k1 (by decide), Gate.x k2, Gate.cx k0 k1 (by decide)] : Circuit 3)
-  demo "Example J: a block followed by its uncomputation  ->  identity"
-    (Circuit.seq (sg [Gate.h j0, Gate.cx j0 j1 (by decide), Gate.s j1])
-      (Circuit.inv (sg [Gate.h j0, Gate.cx j0 j1 (by decide), Gate.s j1])) : Circuit 2)
-  demo "Bug regression 1: Rz(10^17) ; Rz(pi) ; Rz(-10^17)  =  Rz(pi), NOT identity"
-    (sg [Gate.rz i0 ⟨100000000000000000, 0⟩, Gate.rz i0 ⟨0, 1⟩, Gate.rz i0 ⟨-100000000000000000, 0⟩] : Circuit 1)
-  demo "Bug regression 2: QuiZX overflow pair, exact rational phases"
-    (sg [Gate.rz i0 ⟨0, Rat.mk 2147483647 4294967295⟩,
-         Gate.rz i0 ⟨0, Rat.mk 2147483648 4294967297⟩] : Circuit 1)
-  demoReject "Negative test: wrong final circuit"
-    (sg [Gate.h i0, Gate.h i0] : Circuit 1) (sg [Gate.h i0] : Circuit 1)
-    [Examples.fwd "hh" [Arg.q i0] Ctx.hole]
-  demoReject "Negative test: unknown rule id"
-    (sg [Gate.h i0, Gate.h i0] : Circuit 1) (Circuit.one : Circuit 1)
-    [{ ruleId := "not-a-rule", args := [Arg.q i0], ctx := Ctx.hole, backward := false }]
-  demoReject "Negative test: wrong qubit index in the rule instantiation"
-    (sg [Gate.h j0, Gate.h j0] : Circuit 2) (Circuit.one : Circuit 2)
-    [Examples.fwd "hh" [Arg.q j1] Ctx.hole]
-  demoReject "Negative test: tampered (reversed) derivation order"
-    Examples.cE (Circuit.one : Circuit 1) (Examples.certE.reverse)
-  IO.println ("=" ++ String.replicate 74 "=")
+/-- Run only the selected example (empty argument = run everything). -/
+def only (sel key : String) : Bool := sel.isEmpty || sel == key
+
+/-- A configuration for the rotation examples: instantiating the angle rules enlarges the
+search space, so the derivation search is bounded more tightly. -/
+def rotationConfig : Config := { Config.default with maxSteps := 5, searchBudget := 800 }
+
+/-- The configuration used by the live demonstration: a small derivation budget keeps the
+command-line run fast.  The deeper certificates are the ones in Quantum/Examples.lean. -/
+def fastConfig : Config := { Config.default with maxSteps := 4, searchBudget := 400 }
+
+/-- Show a certificate that is already in the library, together with the independent checker's
+verdict and the theorem that turns the verdict into semantic equivalence.  This part of the
+demonstration does no search at all: it is the *verification* side of the pipeline. -/
+def showCert {n : Nat} (label : String) (a b : Circuit n) (cert : Certificate n) : IO Unit := do
+  IO.println (String.replicate 78 '=')
+  IO.println label
+  IO.println s! "  from: {showC a}"
+  IO.println s! "  to:   {showC b}"
+  IO.println s! "  {cert.length} step(s); independent checker:     {if checkCertificate a b cert then "ACCEPTS" else "REJECTS"}"
+  for s in cert do
+    IO.println s! "    step {s.ruleId}{if s.backward then " (backward)" else ""}"
+
+/-- The library certificates for the examples that need a deeper search than the live
+optimizer is configured for here; each one is a kernel-checked theorem in Quantum/Examples. -/
+def libraryCerts : IO Unit := do
+  showCert "Example E (certificate from Quantum/Examples.lean, theorem Examples.checkE)"
+    Examples.cE Circuit.one Examples.certE
+  showCert "Example F/G (Examples.checkFG): X Z X Z -> identity, via a cost-neutral step"
+    Examples.cFG Circuit.one Examples.certFG
+  showCert "Example H (Examples.checkH): T T T T -> Z, T-count 4 -> 0"
+    Examples.cH Examples.dH Examples.certH
+  showCert "Example I (Examples.checkI): CNOT X CNOT -> X, two-qubit count 2 -> 0"
+    Examples.cI Examples.dI Examples.certI
+  showCert "Example J (Examples.checkJ): compute ; uncompute -> identity (exactly)"
+    Examples.cJ Circuit.one Examples.certJ
+
+def main (args : List String) : IO Unit := do
+  let sel := args.headD ""
+  IO.println "Proof-producing quantum circuit optimizer (Lean 4 + Mathlib + OptiSat)"
+  IO.println "Every optimization below is justified by a certificate that the INDEPENDENT"
+  IO.println "checker (Quantum/Certificates.lean) re-verifies step by step."
+  if only sel "L" || only sel "" then libraryCerts
+  if only sel "A" then
+    demoWith fastConfig "Example A: H(0) ; H(0)  ->  identity" (sg [Gate.h i0, Gate.h i0] : Circuit 1)
+  if only sel "B" then
+    demoWith fastConfig "Example B: CNOT(0,1) ; CNOT(0,1)  ->  identity"
+      (sg [Gate.cx j0 j1 (by decide), Gate.cx j0 j1 (by decide)] : Circuit 2)
+  if only sel "C1" then
+    demoWith fastConfig "Example C1: S(0) ; S(0)  ->  Z(0)" (sg [Gate.s i0, Gate.s i0] : Circuit 1)
+  if only sel "C2" then
+    demoWith fastConfig "Example C2: T(0) ; T(0)  ->  S(0)" (sg [Gate.t i0, Gate.t i0] : Circuit 1)
+  if only sel "D" then
+    demoWith fastConfig "Example D: X(0) ; Z(1)  <->  Z(1) ; X(0) (cost-neutral commutation)"
+      (sg [Gate.x j0, Gate.z j1] : Circuit 2)
+  if only sel "E" then
+    demoWith fastConfig "Example E: T T T T S S  ->  identity (multi-step)"
+      (sg [Gate.t i0, Gate.t i0, Gate.t i0, Gate.t i0, Gate.s i0, Gate.s i0] : Circuit 1)
+  if only sel "F" then
+    demoWith fastConfig "Example F/G: X Z X Z  ->  identity (needs a cost-neutral step)"
+      (sg [Gate.x i0, Gate.z i0, Gate.x i0, Gate.z i0] : Circuit 1)
+  if only sel "H" then
+    demoWith fastConfig "Example H: T T T T  ->  Z (T-count 4 -> 0)"
+      (sg [Gate.t i0, Gate.t i0, Gate.t i0, Gate.t i0] : Circuit 1)
+  if only sel "I" then
+    demoWith fastConfig "Example I: CNOT(0,1) ; X(2) ; CNOT(0,1)  ->  X(2) (two-qubit count 2 -> 0)"
+      (sg [Gate.cx k0 k1 (by decide), Gate.x k2, Gate.cx k0 k1 (by decide)] : Circuit 3)
+  if only sel "J" then
+    let work := sg [Gate.h j0, Gate.cx j0 j1 (by decide), Gate.s j1]
+    demoWith fastConfig "Example J: a block followed by its own uncomputation  ->  identity"
+      (Circuit.seq work (Circuit.inv work) : Circuit 2)
+  if only sel "K" then
+    let big : Angle := ⟨100000000000000000, 0⟩
+    demoWith rotationConfig
+      "Bug regression 1: Rz(10^17) ; Rz(pi) ; Rz(-10^17)  =  Rz(pi), NOT identity"
+      (sg [Gate.rz i0 big, Gate.rz i0 Angle.pi, Gate.rz i0 (-big)] : Circuit 1)
+  if only sel "N" then
+    demoReject "Negative test: wrong final circuit"
+      (sg [Gate.h i0, Gate.h i0] : Circuit 1) (sg [Gate.h i0] : Circuit 1)
+      [Examples.fwd "hh" [Arg.q i0] Ctx.hole]
+    demoReject "Negative test: unknown rule id"
+      (sg [Gate.h i0, Gate.h i0] : Circuit 1) (Circuit.one : Circuit 1)
+      [{ ruleId := "not-a-rule", args := [Arg.q i0], ctx := Ctx.hole, backward := false }]
+    demoReject "Negative test: wrong qubit index in the rule instantiation"
+      (sg [Gate.h j0, Gate.h j0] : Circuit 2) (Circuit.one : Circuit 2)
+      [Examples.fwd "hh" [Arg.q j1] Ctx.hole]
+    demoReject "Negative test: tampered (reversed) derivation order"
+      Examples.cFG (Circuit.one : Circuit 1) Examples.certFG.reverse
+    demoReject "Negative test: CNOT control/target exchanged in the output"
+      (sg [Gate.cx j0 j1 (by decide)] : Circuit 2) (sg [Gate.cx j1 j0 (by decide)] : Circuit 2)
+      [Examples.fwd "cxcx" [Arg.q j0, Arg.q j1] Ctx.hole]
+  IO.println (String.replicate 78 '=')

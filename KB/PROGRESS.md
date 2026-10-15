@@ -100,3 +100,14 @@ plus the `decide`-checked rejections in `BugRegression`.
   classical-control specialization pass.
 * The `shor/` deliverable (RSA and ECDLP) — not started.
 * README for the quantum package and the theorem inventory (§13).
+
+## Round 1 (continued) — demo executable
+
+* `lake build` compiles the whole project including the `quantum` executable (211 MB, linked
+  against Mathlib's C objects, which are now built and cached in `quantum/.lake`).
+* `Main.lean` takes an optional example key so each demonstration can be run separately.
+* Live search cost: with `Config.default` (maxSteps 8, searchBudget 4000) the multi-step
+  examples take seconds to minutes; the executable therefore uses `fastConfig`
+  (maxSteps 4, searchBudget 400) for the live optimizer runs and prints the *library*
+  certificates of Quantum/Examples.lean (each one a kernel-checked `decide` theorem) for the
+  deeper examples.  Tuning the live search is open work.

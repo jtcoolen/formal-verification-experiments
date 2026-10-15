@@ -345,9 +345,13 @@ def egCostFn {n : Nat} : ENode (QOp n) -> Nat
 Only rule instances whose arguments occur in the circuit are considered, so this is finite
 and effectively computable. -/
 def oneStepCandidates (c : Circuit n) : List (Step n × Circuit n) :=
+  let subs := c.subcircuits
   (rules n).flatMap fun r =>
     (candidateArgs c).flatMap fun args =>
       if hs : r.side args = true then
+      -- cheap occurs-check: an instance can only fire if one of its two sides is already a
+      -- subcircuit of the input
+      if !((subs.any fun d => d == r.lhs args) || (subs.any fun d => d == r.rhs args)) then [] else
         ([false, true]).flatMap fun bw =>
           (allContextsFrom c Ctx.hole).flatMap fun ctx =>
             let lhs := if bw then r.rhs args else r.lhs args
