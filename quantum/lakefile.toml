@@ -33,3 +33,7 @@ globs = ["Shor", "Shor.+", "Shor.**"]
 [[lean_exe]]
 name = "proptests"
 root = "PropertyTests"
+
+[[lean_exe]]
+name = "diag"
+root = "Diag"

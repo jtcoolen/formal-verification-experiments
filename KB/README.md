@@ -9,6 +9,8 @@ Living reference material for this repository. Two kinds of document:
   never silently modified).
 * `PROGRESS.md` — the phase-by-phase development log: what was implemented, verified,
   compiled and tested, with the actual commands and their output.
+* [`STATE.md`](STATE.md) — **compact authoritative snapshot**: environment, commands, module map,
+  known traps, open work. Read this first after any context compaction.
 
 ## Index
 
