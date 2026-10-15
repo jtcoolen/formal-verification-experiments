@@ -58,14 +58,14 @@ open ProtSat
 def litVal (b : Bool) (l : Lit) : Bool := if l.neg then !b else b
 
 /-- Does literal l mention variable v? -/
-def mentions (v : Var) (l : Lit) : Bool := l.var == v
+def mentions (v : BVar) (l : Lit) : Bool := l.var == v
 
 /-- l is made true by v := b. -/
-def madeTrue (v : Var) (b : Bool) (l : Lit) : Bool :=
+def madeTrue (v : BVar) (b : Bool) (l : Lit) : Bool :=
   if l.var == v then litVal b l else false
 
 /-- l is made false by v := b. -/
-def madeFalse (v : Var) (b : Bool) (l : Lit) : Bool :=
+def madeFalse (v : BVar) (b : Bool) (l : Lit) : Bool :=
   if l.var == v then ! (litVal b l) else false
 
 /-- Satisfaction of a clause list by an assignment. -/
@@ -75,7 +75,7 @@ def SatList (a : Assignment) (cs : List Clause) : Prop :=
 theorem satList_cnf {a : Assignment} {f : CNF} : Sat a f <-> SatList a f.clauses := Iff.rfl
 
 /-- A literal made true by v := b evaluates to true under any assignment with a v = b. -/
-theorem madeTrue_eval {a : Assignment} {v : Var} {b : Bool} {l : Lit}
+theorem madeTrue_eval {a : Assignment} {v : BVar} {b : Bool} {l : Lit}
     (hb : a v = b) (h : madeTrue v b l = true) : l.eval a = true := by
   cases l with
   | mk w neg =>
@@ -86,7 +86,7 @@ theorem madeTrue_eval {a : Assignment} {v : Var} {b : Bool} {l : Lit}
 
 /-- A literal made false by v := b evaluates to false under any assignment with
 a v = b. -/
-theorem madeFalse_eval {a : Assignment} {v : Var} {b : Bool} {l : Lit}
+theorem madeFalse_eval {a : Assignment} {v : BVar} {b : Bool} {l : Lit}
     (hb : a v = b) (h : madeFalse v b l = true) : l.eval a = false := by
   cases l with
   | mk w neg =>
@@ -100,12 +100,12 @@ theorem madeFalse_eval {a : Assignment} {v : Var} {b : Bool} {l : Lit}
 /-- assign v b cs: the clause set after setting variable v to b.  Clauses containing
 a literal made true by the assignment are dropped (that is the filter), and literals
 made false are removed from the rest (that is the map). -/
-def assign (v : Var) (b : Bool) (cs : List Clause) : List Clause :=
+def assign (v : BVar) (b : Bool) (cs : List Clause) : List Clause :=
   (cs.filter (fun c => ! (c.any (madeTrue v b)))).map
     (fun c => c.filter (fun l => ! (madeFalse v b l)))
 
 /-- What membership in an assigned clause set means. -/
-theorem assign_mem {v : Var} {b : Bool} {cs : List Clause} {c' : Clause}
+theorem assign_mem {v : BVar} {b : Bool} {cs : List Clause} {c' : Clause}
     (hc' : c' ∈ assign v b cs) :
     ∃ c ∈ cs, c' = c.filter (fun l => ! (madeFalse v b l))
       ∧ Bool.not (c.any (madeTrue v b)) = true := by
@@ -134,7 +134,7 @@ theorem any_filter {a : Assignment} {c : Clause} {p : Lit -> Bool}
 
 /-- **Forward direction.**  A model of cs that sets v to b is a model of
 assign v b cs. -/
-theorem satList_assign {a : Assignment} {v : Var} {b : Bool} {cs : List Clause}
+theorem satList_assign {a : Assignment} {v : BVar} {b : Bool} {cs : List Clause}
     (h : SatList a cs) (hb : a v = b) : SatList a (assign v b cs) := by
   intro c' hc'
   obtain ⟨c, hc, heq, hkeep⟩ := assign_mem hc'
@@ -147,7 +147,7 @@ theorem satList_assign {a : Assignment} {v : Var} {b : Bool} {cs : List Clause}
 
 /-- **Backward direction.**  An assignment that sets v to b and satisfies
 assign v b cs satisfies cs. -/
-theorem satList_assign_back {a : Assignment} {v : Var} {b : Bool} {cs : List Clause}
+theorem satList_assign_back {a : Assignment} {v : BVar} {b : Bool} {cs : List Clause}
     (h : SatList a (assign v b cs)) (hb : a v = b) : SatList a cs := by
   intro c hc
   classical
@@ -193,7 +193,7 @@ theorem unit_forced {a : Assignment} {cs : List Clause} {l : Lit}
 /-- **propagate** iterates unit propagation.  Each step deletes at least the unit
 clause it consumes, so the depth bound cs.length is enough to reach a fixpoint.  The
 result carries the forced assignments (most recent first) and the reduced clause set. -/
-def propagate : Nat -> List Clause -> Option (List (Var × Bool) × List Clause)
+def propagate : Nat -> List Clause -> Option (List (BVar × Bool) × List Clause)
   | _, [] => some ([], [])
   | 0, cs => some ([], cs)
   | n + 1, cs =>
@@ -205,7 +205,7 @@ def propagate : Nat -> List Clause -> Option (List (Var × Bool) × List Clause)
               fun r => (((l.var, !l.neg) :: r.1), r.2)
 
 /-- The variables occurring in a clause list. -/
-def clauseVars : List Clause -> List Var
+def clauseVars : List Clause -> List BVar
   | [] => []
   | c :: cs => (c.map (fun l => l.var)) ++ clauseVars cs
 
