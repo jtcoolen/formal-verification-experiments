@@ -81,7 +81,7 @@ def candidateArgs (c : Circuit n) : List (List (Arg n)) :=
     | Circuit.seq (Circuit.seq a b) e => some [Arg.c a, Arg.c b, Arg.c e]
     | Circuit.seq a (Circuit.seq b e) => some [Arg.c a, Arg.c b, Arg.c e]
     | _ => none
-  qs ++ qqs ++ qaa ++ qjaa ++ ggs ++ cs ++ ccs ++ cccs
+  (qs ++ qqs ++ qaa ++ qjaa ++ ggs ++ cs ++ ccs ++ cccs).eraseDups
 
 /-- The schematic rules of the library are handled *schematically* by the e-graph (pattern
 variables for subcircuits, see `structRules`), so their ground instances are dropped from the
@@ -310,21 +310,33 @@ def structRules (n : Nat) : List (PatternSoundRule (QOp n) (PhaseOp n)) :=
   let r := structIdR n
   [a, psrFlip a, l, r]
 
-/-- All sound rule instances whose left-hand side *or* right-hand side occurs as a
-subcircuit of the input, in both orientations, as OptiSat rules, together with the schematic
-structural rules.  Restricting the gate rules to occurring subcircuits keeps the generated
-rule set finite and small; it is a documented bound on the search space, not a change in
-semantics: every rule instance is still proved sound individually, and every step of the
-resulting derivation is re-checked independently. -/
+/-- The rule instances fed to the e-graph: every registered rule, instantiated at every
+candidate argument list of the input (indices from the register, angles from the input, gate
+pairs and circuit pairs from the input's own subcircuits), in every orientation that does not
+increase the gate count, plus the schematic structural rules of 'structRules'.
+
+The *contracting bound* is what makes saturation terminate in practice.  Without it the
+inverse of every cancelling rule is instantiated at every class (Z --> S ; S, Z --> H ; X ; H,
+one --> Z ; Z, ...); combined with the two orientations of associativity the class count
+explodes - on Example F saturation reached 4448 classes after a single round at fuel 3 and
+did not finish a second round in several minutes, while the optimum of every example in this
+project is reachable by contracting steps together with the cost-neutral structural and
+commutativity steps, which are retained.
+
+This is a bound on the *search space*, not on the mathematics: every instance is still
+proved sound individually, and every step of the certificate produced from the search is
+re-checked by the independent checker. -/
 def quantumRules {n : Nat} (c : Circuit n) : List (PatternSoundRule (QOp n) (PhaseOp n)) :=
-  let subs := c.subcircuits
   ((instantiatedRules n).flatMap fun r =>
     (candidateArgs c).flatMap fun args =>
       if hs : r.side args = true then
-        let occursL := subs.any fun d => d == r.lhs args
-        let occursR := subs.any fun d => d == r.rhs args
-        (if occursL then [toPatternSoundRule r args hs] else []) ++
-          (if occursR then [toPatternSoundRuleFlip r args hs] else [])
+        let lhs := r.lhs args
+        let rhs := r.rhs args
+        -- Contracting orientation only: see the docstring of 'quantumRules'.
+        let gl := (Cost.of lhs).gateCount
+        let gr := (Cost.of rhs).gateCount
+        (if gr ≤ gl then [toPatternSoundRule r args hs] else []) ++
+          (if gl ≤ gr then [toPatternSoundRuleFlip r args hs] else [])
       else []) ++ structRules n
 
 /-! ### One-step rewrites and certificate synthesis -/
@@ -489,26 +501,137 @@ def findDerivation {n : Nat} (maxSteps : Nat) (target : Circuit n) :
       else if decide (path.length ≥ maxSteps) then findDerivation maxSteps target fuel rest seen
       else findDerivation maxSteps target fuel (rest ++ deriveSuccessors c path seen) (c :: seen)
 
+/-! ### Bidirectional certificate search -/
+
+/-- One forward layer: the unseen successors of the whole frontier, cheapest first. -/
+def forwardLayer {n : Nat} (acc : List (Circuit n × Certificate n))
+    (frontier : List (Circuit n × Certificate n)) : List (Circuit n × Certificate n) :=
+  let seen := acc.map Prod.fst
+  (frontier.flatMap fun (c, path) => deriveSuccessors c path seen) |>.filter fun p =>
+    !((acc.map Prod.fst).any fun d => d == p.1)
+
+/-- All circuits reachable from the frontier within 'depth' steps, each paired with the
+derivation that reaches it.  Structural in depth and budget, so it always terminates. -/
+def forwardClosure {n : Nat} : (depth budget : Nat) ->
+    List (Circuit n × Certificate n) -> List (Circuit n × Certificate n) ->
+    List (Circuit n × Certificate n)
+  | 0, _, acc, _ => acc
+  | _, 0, acc, _ => acc
+  | depth + 1, budget, acc, frontier =>
+      let next := (forwardLayer acc frontier).take budget
+      forwardClosure depth (budget - next.length) (acc ++ next) next
+
+/-- One backward layer.  If y rewrites to x by step s, then x rewrites to y by the flipped step
+(applyStep_flip), so the predecessors of y are the results of the one-step rewrites of y, with
+the flipped step prepended to the path. -/
+def backwardLayer {n : Nat} (acc : List (Circuit n × Certificate n))
+    (frontier : List (Circuit n × Certificate n)) : List (Circuit n × Certificate n) :=
+  let seen := acc.map Prod.fst
+  let raw := frontier.flatMap fun (c, path) =>
+    let nexts := (oneStepRewrites c).filter fun p => !((c :: seen).any fun d => d == p.2)
+    nexts.map fun (s, x) => (x, Step.flip s :: path)
+  raw.filter fun p => !((acc.map Prod.fst).any fun d => d == p.1)
+
+/-- All circuits that rewrite into the root of the backward search within 'depth' steps, each
+paired with the derivation from that circuit to that root. -/
+def backwardClosure {n : Nat} : (depth budget : Nat) ->
+    List (Circuit n × Certificate n) -> List (Circuit n × Certificate n) ->
+    List (Circuit n × Certificate n)
+  | 0, _, acc, _ => acc
+  | _, 0, acc, _ => acc
+  | depth + 1, budget, acc, frontier =>
+      let next := (backwardLayer acc frontier).take budget
+      backwardClosure depth (budget - next.length) (acc ++ next) next
+
+/-- **Bidirectional certificate search.**  A derivation from c to target is found by expanding
+c forward and target backward and meeting in the middle: the exponential blow-up drops from
+b^(2d) to 2·b^d.  Every step it uses is a step the independent checker accepts (oneStepRewrites
+is filtered by applyStep), and the assembled certificate is re-checked by the caller anyway. -/
+def findDerivationBidir {n : Nat} (depth : Nat) (budget : Nat) (c target : Circuit n) :
+    Option (Certificate n) :=
+  let fwd := forwardClosure (n := n) depth budget [(c, [])] [(c, [])]
+  let bwd := backwardClosure (n := n) depth budget [(target, [])] [(target, [])]
+  fwd.findSome? fun (x, p1) =>
+    match bwd.find? (fun (y, _p2) => x == y) with
+    | some (_, p2) => some (p1 ++ p2)
+    | none => none
+
 /-- Optimizer configuration: explicit resource bounds on every loop. -/
 structure Config where
   /-- fuel for e-matching and instantiation inside one saturation round -/
-  fuel : Nat := 300
+  fuel : Nat := 8
   /-- maximum number of saturation rounds -/
-  maxIter : Nat := 6
+  maxIter : Nat := 2
   /-- fuel for congruence rebuilding in one round -/
-  rebuildFuel : Nat := 300
+  rebuildFuel : Nat := 30
   /-- iterations of the cost fixpoint computation -/
   costFuel : Nat := 60
   /-- maximum length of a synthesized derivation -/
-  maxSteps : Nat := 8
+  maxSteps : Nat := 10
   /-- maximum number of circuits explored by the derivation search -/
-  searchBudget : Nat := 4000
+  searchBudget : Nat := 400
   /-- the lexicographic cost policy used for reporting -/
   costConfig : CostConfig := CostConfig.default
 deriving Repr, Inhabited
 
 /-- The default configuration. -/
 def Config.default : Config := {}
+
+
+/-! ### Cost-guided certificate search -/
+
+/-- Lexicographic comparison of two search nodes: cheaper circuits first, and among circuits
+of equal cost the one reached by a shorter derivation first. -/
+def nodeLe {n : Nat} (cfg : CostConfig) (x y : Circuit n × Certificate n) : Bool :=
+  if decide (Cost.le cfg (Cost.of x.1) (Cost.of y.1))
+    then if decide (Cost.le cfg (Cost.of y.1) (Cost.of x.1)) then x.2.length ≤ y.2.length else true
+    else false
+
+/-- Insert a node into a list already sorted by 'nodeLe'. -/
+def insertNode {n : Nat} (cfg : CostConfig) (x : Circuit n × Certificate n) :
+    List (Circuit n × Certificate n) -> List (Circuit n × Certificate n)
+  | [] => [x]
+  | y :: ys => if nodeLe cfg x y then x :: y :: ys else y :: insertNode cfg x ys
+
+/-- Merge two 'nodeLe'-sorted node lists. -/
+def mergeNodes {n : Nat} (cfg : CostConfig) :
+    List (Circuit n × Certificate n) -> List (Circuit n × Certificate n) ->
+    List (Circuit n × Certificate n)
+  | [], ys => ys
+  | x :: xs, ys => insertNode cfg x (mergeNodes cfg xs ys)
+
+/-- **Cost-guided certificate search.**  A uniform-cost search from 'c' toward 'target' that
+only follows rewrite steps which do not increase the cost.  Because the e-graph has already
+selected 'target' as a minimum-cost member of the class, the derivations we need are
+monotone: cancelling a pair, merging two rotations, or commuting two disjoint gates never
+raises the cost.  Restricting the frontier to cost-non-increasing steps is what makes the
+search finish in milliseconds instead of minutes, and it loses nothing: if no monotone path
+exists the caller falls back to the bidirectional search and then to the reflexive
+certificate, so the optimizer stays fail-closed. -/
+def costSearch {n : Nat} (cfg : Config) (target : Circuit n) :
+    (fuel : Nat) -> List (Circuit n × Certificate n) -> List (Circuit n) ->
+    Option (Certificate n)
+  | 0, _, _ => none
+  | fuel + 1, queue, seen =>
+    match queue with
+    | [] => none
+    | (c, path) :: rest =>
+      if decide (c = target) then some path
+      else if decide (path.length ≥ cfg.maxSteps) then costSearch cfg target fuel rest seen
+      else
+        let nexts := (deriveSuccessors c path seen).filter fun p =>
+          decide (Cost.le cfg.costConfig (Cost.of p.1) (Cost.of c))
+        costSearch cfg target fuel (mergeNodes cfg.costConfig nexts rest) (c :: seen)
+
+/-- The certificate search used by the optimizer: first the cheap cost-guided search, then
+the bidirectional breadth-first search, which can cross a cost-increasing hump. -/
+def findDerivationCost {n : Nat} (cfg : Config) (c target : Circuit n) :
+    Option (Certificate n) :=
+  match costSearch cfg target cfg.searchBudget [(c, [])] [] with
+  | some cert => some cert
+  | none => findDerivationBidir cfg.maxSteps cfg.searchBudget c target
+
+
 
 /-- The final gate of the optimizer: a candidate result is returned only if the independent
 checker accepts its certificate; otherwise the input circuit is returned together with the
@@ -531,7 +654,7 @@ def optimizeFrom (cfg : Config) (c : Circuit n) : Option (Circuit n × Certifica
   match extractAuto (saturatedGraph cfg c) (rootOf cfg c) with
   | none => some (finish c c [])
   | some c' =>
-      match findDerivation cfg.maxSteps c' cfg.searchBudget [(c, [])] [] with
+      match findDerivationCost cfg c c' with
       | some cert => some (finish c c' cert)
       | none => some (finish c c [])
 

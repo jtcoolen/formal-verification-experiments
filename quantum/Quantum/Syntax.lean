@@ -186,4 +186,34 @@ def normalize : Circuit n -> Circuit n
 
 end Circuit
 
+
+/-! ### Executable pretty printing
+
+Purely diagnostic helpers: no theorem in this project depends on them, so they cannot widen
+the trust boundary, but they let the command-line tools (and the reader of a certificate)
+see what a circuit actually is. -/
+
+/-- The name of a gate as a string. -/
+def Gate.show : Gate n -> String
+  | Gate.h _ => "H"
+  | Gate.x _ => "X"
+  | Gate.y _ => "Y"
+  | Gate.z _ => "Z"
+  | Gate.s _ => "S"
+  | Gate.t _ => "T"
+  | Gate.sDag _ => "S†"
+  | Gate.tDag _ => "T†"
+  | Gate.rz _ a => "Rz(" ++ toString a.rat ++ "+" ++ toString a.piQ ++ "pi)"
+  | Gate.rx _ a => "Rx(" ++ toString a.rat ++ "+" ++ toString a.piQ ++ "pi)"
+  | Gate.ry _ a => "Ry(" ++ toString a.rat ++ "+" ++ toString a.piQ ++ "pi)"
+  | Gate.cx i j _ => "CX(" ++ toString i.val ++ "," ++ toString j.val ++ ")"
+  | Gate.cz i j _ => "CZ(" ++ toString i.val ++ "," ++ toString j.val ++ ")"
+  | Gate.swap i j _ => "SWAP(" ++ toString i.val ++ "," ++ toString j.val ++ ")"
+  | Gate.cp i j _ a => "CP(" ++ toString i.val ++ "," ++ toString j.val ++ "," ++ toString a.piQ ++ "pi)"
+  | Gate.crz i j _ a => "CRz(" ++ toString i.val ++ "," ++ toString j.val ++ "," ++ toString a.piQ ++ "pi)"
+
+/-- A circuit printed as its gate list in execution order. -/
+def Circuit.show (c : Circuit n) : String :=
+  String.intercalate " ; " (c.gates.map Gate.show)
+
 end Quantum

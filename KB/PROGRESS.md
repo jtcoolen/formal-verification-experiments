@@ -256,3 +256,39 @@ default budget (maxSteps 8, searchBudget 4000) takes minutes: oneStepRewrites en
 fix is to reconstruct derivations from the e-graph instead of searching for them (which needs
 merge provenance, absent in the vendored OptiSat), or to index the rule instances by the
 subcircuit they match. Tracked as remaining work.
+
+## Round 5 — the saturation explosion, found and fixed
+
+**Implemented**
+* `Quantum/Optimizer.lean`: `findDerivationBidir` (fixed to `List.findSome?`), a new
+  cost-guided uniform-cost search `costSearch` with `nodeLe`/`insertNode`/`mergeNodes`, and
+  `findDerivationCost` (cost-guided first, bidirectional BFS as the fallback).
+  `optimizeFrom` now uses `findDerivationCost`.
+* `quantumRules` now applies a **contracting bound** instead of the old occurs bound.
+* `Config.default` re-tuned from measurement: fuel 8, maxIter 2, rebuildFuel 30,
+  maxSteps 10, searchBudget 400.
+* `Quantum.Syntax`: executable pretty printer `Gate.show` / `Circuit.show`.
+* `Diag.lean` rewritten with modes `iso | sat | extract | all` and unbuffered file tracing.
+
+**Verified**
+* `Quantum/Optimizer.lean` and `Quantum/Correctness.lean` compile with the new search;
+  `Opt.optimize_sound` and `Opt.optimize_isSome` restated for `findDerivationCost`.
+
+**Compiled**
+* `lake build` → Build completed successfully (4447 jobs), exit 0.
+
+**Tested**
+* `lake exe quantum` → 171 lines, exit 0.  Every example now yields an accepted certificate:
+  A 2→0, B 2→0, C1 2→1, C2 2→1 (T 2→0), D neutral, **E 6→2 gates with a 9-step certificate
+  (T-count 4→0)**, **F 4→2 gates with a 4-step certificate**, H 4→1 (T 4→0),
+  **I 3→1 gates with a 4-step certificate (two-qubit count 2→0)**, J 6→0.
+* `lake exe proptests` → all metamorphic properties held; 0 unaccepted certificates;
+  0 mutated certificates wrongly accepted.
+* `lake env lean Axioms.lean` → 27 theorems, only propext/Classical.choice/Quot.sound.
+
+**Remaining**
+* The engine stops at `Z;Z`/`X;X` on E/F instead of identity: one more saturation round is
+  needed, which currently costs too much because the rule set is large.  Next step: a
+  gate-kind closure filter to shrink `quantumRules` so maxIter can go to 4-6.
+* `Quantum/Invariants.lean` (spec §E) still to be written.
+* Shor quantum half and Toffoli still to be built.

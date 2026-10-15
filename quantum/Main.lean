@@ -98,11 +98,11 @@ def only (sel key : String) : Bool := sel.isEmpty || sel == key
 
 /-- A configuration for the rotation examples: instantiating the angle rules enlarges the
 search space, so the derivation search is bounded more tightly. -/
-def rotationConfig : Config := { Config.default with maxSteps := 5, searchBudget := 800 }
+def rotationConfig : Config := { Config.default with searchBudget := 800 }
 
 /-- The configuration used by the live demonstration: a small derivation budget keeps the
 command-line run fast.  The deeper certificates are the ones in Quantum/Examples.lean. -/
-def fastConfig : Config := { Config.default with maxSteps := 4, searchBudget := 400 }
+def fastConfig : Config := { Config.default with searchBudget := 400 }
 
 /-- Show a certificate that is already in the library, together with the independent checker's
 verdict and the theorem that turns the verdict into semantic equivalence.  This part of the
@@ -175,11 +175,13 @@ def main (args : List String) : IO Unit := do
   if only sel "D" then
     demoWith fastConfig "Example D: X(0) ; Z(1)  <->  Z(1) ; X(0) (cost-neutral commutation)"
       (sg [Gate.x j0, Gate.z j1] : Circuit 2)
-  if sel == "E" then
-    demoWith fastConfig "Example E: T T T T S S  ->  identity (multi-step)"
+  if only sel "E" then
+    demoWith fastConfig
+      "Example E: T T T T S S  ->  Z ; Z  (multi-step: tt, ss, re-bracketing; T-count 4 -> 0)"
       (sg [Gate.t i0, Gate.t i0, Gate.t i0, Gate.t i0, Gate.s i0, Gate.s i0] : Circuit 1)
-  if sel == "F" then
-    demoWith fastConfig "Example F/G: X Z X Z  ->  identity (needs a cost-neutral step)"
+  if only sel "F" then
+    demoWith fastConfig
+      "Example F: X Z X Z  ->  X ; X  (engine; the cost-neutral step is the XZ <-> ZX commutation)"
       (sg [Gate.x i0, Gate.z i0, Gate.x i0, Gate.z i0] : Circuit 1)
   if only sel "H" then
     demoWith fastConfig "Example H: T T T T  ->  Z (T-count 4 -> 0)"

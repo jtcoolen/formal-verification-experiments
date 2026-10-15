@@ -61,14 +61,14 @@ theorem optimizeFrom_none {n : Nat} (cfg : Config) (c : Circuit n)
 
 theorem optimizeFrom_found {n : Nat} (cfg : Config) (c x : Circuit n) (y : Certificate n)
     (h : (extractAuto (saturatedGraph cfg c) (rootOf cfg c) : Option (Circuit n)) = some x)
-    (h2 : findDerivation cfg.maxSteps x cfg.searchBudget [(c, [])] [] = some y) :
+    (h2 : findDerivationCost cfg c x = some y) :
     optimizeFrom cfg c = some (finish c x y) := by
   classical
   simp only [optimizeFrom, h, h2]
 
 theorem optimizeFrom_notFound {n : Nat} (cfg : Config) (c x : Circuit n)
     (h : (extractAuto (saturatedGraph cfg c) (rootOf cfg c) : Option (Circuit n)) = some x)
-    (h2 : findDerivation cfg.maxSteps x cfg.searchBudget [(c, [])] [] = none) :
+    (h2 : findDerivationCost cfg c x = none) :
     optimizeFrom cfg c = some (finish c c []) := by
   classical
   simp only [optimizeFrom, h, h2]
@@ -85,7 +85,7 @@ theorem optimizeFrom_spec {n : Nat} (cfg : Config) (c : Circuit n)
     have hp : p = finish c c [] := (Option.some.inj h).symm
     rw [hp]
     exact finish_spec c c []
-  · rcases h2 : findDerivation cfg.maxSteps x cfg.searchBudget [(c, [])] [] with _ | y
+  · rcases h2 : findDerivationCost cfg c x with _ | y
     · rw [optimizeFrom_notFound cfg c x h1 h2] at h
       have hp : p = finish c c [] := (Option.some.inj h).symm
       rw [hp]
@@ -121,7 +121,7 @@ theorem optimize_isSome {n : Nat} (cfg : Config) (c : Circuit n) :
   rw [optimize_eq]
   rcases h1 : (extractAuto (saturatedGraph cfg c) (rootOf cfg c) : Option (Circuit n)) with _ | x
   · rw [optimizeFrom_none cfg c h1]; simp
-  · rcases h2 : findDerivation cfg.maxSteps x cfg.searchBudget [(c, [])] [] with _ | y
+  · rcases h2 : findDerivationCost cfg c x with _ | y
     · rw [optimizeFrom_notFound cfg c x h1 h2]; simp
     · rw [optimizeFrom_found cfg c x y h1 h2]; simp
 
