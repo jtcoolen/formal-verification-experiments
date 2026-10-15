@@ -149,3 +149,55 @@ Executable demo (`quantum/demo_output.txt` is the captured output of `lake exe q
 4. `shor/`: verified RSA and ECDLP (classical post-processing, QFT circuit semantics, oracle
    permutation semantics) with the optimizer applied to the generated circuits.
 5. Property-based / differential testing with an independent numerical reference evaluator.
+
+## Round 2 - ECDSA.Fail passes, architecture accounting, Shor classical core
+
+**Implemented**
+
+* Quantum/Architecture.lean (new): an explicit architecture specification (supported gate kinds
+  plus a per-kind Toffoli-equivalent cost), toffoliCount, usedQubits, qubitWidth (the peak live
+  width Q of arXiv:2609.09582 section 3.2), spacetimeScore = Q * T, and a Clifford-only
+  architecture that *refuses* a controlled rotation (clifford_refuses_crz).
+* Quantum/Specialize.lean (new): the paper's section 5.3.6 constant-propagation pass,
+  formalized as cblock / condBlocks / constProp, with denote_condBlocks (the specialization is
+  *exactly* the same unitary), cblock_phase (classical control preserves phase equivalence in
+  both branches - the deliberate contrast with ControlPhase.crz_twoPi_not_phase_one, where
+  quantum control does not), toffoli_constProp_le, and the worked ladder (ladder_static,
+  ladder_after, ladder_saves, ladder_exact, ladder_phase). The paper's section 5.3.7 dead-code
+  law (compute ; uncompute = I) was already implemented in round 1 as the rules uncompute /
+  uncompute2 and Example J.
+* Shor/Arith.lean (new): modExp with modExp_ModEq; the multiplicative order as the minimum of an
+  explicit finite set, with order_spec, order_pos, order_le_totient, order_min and order_dvd
+  (the order divides every annihilating exponent - the fact Shor's post-processing depends on);
+  ModEq_coprime_mul (Chinese-remainder combination).
+* Shor/RSA.lean (new): shor_factor (a square root of 1 that is not plus-or-minus 1 yields a
+  factor g with 1 < g < n), sqrt_one_of_even_order, and fully verified concrete instances:
+  order_2_15 = 4, factor_15 (15 = 3*5), order_2_21 = 6, factor_21 (21 = 3*7), rsa_key_33, and
+  rsa_roundtrip_33 (decrypt(encrypt m) = m for every one of the 33 messages).
+* Shor/ECDLP.lean (new): recovery and recovery_unique - from a measured lattice point (c, d)
+  with c + d*k = 0 and d invertible, k = -c * d^-1 - with the concrete instance r = 7,
+  (c, d) = (6, 3), k = 5 (measured_7, inv3_7, recovered_7), and order_3_7.
+* Main.lean: two new demonstration sections (lake exe quantum P for constant propagation,
+  lake exe quantum R for Shor).
+* Axioms.lean: extended to the new theorems.
+* KB/papers/ecdsa-fail.md: the paper's techniques tabulated against what is implemented here.
+
+**Compiled / Tested**
+
+* lake build -> Build completed successfully (4121 jobs), exit 0.
+* lake env lean Axioms.lean -> every principal theorem depends only on propext,
+  Classical.choice and Quot.sound; Shor.factor_15 depends on no axioms at all.
+* lake exe quantum P: static cost gates=4 Toffoli=2, specialized cost gates=3 Toffoli=1, same
+  unitary (theorem ladder_exact).
+* lake exe quantum R: order 2 mod 15 = 4, gcd(4-1,15) = 3 -> 15 = 3*5; order 2 mod 21 = 6,
+  gcd(8-1,21) = 7 -> 21 = 3*7; RSA-33 round trip over all messages; ECDLP recovery k = 5.
+
+**Remaining**
+
+* The quantum half of Shor: QFT circuit semantics (needs a controlled-phase cp gate), the
+  modular-multiplication / EC point-addition oracles as circuits, and running the verified
+  optimizer over them.
+* Toffoli (CCX/CCZ) primitives with an embed3 semantics so the Q x T accounting can use the
+  paper's own gate costs.
+* Live-search tuning: reconstruct derivations from e-graph provenance instead of searching.
+* Restate the OptiSat invariant chain for QOp/PhaseOp inside quantum/.

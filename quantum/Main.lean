@@ -13,6 +13,7 @@ Usage: lake exe quantum            (all examples)
        lake exe quantum A          (only the example whose key is A)
 -/
 import Quantum
+import Shor
 
 open Quantum Quantum.Opt
 
@@ -127,6 +128,33 @@ def libraryCerts : IO Unit := do
   showCert "Example J (Examples.checkJ): compute ; uncompute -> identity (exactly)"
     Examples.cJ Circuit.one Examples.certJ
 
+
+/-- Constant propagation on a classically-controlled ladder (arXiv:2609.09582 section 5.3.6). -/
+def demoSpecialize : IO Unit := do
+  let sg := staticGateCount (bits13.zip blocks13)
+  let st := staticToffoli Architecture.default (bits13.zip blocks13)
+  let ag := (Cost.of ladderSpec).gateCount
+  let ato := toffoliT ladderSpec
+  IO.println (String.replicate 78 '=')
+  IO.println "Pass: classical-control constant propagation (exact specialization)"
+  IO.println ("  guarded ladder   : " ++ showC ladder)
+  IO.println ("    static cost: gates=" ++ toString sg ++ "  Toffoli=" ++ toString st)
+  IO.println ("  after propagation: " ++ showC ladderSpec)
+  IO.println ("    specialized cost: gates=" ++ toString ag ++ "  Toffoli=" ++ toString ato)
+  IO.println "  both circuits denote the SAME unitary (theorem ladder_exact)"
+
+/-- Shor's algorithm: the classically verified post-processing. -/
+def demoShor : IO Unit := do
+  IO.println (String.replicate 78 '=')
+  IO.println "Shor: order-finding post-processing (theorems Shor.factor_15, Shor.factor_21)"
+  IO.println ("  order of 2 mod 15 = " ++ toString (Shor.order 2 15) ++ ";  y = 2^(order/2) = 4")
+  IO.println ("  gcd(y-1, 15) = " ++ toString (Nat.gcd (4 - 1) 15) ++ "  ->  15 = 3 * 5")
+  IO.println ("  order of 2 mod 21 = " ++ toString (Shor.order 2 21) ++ ";  y = 2^(order/2) = 8")
+  IO.println ("  gcd(y-1, 21) = " ++ toString (Nat.gcd (8 - 1) 21) ++ "  ->  21 = 3 * 7")
+  IO.println "  RSA n = 33 = 3*11, e = 3, d = 7:"
+  IO.println "    decrypt(encrypt m) = m for every one of the 33 messages (Shor.rsa_roundtrip_33)"
+  IO.println "  ECDLP recovery: r = 7, measured (c,d) = (6,3) gives k = 5 (Shor.ECDLP.recovered_7)"
+
 def main (args : List String) : IO Unit := do
   let sel := args.headD ""
   IO.println "Proof-producing quantum circuit optimizer (Lean 4 + Mathlib + OptiSat)"
@@ -166,6 +194,8 @@ def main (args : List String) : IO Unit := do
     demoWith rotationConfig
       "Bug regression 1: Rz(10^17) ; Rz(pi) ; Rz(-10^17)  =  Rz(pi), NOT identity"
       (sg [Gate.rz i0 big, Gate.rz i0 Angle.pi, Gate.rz i0 (-big)] : Circuit 1)
+  if only sel "P" then demoSpecialize
+  if only sel "R" then demoShor
   if only sel "N" then
     demoReject "Negative test: wrong final circuit"
       (sg [Gate.h i0, Gate.h i0] : Circuit 1) (sg [Gate.h i0] : Circuit 1)

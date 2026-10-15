@@ -1,6 +1,6 @@
 name = "quantum"
 version = "0.1.0"
-defaultTargets = ["quantum", "Quantum", "LambdaSat"]
+defaultTargets = ["quantum", "Quantum", "LambdaSat", "Shor"]
 
 [leanOptions]
 pp.unicode.fun = true
@@ -24,3 +24,8 @@ root = "Main"
 name = "LambdaSat"
 roots = ["LambdaSat"]
 globs = ["LambdaSat", "LambdaSat.+"]
+
+[[lean_lib]]
+name = "Shor"
+roots = ["Shor"]
+globs = ["Shor", "Shor.+", "Shor.**"]

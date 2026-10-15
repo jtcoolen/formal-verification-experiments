@@ -33,5 +33,7 @@ import Quantum.QuantumEGraph
 import Quantum.Optimizer
 import Quantum.ControlPhase
 import Quantum.Examples
+import Quantum.Architecture
+import Quantum.Specialize
 import Quantum.BugRegression
 import Quantum.Correctness
