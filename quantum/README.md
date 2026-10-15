@@ -79,6 +79,16 @@ Single step: `applyStep_iff`, `applyStep_sound`, `applyStep_flip`. Derivation: `
 
 ### F. Extraction,Fuel-bounded `extractF`/`extractAuto` following `bestNode` pointers set by `computeCostsF`,with `egCostFn` (1 per primitive gate, 0 for identity and composition). General guarantees:,`extractF_correct`, `extractAuto_correct`, `extractAuto_complete`. Quantum instance:,`extractableSound_qop`.,,The pipeline the optimizer runs *is* OptiSat's `optimizeF` (`Invariants.optimizeF_eq`, by,`rfl`), so the generic pipeline theorem applies verbatim: `Invariants.extraction_value` and,its hypothesis-free corollary `Invariants.extraction_value_initial` say that if the,pipeline extracts `c'` from `c`, then `c'` evaluates — in the phase quotient, where,equality *is* equality up to global phase — to the value of the root e-class of the,saturated graph. `initial_bestNodeInv` discharges the cost-table side condition.,,Membership and minimum cost within the represented language are OptiSat's,`extractAuto_complete`/`extractF_correct`; the *bounded* nature of that language (depth and,node budget of the fuel-bounded enumeration) is a documented limit, and no theorem claims a,minimum over all mathematically equivalent circuits.
 
+### G0. Saturation status (§8)
+
+`Opt.SaturationStatus` with `Opt.saturationStatus cfg c`: the loop is re-run round by round
+(`Opt.satRounds`) and the last two graphs compared, so `fixedPoint` means an additional round
+added neither e-classes nor e-nodes, and `budgetExhausted` means the bound - not the rewrite
+theory - stopped the search.  `Opt.Report` bundles saturation status, input, output,
+certificate, whether the independent checker accepted it, and whether the result is strictly
+cheaper; `Opt.report_sound` says a checked report implies `PhaseEquivalent`.  The
+command-line demo prints all three separately, and today reports `fixedPoint` for the small
+examples and `BUDGET EXHAUSTED` for E, F, H, I and the rotation cases.
 ### G. End-to-end
 **`Opt.optimize_sound`**: `optimize cfg c = some (c', cert) → checkCertificate c c' cert = true ∧ PhaseEquivalent c c'`. Also `Opt.optimize_isSome` (a result is always returned, and it is always checked — the fallback is the input circuit with the empty certificate) and `Opt.greedy_phaseEquivalent`.,,The body is `some (finish c (rounds cfg.rounds cfg c).1 (rounds cfg.rounds cfg c).2),(`optimizeFrom_eq`): `round` saturates, extracts and certifies; `rounds` repeats that,`cfg.rounds` times on the circuit the previous round produced and chains the certificates,with `++`. Because `walk` applies a certificate in list order, the concatenation is a,single derivation from the original input to the final output and a round boundary is not,a trust point — `optimizeFrom_spec` needs only `finish_spec`.
 

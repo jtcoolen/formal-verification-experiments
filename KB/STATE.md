@@ -108,6 +108,15 @@ cost-decreasing steps only) cannot move, the saturating engine reaches identity.
   certified step; S2 CP fusion; S3 the a=2,N=3 order-finding unitary squared → identity).
 * `Config` gained `rounds : Nat := 3`; `Diag.lean` gained S1/S2 probes and rule-name tracing.
 
+## Round 7 additions
+* `Opt.SaturationStatus` / `satRounds` / `saturationStatus` (§8 status), `Opt.Report`,
+  `report_spec`, `report_sound`.  NOTE: never implement the status by running an EXTRA
+  saturation round - the third round is the one that explodes.  Compare the last two of the
+  maxIter rounds instead (same cost as the optimization).
+* `demoWith` prints saturation status + strictly-cheaper verdict; README §G0 documents it.
+* Demo is 235 lines; `fixedPoint` for A/B/C1/C2/D/J/S1/S3, `BUDGET EXHAUSTED` for
+  E/F/H/I/K/S2 - honest reporting.
+
 ## Remaining priorities
 1. ~~Reach identity with the engine on E and F~~ DONE (iterated rounds + alphabet bound).
    Next: make a single round deeper (the third round still explodes; look at OptiSat's

@@ -77,6 +77,14 @@ def demoWith {n : Nat} (cfg : Config) (label : String) (c : Circuit n) : IO Unit
       IO.println s! "    {if ok then "ACCEPTS" else "REJECTS"}   (search took {t1 - t0} ms)"
       for s in cert do
         IO.println s! "    step {s.ruleId}{if s.backward then " (backward)" else ""}"
+      let st := saturationStatus cfg c
+      IO.println ("  saturation: " ++ match st with
+        | .fixedPoint =>
+            "fixed point (one more round adds no classes and no nodes)"
+        | .budgetExhausted =>
+            "BUDGET EXHAUSTED (the bound, not the rewrite theory, stopped the search)")
+      IO.println ("  strictly cheaper than input: " ++
+        if (Cost.of c').gateCount < ci.gateCount then "yes" else "no")
       let g := greedy 40 c
       IO.println ("  greedy baseline (only strictly cost-decreasing steps): " ++ showC g ++ "   [" ++ showCost (Cost.of g) ++ "]")
       if !ok then

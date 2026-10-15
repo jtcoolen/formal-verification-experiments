@@ -351,3 +351,26 @@ proptests: all metamorphic properties held.  Axiom audit: 49 theorems, standard 
 
 **Remaining** — QFT₃ entrywise = DFT₃; Toffoli CCX/CCZ for the ECDSA.Fail Q×T metric;
 modular-multiplication oracles for larger N (needs a reversible adder).
+
+## Round 7 — observable saturation status (§8) and the report structure
+
+**Implemented**
+* `Opt.SaturationStatus` (`fixedPoint` / `budgetExhausted`), `Opt.satRounds` (the graph after
+  each round) and `Opt.saturationStatus`.  The first version ran `maxIter + 1` rounds and
+  exploded (the third round is exactly the one that blows up), so it was rewritten to compare
+  the last two of `cfg.maxIter` rounds - same cost as the optimization itself.
+* `Opt.Report` (saturation status, input, output, certificate, checked, improved) +
+  `report_spec` + `report_sound`.
+* `demoWith` now prints the saturation status and whether the result is strictly cheaper.
+* README §G0 documents the status; Axioms.lean audits `report_sound`.
+
+**Verified** — `report_sound`: a report whose checker bit is true implies
+`PhaseEquivalent input output`.
+
+**Compiled** — `lake build` → 4451 jobs, exit 0.
+
+**Tested** — `lake exe quantum` 235 lines, exit 0.  Status now distinguishes honestly:
+`fixedPoint` for A/B/C1/C2/D/J/S1/S3 and `BUDGET EXHAUSTED` for E/F/H/I/K/S2.
+
+**Remaining** — Toffoli CCX/CCZ (needs `isUnitaryM_embedList` for 3-element supports);
+QFT₃ = DFT₃ entrywise; modular-multiplication oracles for larger N.

@@ -57,3 +57,4 @@ import Shor
 #print axioms Shor.ModMul.unitary_order_eq_order
 #print axioms Shor.ModMul.denote_swap_pow_order
 #print axioms Shor.ModMul.permMat_mul
+#print axioms Quantum.Opt.report_sound

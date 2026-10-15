@@ -727,5 +727,84 @@ def optimize (cfg : Config) (c : Circuit n) : Option (Circuit n × Certificate n
 
 theorem optimize_eq (cfg : Config) (c : Circuit n) : optimize cfg c = optimizeFrom cfg c := rfl
 
+
+/-! ### Observable saturation status -/
+
+/-- Whether the bounded saturation loop had reached a fixed point.
+
+This is an *observation*, not a claim of completeness: `fixedPoint` means that running one
+additional saturation round changed neither the number of e-classes nor the number of
+e-nodes of the graph.  The specification asks that a genuine fixed point be distinguished
+from budget exhaustion, and that neither be reported as saturation of the whole rewrite
+theory. -/
+inductive SaturationStatus
+  /-- one more round added no classes and no nodes -/
+  | fixedPoint
+  /-- one more round would still have grown the graph: the bound, not the theory, stopped it -/
+  | budgetExhausted
+deriving Repr, DecidableEq, BEq
+
+/-- The graphs after 0, 1, ..., k saturation rounds.  Each round is exactly one
+`saturateF fuel 1 rebuildFuel` step, so the total work is the same as a single
+`saturateF fuel k rebuildFuel` run. -/
+def satRounds {n : Nat} (cfg : Config) (rs : List (RewriteRule (QOp n))) :
+    (k : Nat) -> EGraph (QOp n) -> List (EGraph (QOp n))
+  | 0, g => [g]
+  | k + 1, g => g :: satRounds cfg rs k
+      (saturateF cfg.fuel 1 cfg.rebuildFuel g rs)
+
+/-- The optimizer's budget is what stops the search, not a fixed point, unless the last round
+changed nothing.  Note this costs no more than the optimization itself: it runs exactly
+`cfg.maxIter` rounds and compares consecutive graphs. -/
+def saturationStatus {n : Nat} (cfg : Config) (c : Circuit n) : SaturationStatus :=
+  let (_root, g0) := ofCircuit c
+  let rs := (quantumRules c).map fun psr => psr.rule
+  match satRounds cfg rs cfg.maxIter g0 with
+  | [_, gPrev, gLast] =>
+      if gLast.numClasses == gPrev.numClasses && gLast.numNodes == gPrev.numNodes then
+        SaturationStatus.fixedPoint else SaturationStatus.budgetExhausted
+  | _ => SaturationStatus.budgetExhausted
+
+/-- Everything the specification asks to report about one optimization attempt, kept
+separate so that no field can be quietly conflated with another: the saturation status,
+the two circuits, their costs, the certificate, whether the *independent* checker accepted
+it, and whether the result is actually cheaper than the input. -/
+structure Report (n : Nat) where
+  saturation : SaturationStatus
+  input : Circuit n
+  output : Circuit n
+  certificate : Certificate n
+  checked : Bool
+  improved : Bool
+
+/-- Run the pipeline and describe the outcome. -/
+def report {n : Nat} (cfg : Config) (c : Circuit n) : Report n :=
+  let (c', cert) := (optimize cfg c).getD (c, [])
+  { saturation := saturationStatus cfg c,
+    input := c, output := c', certificate := cert,
+    checked := decide (checkCertificate c c' cert),
+    improved := decide ((Cost.of c').gateCount < (Cost.of c).gateCount) }
+
+/-- The report fields are the optimizer's own fields: nothing is re-derived and nothing is
+added. -/
+theorem report_spec {n : Nat} (cfg : Config) (c c' : Circuit n) (cert : Certificate n)
+    (h : optimize cfg c = some (c', cert)) :
+    (report cfg c).input = c ∧ (report cfg c).output = c' ∧
+      (report cfg c).checked = decide (checkCertificate c c' cert) ∧
+      (report cfg c).improved = decide ((Cost.of c').gateCount < (Cost.of c).gateCount) := by
+  classical
+  simp [report, h]
+
+/-- **A checked report really certifies equivalence.**  The report is a re-packaging of
+`optimize`, so the end-to-end theorem applies to it unchanged. -/
+theorem report_sound {n : Nat} (cfg : Config) (c c' : Circuit n) (cert : Certificate n)
+    (h : optimize cfg c = some (c', cert))
+    (hc : (report cfg c).checked = true) :
+    PhaseEquivalent (report cfg c).input (report cfg c).output := by
+  classical
+  obtain ⟨e1, e2, e3, _⟩ := report_spec cfg c c' cert h
+  rw [e1, e2]
+  exact checkCertificate_sound c c' cert (of_decide_eq_true (e3 ▸ hc))
+
 end Opt
 end Quantum

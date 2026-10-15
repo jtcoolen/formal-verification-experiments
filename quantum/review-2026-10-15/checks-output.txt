@@ -1,0 +1,6 @@
+warning: mathlib: repository '/Users/julian/Downloads/formally_verified/quantum/.lake/packages/mathlib' has local changes
+warning: proofwidgets: repository '/Users/julian/Downloads/formally_verified/quantum/.lake/packages/proofwidgets' has local changes
+valid nested HH checker step: true
+enumerator reaches expected nested HH result: false
+Clifford target accepts Rz(pi/4): true
+zero matching fuel reports fixedPoint on HH: true

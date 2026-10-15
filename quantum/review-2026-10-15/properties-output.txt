@@ -1,0 +1,12 @@
+warning: mathlib: repository '/Users/julian/Downloads/formally_verified/quantum/.lake/packages/mathlib' has local changes
+warning: proofwidgets: repository '/Users/julian/Downloads/formally_verified/quantum/.lake/packages/proofwidgets' has local changes
+Property / metamorphic test summary (12 generated 2-qubit circuits):
+  runs                          = 12
+  circuits whose steps all check out = 12
+  total accepted one-step rewrites = 39
+  UNACCEPTED certificates       = 0   (must be 0)
+  reflexive certificates accepted = 12   (must equal runs)
+  zero-budget failures          = 0   (must be 0)
+  mutated certificates rejected = 12
+  mutated certificates WRONGLY accepted = 0  (must be 0)
+RESULT: all metamorphic properties held on the generated population.
