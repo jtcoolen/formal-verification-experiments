@@ -47,6 +47,8 @@ def showG {n : Nat} : Gate n -> String
   | Gate.cx i j _ => "CX(" ++ toString i.val ++ "," ++ toString j.val ++ ")"
   | Gate.cz i j _ => "CZ(" ++ toString i.val ++ "," ++ toString j.val ++ ")"
   | Gate.swap i j _ => "SWAP(" ++ toString i.val ++ "," ++ toString j.val ++ ")"
+  | Gate.cp i j _ a =>
+      "CP(" ++ toString i.val ++ "," ++ toString j.val ++ "," ++ toString a.piQ ++ "pi)"
   | Gate.crz i j _ a =>
       "CRz(" ++ toString i.val ++ "," ++ toString j.val ++ "," ++ toString a.piQ ++ "pi)"
 

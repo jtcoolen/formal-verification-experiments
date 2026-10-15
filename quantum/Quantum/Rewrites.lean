@@ -323,6 +323,20 @@ theorem rw_swapswap {i j : Fin n} (h : i ≠ j) :
   show embed2 SWAP4 i j * embed2 SWAP4 i j = 1
   rw [embed2_mul (hij := h), SWAP4_mul_SWAP4, embed2_one h]
 
+theorem rw_cp_add {i j : Fin n} (h : i ≠ j) (s t : Angle) :
+    PhaseEquivalent (Circuit.seq (Circuit.gate (Gate.cp i j h s))
+      (Circuit.gate (Gate.cp i j h t))) (Circuit.gate (Gate.cp i j h (s + t))) := by
+  refine phase_of_eq ?_
+  show embed2 (CP4 (Angle.val t)) i j * embed2 (CP4 (Angle.val s)) i j
+      = embed2 (CP4 (Angle.val (s + t))) i j
+  rw [embed2_mul (hij := h), CP4_mul, Angle.val_add, add_comm]
+
+theorem rw_cp_zero {i j : Fin n} (h : i ≠ j) :
+    PhaseEquivalent (Circuit.gate (Gate.cp i j h 0)) Circuit.one := by
+  refine phase_of_eq ?_
+  show embed2 (CP4 (Angle.val 0)) i j = 1
+  rw [Angle.val_zero, CP4_zero, embed2_one h]
+
 theorem rw_crz_zero {i j : Fin n} (h : i ≠ j) :
     PhaseEquivalent (Circuit.gate (Gate.crz i j h 0)) Circuit.one := by
   refine phase_of_eq ?_
@@ -362,6 +376,7 @@ noncomputable def Gate.mat2 : Gate n -> Matrix (Bool × Bool) (Bool × Bool) ℂ
   | Gate.cz _ _ _ => CZ4
   | Gate.swap _ _ _ => SWAP4
   | Gate.crz _ _ _ a => CRz4 (Angle.val a)
+  | Gate.cp _ _ _ a => CP4 (Angle.val a)
   | _ => 1
 
 theorem denoteGate_embed1 {g : Gate n} {i : Fin n} (h : g.index1? = some i) :
@@ -402,6 +417,7 @@ theorem Gate.ne_of_index2? {g : Gate n} {i j : Fin n} (h : g.index2? = some (i, 
   | cz a b hab => exact key a b (by simpa [Gate.index2?] using h) hab
   | swap a b hab => exact key a b (by simpa [Gate.index2?] using h) hab
   | crz a b hab _ => exact key a b (by simpa [Gate.index2?] using h) hab
+  | cp a b hab _ => exact key a b (by simpa [Gate.index2?] using h) hab
 
 /-- Every gate is either single-qubit or two-qubit. -/
 theorem Gate.arity (g : Gate n) :
@@ -418,6 +434,7 @@ theorem Gate.arity (g : Gate n) :
   · left; exact ⟨_, rfl⟩
   · left; exact ⟨_, rfl⟩
   · left; exact ⟨_, rfl⟩
+  · right; exact ⟨_, _, rfl⟩
   · right; exact ⟨_, _, rfl⟩
   · right; exact ⟨_, _, rfl⟩
   · right; exact ⟨_, _, rfl⟩
@@ -570,6 +587,12 @@ def ruleCrzZero (n : Nat) : Rule n :=
     (fun p => Circuit.gate (Gate.crz p.val.1 p.val.2 p.property 0)) (fun _ => Circuit.one)
     (fun p => rw_crz_zero (h := p.property))
 
+/-- A controlled phase by the zero angle disappears. -/
+def ruleCpZero (n : Nat) : Rule n :=
+  mkRule (n := n) "cp_zero" twoQne
+    (fun p => Circuit.gate (Gate.cp p.val.1 p.val.2 p.property 0)) (fun _ => Circuit.one)
+    (fun p => rw_cp_zero (h := p.property))
+
 /-- Adding two controlled-rotation angles. -/
 def ruleAddRot2 (f : (a b : Fin n) -> a ≠ b -> Angle -> Gate n) (name : String)
     (h : ∀ {i j : Fin n} (hij : i ≠ j) (s t : Angle),
@@ -669,6 +692,8 @@ def rules (n : Nat) : List (Rule n) :=
     ruleSelfInv2 Gate.swap "swapswap" rw_swapswap,
     ruleAddRot2 (fun i j h => Gate.crz i j h) "crz_add" rw_crz_add,
     ruleCrzZero n,
+    ruleAddRot2 (fun i j h => Gate.cp i j h) "cp_add" rw_cp_add,
+    ruleCpZero n,
     mkRule (n := n) "rz_pi_z" oneQ (fun i => gc (fun k => Gate.rz k Angle.pi) i)
       (fun i => gc Gate.z i) (fun i => rw_rz_pi_z i),
     mkRule (n := n) "rz_halfPi_s" oneQ

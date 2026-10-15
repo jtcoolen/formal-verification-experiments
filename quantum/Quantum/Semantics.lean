@@ -31,6 +31,7 @@ noncomputable def denoteGate {n : Nat} : Gate n -> Operator n
   | Gate.cz i j _ => embed2 CZ4 i j
   | Gate.swap i j _ => embed2 SWAP4 i j
   | Gate.crz i j _ a => embed2 (CRz4 (Angle.val a)) i j
+  | Gate.cp i j _ a => embed2 (CP4 (Angle.val a)) i j
 
 /-- The operator denoted by a circuit. -/
 noncomputable def denote {n : Nat} : Circuit n -> Operator n
@@ -61,6 +62,9 @@ noncomputable def denote {n : Nat} : Circuit n -> Operator n
 @[simp] theorem denoteGate_crz {n : Nat} (i j : Fin n) (h : i ≠ j) (a : Angle) :
     denoteGate (Gate.crz i j h a) = embed2 (CRz4 (Angle.val a)) i j := rfl
 
+@[simp] theorem denoteGate_cp {n : Nat} (i j : Fin n) (h : i ≠ j) (a : Angle) :
+    denoteGate (Gate.cp i j h a) = embed2 (CP4 (Angle.val a)) i j := rfl
+
 theorem denote_one {n : Nat} : denote (Circuit.one : Circuit n) = 1 := rfl
 
 theorem denote_seq {n : Nat} (a b : Circuit n) :
@@ -87,6 +91,7 @@ theorem denoteGate_isUnitary {n : Nat} (g : Gate n) : IsUnitaryM (denoteGate g) 
   | cz i j h => exact isUnitaryM_embed2 CZ4 isUnitary_CZ4 h
   | swap i j h => exact isUnitaryM_embed2 SWAP4 isUnitary_SWAP4 h
   | crz i j h a => exact isUnitaryM_embed2 (CRz4 (Angle.val a)) (isUnitary_CRz4 _) h
+  | cp i j h a => exact isUnitaryM_embed2 (CP4 (Angle.val a)) (isUnitary_CP4 _) h
 
 /-- Every circuit denotes a unitary operator. -/
 theorem denote_isUnitary {n : Nat} (c : Circuit n) : IsUnitaryM (denote c) := by
@@ -207,6 +212,9 @@ theorem denoteGate_inv_mul {n : Nat} (g : Gate n) :
   | crz i j hij a =>
     show embed2 (CRz4 (Angle.val (-a))) i j * embed2 (CRz4 (Angle.val a)) i j = 1
     rw [embed2_mul (hij := hij), CRz4_mul, val_neg_add_self, CRz4_zero, embed2_one hij]
+  | cp i j hij a =>
+    show embed2 (CP4 (Angle.val (-a))) i j * embed2 (CP4 (Angle.val a)) i j = 1
+    rw [embed2_mul (hij := hij), CP4_mul, val_neg_add_self, CP4_zero, embed2_one hij]
 
 /-- A primitive gate preceded by its inverse denotes the identity. -/
 theorem denoteGate_mul_inv {n : Nat} (g : Gate n) :
@@ -257,6 +265,9 @@ theorem denoteGate_mul_inv {n : Nat} (g : Gate n) :
   | crz i j hij a =>
     show embed2 (CRz4 (Angle.val a)) i j * embed2 (CRz4 (Angle.val (-a))) i j = 1
     rw [embed2_mul (hij := hij), CRz4_mul, val_add_neg_self, CRz4_zero, embed2_one hij]
+  | cp i j hij a =>
+    show embed2 (CP4 (Angle.val a)) i j * embed2 (CP4 (Angle.val (-a))) i j = 1
+    rw [embed2_mul (hij := hij), CP4_mul, val_add_neg_self, CP4_zero, embed2_one hij]
 
 /-- The inverse circuit really is a two-sided inverse of the denotation.  This is the
 "uncomputation" law: a computation followed by its uncomputation is the identity, and it is

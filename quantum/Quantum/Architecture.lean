@@ -52,6 +52,7 @@ def default : Architecture where
     | GateKind.cz => 1
     | GateKind.swap => 1
     | GateKind.crz => 1
+    | GateKind.cp => 1
     | _ => 0
   supported := fun _ => true
 
@@ -67,6 +68,7 @@ def clifford : Architecture where
   supported := fun k =>
     match k with
     | GateKind.crz => false
+    | GateKind.cp => false
     | GateKind.t => false
     | GateKind.tDag => false
     | _ => true

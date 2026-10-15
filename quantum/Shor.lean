@@ -16,3 +16,4 @@ so any optimization applied to it is certified in exactly the same sense.
 import Shor.Arith
 import Shor.RSA
 import Shor.ECDLP
+import Shor.QFT

@@ -262,4 +262,61 @@ theorem Rz2_pi_phase_not : ¬ (Rz2 Real.pi = (-Complex.I) • S2) := by
   rw [h1, h2] at h3
   exact absurd h3 (by intro hh; exact absurd (congrArg Complex.re hh) (by norm_num))
 
+
+/-! ### Controlled phase
+
+CP(theta) is the diagonal two-qubit gate diag(1, 1, 1, e^{i theta}) with the control in the
+first component and the target in the second.  It is the gate the quantum Fourier transform is
+built from: a controlled S is CP(pi/2) and a controlled T is CP(pi/4), both exactly.  CP is a
+primitive of this language precisely because a controlled version of an arbitrary circuit is not
+(see Quantum/ControlPhase.lean). -/
+
+/-- Controlled phase: diag(1, 1, 1, exp(i theta)). -/
+noncomputable def CP4 (t : ℝ) : Matrix (Bool × Bool) (Bool × Bool) ℂ :=
+  fun x y => if x = y then if x.1 && x.2 then Complex.exp (Complex.I * (t : ℂ)) else 1 else 0
+
+/-- Two pure phases add. -/
+lemma expI_add (s t : ℝ) :
+    Complex.exp (Complex.I * (s : ℂ)) * Complex.exp (Complex.I * (t : ℂ)) =
+      Complex.exp (Complex.I * ((s + t) : ℂ)) := by
+  rw [← Complex.exp_add]
+  congr 1
+  ring
+
+/-- Conjugating a pure phase negates the angle. -/
+lemma expI_star (t : ℝ) :
+    star (Complex.exp (Complex.I * (t : ℂ))) = Complex.exp (Complex.I * (-t : ℂ)) := by
+  show (starRingEnd ℂ) (Complex.exp (Complex.I * (t : ℂ))) = _
+  rw [← Complex.exp_conj]
+  congr 1
+  simp [Complex.conj_I, Complex.conj_ofReal, neg_mul]
+
+/-- Controlled phases add: CP(s) * CP(t) = CP(s + t). -/
+theorem CP4_mul (s t : ℝ) : CP4 s * CP4 t = CP4 (s + t) := by
+  classical
+  ext i j
+  fin_cases i <;> fin_cases j <;>
+    simp [mul4_apply, CP4, expI_add, Matrix.one_apply, Pi.one_apply]
+
+/-- CP(0) is the identity. -/
+theorem CP4_zero : CP4 0 = 1 := by
+  classical
+  ext i j
+  fin_cases i <;> fin_cases j <;> simp [CP4, Matrix.one_apply]
+
+/-- The adjoint of CP(t) is CP(-t). -/
+theorem CP4_conjTranspose (t : ℝ) : (CP4 t).conjTranspose = CP4 (-t) := by
+  classical
+  ext i j
+  fin_cases i <;> fin_cases j <;>
+    simp [CP4, Matrix.conjTranspose_apply, Prod.swap, expI_star]
+
+/-- Controlled phases are unitary. -/
+theorem isUnitary_CP4 (t : ℝ) : IsUnitaryM (CP4 t) := by
+  have h1 : CP4 t * CP4 (-t) = 1 := by
+    rw [CP4_mul, show ((t : ℝ) + -t = 0) by ring, CP4_zero]
+  have h2 : CP4 (-t) * CP4 t = 1 := by
+    rw [CP4_mul, show ((-t : ℝ) + t = 0) by ring, CP4_zero]
+  exact ⟨by rw [CP4_conjTranspose]; exact h1, by rw [CP4_conjTranspose]; exact h2⟩
+
 end Quantum

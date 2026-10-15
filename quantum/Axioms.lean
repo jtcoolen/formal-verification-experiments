@@ -33,3 +33,8 @@ import Shor
 #print axioms Shor.factor_15
 #print axioms Shor.rsa_roundtrip_33
 #print axioms Shor.ECDLP.recovery
+#print axioms Shor.QFT.qft2_unitary
+#print axioms Shor.QFT.qft2_inverse_exact
+#print axioms Shor.QFT.cp_zero_phase
+#print axioms Shor.QFT.two_cphases
+#print axioms Quantum.denoteGate_isUnitary

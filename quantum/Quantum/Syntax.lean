@@ -29,11 +29,12 @@ inductive Gate (n : Nat) : Type where
   | cz : (c : Fin n) -> (t : Fin n) -> c ≠ t -> Gate n
   | swap : (a : Fin n) -> (b : Fin n) -> a ≠ b -> Gate n
   | crz : (c : Fin n) -> (t : Fin n) -> c ≠ t -> Angle -> Gate n
+  | cp : (c : Fin n) -> (t : Fin n) -> c ≠ t -> Angle -> Gate n
 deriving DecidableEq, Repr
 
 /-- The sort of a gate, used by the architecture specification and by the cost model. -/
 inductive GateKind : Type where
-  | h | x | y | z | s | t | sDag | tDag | rz | rx | ry | cx | cz | swap | crz
+  | h | x | y | z | s | t | sDag | tDag | rz | rx | ry | cx | cz | swap | crz | cp
 deriving DecidableEq
 
 /-! ### Circuits -/
@@ -51,6 +52,7 @@ def qubits : Gate n -> List (Fin n)
   | cx i j _ | cz i j _ | swap i j _ => [i, j]
   | rz i _ | rx i _ | ry i _ => [i]
   | crz i j _ _ => [i, j]
+  | cp i j _ _ => [i, j]
 
 def kind : Gate n -> GateKind
   | h _ => GateKind.h
@@ -68,6 +70,7 @@ def kind : Gate n -> GateKind
   | cz _ _ _ => GateKind.cz
   | swap _ _ _ => GateKind.swap
   | crz _ _ _ _ => GateKind.crz
+  | cp _ _ _ _ => GateKind.cp
 
 /-- The index of a single-qubit gate, if it is one. -/
 def index1? : Gate n -> Option (Fin n)
@@ -79,6 +82,7 @@ def index1? : Gate n -> Option (Fin n)
 def index2? : Gate n -> Option (Fin n × Fin n)
   | cx i j _ | cz i j _ | swap i j _ => some (i, j)
   | crz i j _ _ => some (i, j)
+  | cp i j _ _ => some (i, j)
   | _ => none
 
 def isOneQubit (g : Gate n) : Bool := g.index1?.isSome
@@ -110,6 +114,7 @@ def Gate.inv : Gate n -> Gate n
   | cz i j hij => cz i j hij
   | swap i j hij => swap i j hij
   | crz i j hij a => crz i j hij (-a)
+  | cp i j hij a => cp i j hij (-a)
 
 theorem Gate.inv_inv (g : Gate n) : Gate.inv (Gate.inv g) = g := by
   cases g <;> simp [Gate.inv, Angle.neg_neg]
