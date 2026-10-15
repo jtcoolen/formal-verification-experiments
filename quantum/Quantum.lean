@@ -14,6 +14,7 @@ A formally verified, proof-producing quantum circuit optimizer.
 * Quantum/Cost.lean         gate count / two-qubit count / T count, lexicographic policy
 * Quantum/QuantumEGraph.lean OptiSat adapter: e-nodes, phase quotient, extraction instance
 * Quantum/Optimizer.lean    bounded equality saturation + certificate synthesis
+* Quantum/Invariants.lean   the e-graph invariants instantiated at QOp n / PhaseOp n
 * Quantum/ControlPhase.lean why global phase must not be moved under a control
 * Quantum/Examples.lean     the machine-checked examples A-J
 * Quantum/BugRegression.lean adversarial regression tests (must all be rejected)
@@ -31,6 +32,7 @@ import Quantum.Certificates
 import Quantum.Cost
 import Quantum.QuantumEGraph
 import Quantum.Optimizer
+import Quantum.Invariants
 import Quantum.ControlPhase
 import Quantum.Examples
 import Quantum.Architecture

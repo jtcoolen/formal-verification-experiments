@@ -38,3 +38,16 @@ import Shor
 #print axioms Shor.QFT.cp_zero_phase
 #print axioms Shor.QFT.two_cphases
 #print axioms Quantum.denoteGate_isUnitary
+#print axioms Quantum.Invariants.ofCircuit_uf_wf
+#print axioms Quantum.Invariants.empty_quadruple
+#print axioms Quantum.Invariants.insert_preserves
+#print axioms Quantum.Invariants.merge_preserves
+#print axioms Quantum.Invariants.congruence_preserves
+#print axioms Quantum.Invariants.rebuild_preserves
+#print axioms Quantum.Invariants.saturation_preserves
+#print axioms Quantum.Invariants.extraction_value
+#print axioms Quantum.Invariants.addCircuit_quadruple
+#print axioms Quantum.Invariants.initial_quadruple
+#print axioms Quantum.Invariants.initial_bestNodeInv
+#print axioms Quantum.Invariants.extraction_value_initial
+#print axioms Quantum.Invariants.saturation_preserves_initial
