@@ -49,7 +49,8 @@ afterwards linking takes seconds.
 | `Quantum/Certificates.lean` | **the independent checker**: `Step`, `Certificate`, `stepTerms`, `applyStep`, `walk`, `checkCertificate`; `applyStep_sound`, `walk_some`, **`checkCertificate_sound`**; reflection helpers `step_of`, `step_none`, `walk_cons_ok`, `checkCertificate_of_walk`, `checkCertificate_none`. |
 | `Quantum/Cost.lean` | `Cost` = (gateCount, twoQubitCount, tCount); `Cost.ofGate/of/ofGates`; `ofGates_append`, `of_gates`; lexicographic policy `CostConfig`, `Cost.le/lt`. |
 | `Quantum/QuantumEGraph.lean` | OptiSat adapter: `QOp n` e-nodes, the phase quotient `PhaseOp n` with `pquot_op_mul_assoc`, `pquot_op_mul_one`, `pquot_op_one_mul`; the `NodeSemantics`, `Extractable`, `EvalExpr` instances; `extractableSound_qop`; `ofCircuit`. |
-| `Quantum/Optimizer.lean` | schematic + instantiated rules (`quantumRules`, `structAssoc`, `structIdL`, `structIdR`, `toPatternSoundRuleFlip`), bounded saturation (`saturateF` → `computeCostsF` → `extractAuto`), certificate synthesis (`oneStepRewrites`, `oneStepRewrites_apply`, `oneStepRewrites_sound`, `findDerivation`), the greedy baseline (`greedy`, `greedy_phaseEquivalent`), `Config`, `finish`, `optimizeFrom`, `optimize`. |
+| `Quantum/Optimizer.lean` | schematic + instantiated rules (`quantumRules`, `structAssoc`, `structIdL`, `structIdR`, `toPatternSoundRuleFlip`), bounded saturation with two documented search-space bounds — the **contracting bound** (an orientation is kept only if it does not increase the gate count) and the **alphabet bound** `kindClosure` (a rule instance is kept only if its source side's gate kinds lie in the closure of the input's kinds) — then `saturateF` → `computeCostsF` → `extractAuto`; certificate synthesis (`oneStepRewrites`, `oneStepRewrites_apply`, `oneStepRewrites_sound`, `findDerivation`, `costSearch`, `findDerivationBidir`, `findDerivationCost`), the greedy baseline (`greedy`, `greedy_phaseEquivalent`), `Config`, `finish`, `round`, `rounds`, `optimizeFrom`, `optimize`. |
+| `Quantum/Invariants.lean` | **the e-graph invariant chain instantiated at `QOp n`/`PhaseOp n`**: `Quadruple`, `addCircuit_uf_wf`, `ofCircuit_uf_wf`, `empty_quadruple`, `insert_preserves`, `merge_preserves`, `congruence_preserves`, `rebuild_preserves`, `saturation_preserves`, `addCircuit_quadruple`, `initial_quadruple`, `initial_bestNodeInv`, `optimizeF_eq`, `extraction_value`, `extraction_value_initial`, `saturation_preserves_initial`. |
 | `Quantum/Correctness.lean` | `finish_spec`, `optimizeFrom_spec`, **`optimize_sound`**, `optimize_isSome`. |
 | `Quantum/ControlPhase.lean` | why global phase may not be moved under a control: `rz_twoPi_phase_one`, `rz_twoPi_ne_one`, `crz_twoPi_not_phase_one`, `cz_cz_eq_one`. |
 | `Shor/QFT.lean` | the quantum Fourier transform as a circuit in the verified language: `qft2` (Hadamards + controlled phases + reversal), `iqft2 = Circuit.inv qft2`, `qft2_unitary`, `qft2_inverse_exact` (exact, not merely up to phase), `cp_zero_certified` (accepted by the independent checker), `two_cphases` (CP(pi/2);CP(pi/2) = CP(pi), via exact rational arithmetic). | |
@@ -74,14 +75,12 @@ Each rule is a `Rule n` whose `sound` field proves `∀ args, side args = true �
 ### D. Certificates
 Single step: `applyStep_iff`, `applyStep_sound`, `applyStep_flip`. Derivation: `walk_nil`, `walk_cons`, `walk_some`. Checker: **`checkCertificate_sound`**. The checker imports only `Quantum.Rewrites` — never the e-graph, the optimizer, or extraction.
 
-### E. E-graph
-OptiSat supplies the invariant quadruple (`ConsistentValuation`, `PostMergeInvariant`, `SemanticHashconsInv`, `HashconsChildrenBounded`), the `saturateF`/`rebuildF`/`computeCostsF` preservation chain and `ematchF`/`instantiateF` soundness, all sorry-free. The quantum-domain extraction law is `extractableSound_qop`; the circuit↔e-class bridge is `eval_patOf` + `pquot_phase`. **Open:** restating the saturation/extraction invariants for `QOp`/`PhaseOp` inside `quantum/`; the semantic guarantee currently rests on the external certificate route.
+### E. E-graph,Restated for this domain in `Quantum/Invariants.lean`; each is the corresponding generic,OptiSat theorem applied to `QOp n` / `PhaseOp n` with the instances of,`Quantum/QuantumEGraph.lean`.,,* *Initial well-formedness*: `ofCircuit_uf_wf` (by induction over the circuit through,  `add_preserves_uf_wf`), `empty_quadruple`.,* *Node insertion preservation*: `insert_preserves` — adding an e-node preserves the whole,  bundle, extends the valuation pointwise on the classes that already existed, and the new,  class evaluates to the meaning of the node inserted.,* *Merge preservation* (class union and rule-based merge): `merge_preserves`.,* *Congruence closure correctness*: `congruence_preserves` (`processClass` is the congruence,  step; it preserves `ConsistentValuation` and `PostMergeInvariant`).,* *Rebuilding preservation*: `rebuild_preserves` (`rebuildF`, deferred congruence, run to a,  fuel bound, preserves the bundle with the same valuation).,* *Saturation preservation*: `saturation_preserves`, and `saturation_preserves_initial` for,  the graph the optimizer actually builds.,* *Semantic consistency of each class*: `addCircuit_quadruple` / `initial_quadruple` — the,  e-graph built from `c` carries a valuation whose value at the class of `c` is exactly,  `pquot (denote c)`.,,The circuit↔e-class bridge is `eval_patOf` + `pquot_phase`; the quantum-domain extraction,law is `extractableSound_qop`. Note that none of this is *trusted* by the end-to-end,theorem: `optimize_sound` runs on the external certificate checker alone.
 
-### F. Extraction
-Fuel-bounded `extractF`/`extractAuto` following `bestNode` pointers set by `computeCostsF` with `egCostFn` (1 per primitive gate, 0 for identity and composition). General guarantees: `extractF_correct`, `extractAuto_correct`, `extractAuto_complete`. Quantum instance: `extractableSound_qop`.
+### F. Extraction,Fuel-bounded `extractF`/`extractAuto` following `bestNode` pointers set by `computeCostsF`,with `egCostFn` (1 per primitive gate, 0 for identity and composition). General guarantees:,`extractF_correct`, `extractAuto_correct`, `extractAuto_complete`. Quantum instance:,`extractableSound_qop`.,,The pipeline the optimizer runs *is* OptiSat's `optimizeF` (`Invariants.optimizeF_eq`, by,`rfl`), so the generic pipeline theorem applies verbatim: `Invariants.extraction_value` and,its hypothesis-free corollary `Invariants.extraction_value_initial` say that if the,pipeline extracts `c'` from `c`, then `c'` evaluates — in the phase quotient, where,equality *is* equality up to global phase — to the value of the root e-class of the,saturated graph. `initial_bestNodeInv` discharges the cost-table side condition.,,Membership and minimum cost within the represented language are OptiSat's,`extractAuto_complete`/`extractF_correct`; the *bounded* nature of that language (depth and,node budget of the fuel-bounded enumeration) is a documented limit, and no theorem claims a,minimum over all mathematically equivalent circuits.
 
 ### G. End-to-end
-**`Opt.optimize_sound`**: `optimize cfg c = some (c', cert) → checkCertificate c c' cert = true ∧ PhaseEquivalent c c'`. Also `Opt.optimize_isSome` (a result is always returned, and it is always checked — the fallback is the input circuit with the empty certificate) and `Opt.greedy_phaseEquivalent`.
+**`Opt.optimize_sound`**: `optimize cfg c = some (c', cert) → checkCertificate c c' cert = true ∧ PhaseEquivalent c c'`. Also `Opt.optimize_isSome` (a result is always returned, and it is always checked — the fallback is the input circuit with the empty certificate) and `Opt.greedy_phaseEquivalent`.,,The body is `some (finish c (rounds cfg.rounds cfg c).1 (rounds cfg.rounds cfg c).2),(`optimizeFrom_eq`): `round` saturates, extracts and certifies; `rounds` repeats that,`cfg.rounds` times on the circuit the previous round produced and chains the certificates,with `++`. Because `walk` applies a certificate in list order, the concatenation is a,single derivation from the original input to the final output and a round boundary is not,a trust point — `optimizeFrom_spec` needs only `finish_spec`.
 
 ## Examples (kernel-checked in `Quantum/Examples.lean`)
 
@@ -98,6 +97,30 @@ Fuel-bounded `extractF`/`extractAuto` following `bestNode` pointers set by `comp
 | I | `CNOT(0,1);X(2);CNOT(0,1)` | `X(2)` | 2q 2 → 0 | `checkI`, `soundI`, `costI_in`, `costI_out` |
 | J | `work ; work†` | identity, **exactly** | 3 → 0 | `checkJ`, `soundJ`, `exactJ` |
 
+### What the live engine produces (`lake exe quantum`)
+
+The table above is the *certificate library*: hand-built derivations that the checker
+accepts, each with a theorem pinning it. The executable additionally runs the real
+pipeline (saturate → extract → certify, `Config.rounds = 3` times) and prints the
+greedy baseline next to it. Measured on this machine, compiled:
+
+| Key | input | engine output | certificate | checker | time | greedy baseline |
+|---|---|---|---|---|---|---|
+| A | `H;H` | identity | 1 step | ACCEPTS | 1 ms | identity |
+| B | `CX;CX` | identity | 1 step | ACCEPTS | 1 ms | identity |
+| C1 | `S;S` | `Z` | 1 step | ACCEPTS | 1 ms | `Z` |
+| C2 | `T;T` | `S` (T 2→0) | 1 step | ACCEPTS | 0 ms | `S` |
+| D | `X(0);Z(1)` | unchanged (nothing cheaper exists) | 0 steps | ACCEPTS | 9 ms | unchanged |
+| **E** | `T;T;T;T;S;S` | **identity** (6→0 gates, T 4→0) | **10 steps** | ACCEPTS | 764 ms | stuck at 5 gates |
+| **F** | `X;Z;X;Z` | **identity** (4→0 gates) | **5 steps** | ACCEPTS | 383 ms | **stuck at 4 gates** |
+| H | `T;T;T;T` | `Z` (T 4→0) | 4 steps | ACCEPTS | 291 ms | — |
+| **I** | `CX(0,1);X(2);CX(0,1)` | `X(2)` (2q 2→0) | 4 steps | ACCEPTS | 49 ms | — |
+| J | `work;work†` | identity | 1 step | ACCEPTS | 5 ms | — |
+
+Example F is the specification's headline case: the explicitly defined greedy baseline
+(only strictly cost-decreasing steps) cannot move at all, while the saturating engine
+reaches identity through the cost-neutral `XZ ↔ ZX` commutation, and the 5-step
+certificate of that derivation is accepted by the independent checker.
 Example G is the required non-trivial global phase: `denotationFG` proves
 `denote (X;Z;X;Z) = (-1) • 1`, `denotationFG_ne_one` proves it is not `1`, `fg_not_exact`
 proves `¬ EqExact cFG one`, while `soundFG` proves `PhaseEquivalent cFG one`.
@@ -128,7 +151,7 @@ proofs, the certificate checker and `checkCertificate_sound`, the end-to-end `op
 and the exact angle arithmetic.
 
 **Untrusted:** OptiSat's saturation, e-matching, congruence, cost propagation and extraction;
-the derivation search `findDerivation`; the greedy baseline. None of them can make a wrong
+the derivation searches (`costSearch`, `findDerivationBidir`, `findDerivationCost`), the round decomposition and certificate chaining (`round`, `rounds`); the greedy baseline. None of them can make a wrong
 answer pass: `optimize` runs its own output through `checkCertificate` and falls back to the
 input circuit with the empty certificate if the checker refuses.
 
@@ -153,10 +176,7 @@ in \`Quantum/\` (check: \`grep -rn 'sorry\|admit\|axiom\|native_decide\|partial'
 
 ## Known limitations
 
-1. The live derivation search is slow on circuits with many rotation instances; the executable
-   therefore uses a small budget and prints the library certificates for the deeper examples.
-2. The e-graph's *internal* invariant story (§E) is inherited from OptiSat rather than
-   restated for the quantum domain inside `quantum/`.
+1. Saturation is bounded three ways at once — fuel, rounds, and the two rule-set bounds (contracting,,   alphabet). A third saturation round still explodes the class count, which is why the optimizer,   re-runs the whole pipeline (`Config.rounds`) on the shrinking circuit instead of deepening a,   single pass. The bounds are documented in `quantumRules`/`kindClosure` and are search-space,   bounds, not semantic ones.,2. The live derivation search is slow on circuits with many rotation instances; the executable,   therefore uses a small budget and prints the library certificates for the deeper examples.
 3. Angle rule instantiation is bounded by the angles occurring in the input (plus zero): a
    rewrite needing a fresh angle is not generated. A documented search-space bound, not a
    semantic one.
