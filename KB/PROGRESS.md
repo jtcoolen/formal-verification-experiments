@@ -292,3 +292,29 @@ subcircuit they match. Tracked as remaining work.
   gate-kind closure filter to shrink `quantumRules` so maxIter can go to 4-6.
 * `Quantum/Invariants.lean` (spec §E) still to be written.
 * Shor quantum half and Toffoli still to be built.
+
+## Round 5b — iterated rounds: the engine now beats greedy on Example F
+
+**Implemented**
+* `Opt.round` (saturate → extract → certify, identity round on failure) and `Opt.rounds`
+  (k rounds, certificates chained with `++`); `Config.rounds := 3`.
+* `optimizeFrom` reduced to `some (finish c (rounds …).1 (rounds …).2)`.
+* Alphabet bound `kindsOf`/`kindsStep`/`kindsClose`/`kindClosure`: a rule instance is kept
+  only if its source side's gate kinds lie in the closure of the input's kinds under the
+  contracting orientations of the library (Example F: >1000 instances → 16).
+* `GateKind` now derives `BEq`; `demoWith` prints the greedy baseline next to the result.
+* `Correctness.lean` rewritten for the new body: `optimizeFrom_eq`, `optimizeFrom_spec`
+  (now a 6-line proof by `subst` + `finish_spec`), `optimize_isSome`.
+
+**Verified** — `lake build` → 4447 jobs, exit 0; no new axioms (audit unchanged:
+propext/Classical.choice/Quot.sound on 27 theorems).
+
+**Tested** — `lake exe quantum` (183 lines, exit 0):
+E: TTTTSS → **identity**, 10-step chained certificate, ACCEPTS (764 ms); greedy stuck at 5g.
+F: XZXZ → **identity**, 5-step certificate, ACCEPTS (383 ms); **greedy baseline cannot move (4g)**.
+I: CX X CX → X, 2q 2→0, 4 steps.  H: TTTT → Z, T 4→0.  A/B/C1/C2/J all reduce to the optimum.
+`lake exe proptests` → all metamorphic properties held (12 circuits, 0 unaccepted, 0 mutations
+wrongly accepted), 12 s.
+
+**Remaining** — a third saturation round in one pass still explodes; `Quantum/Invariants.lean`
+(spec §E); Shor quantum half; Toffoli.

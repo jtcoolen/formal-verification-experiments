@@ -310,6 +310,34 @@ def structRules (n : Nat) : List (PatternSoundRule (QOp n) (PhaseOp n)) :=
   let r := structIdR n
   [a, psrFlip a, l, r]
 
+/-- The gate kinds occurring in a circuit, without repetitions. -/
+def kindsOf (c : Circuit n) : List GateKind :=
+  (c.gates.map Gate.kind).eraseDups
+
+/-- One round of the gate-kind closure: the kinds that a contracting rule instance whose source
+is already realizable can introduce. -/
+def kindsStep {n : Nat} (c : Circuit n) (ks : List GateKind) : List GateKind :=
+  (ks ++ ((instantiatedRules n).flatMap fun r =>
+    (candidateArgs c).flatMap fun args =>
+      if r.side args = true then
+        let lhs := r.lhs args
+        let rhs := r.rhs args
+        let gl := (Cost.of lhs).gateCount
+        let gr := (Cost.of rhs).gateCount
+        (if gr ≤ gl && (kindsOf lhs).all fun k => ks.contains k then kindsOf rhs else []) ++
+          (if gl ≤ gr && (kindsOf rhs).all fun k => ks.contains k then kindsOf lhs else [])
+      else [])).eraseDups
+
+/-- The gate kinds that saturation may need: the closure of the input's own kinds under the
+contracting orientations of the rule library.  Six rounds is more than the longest dependency
+chain in the library (T --> S --> Z), and the fixpoint is reached long before that. -/
+def kindsClose {n : Nat} (c : Circuit n) : (k : Nat) -> List GateKind -> List GateKind
+  | 0, ks => ks
+  | k + 1, ks => kindsClose c k (kindsStep c ks)
+
+/-- The *alphabet* of a circuit for optimization purposes. -/
+def kindClosure {n : Nat} (c : Circuit n) : List GateKind := kindsClose c 6 (kindsOf c)
+
 /-- The rule instances fed to the e-graph: every registered rule, instantiated at every
 candidate argument list of the input (indices from the register, angles from the input, gate
 pairs and circuit pairs from the input's own subcircuits), in every orientation that does not
@@ -327,16 +355,19 @@ This is a bound on the *search space*, not on the mathematics: every instance is
 proved sound individually, and every step of the certificate produced from the search is
 re-checked by the independent checker. -/
 def quantumRules {n : Nat} (c : Circuit n) : List (PatternSoundRule (QOp n) (PhaseOp n)) :=
+  let ks := kindClosure c
   ((instantiatedRules n).flatMap fun r =>
     (candidateArgs c).flatMap fun args =>
       if hs : r.side args = true then
         let lhs := r.lhs args
         let rhs := r.rhs args
-        -- Contracting orientation only: see the docstring of 'quantumRules'.
+        -- Contracting + alphabet bounds: see the docstring of 'quantumRules'.
         let gl := (Cost.of lhs).gateCount
         let gr := (Cost.of rhs).gateCount
-        (if gr ≤ gl then [toPatternSoundRule r args hs] else []) ++
-          (if gl ≤ gr then [toPatternSoundRuleFlip r args hs] else [])
+        let okL := (kindsOf lhs).all fun k => ks.contains k
+        let okR := (kindsOf rhs).all fun k => ks.contains k
+        (if gr ≤ gl && okL then [toPatternSoundRule r args hs] else []) ++
+          (if gl ≤ gr && okR then [toPatternSoundRuleFlip r args hs] else [])
       else []) ++ structRules n
 
 /-! ### One-step rewrites and certificate synthesis -/
@@ -570,6 +601,9 @@ structure Config where
   maxSteps : Nat := 10
   /-- maximum number of circuits explored by the derivation search -/
   searchBudget : Nat := 400
+  /-- how many times the whole saturate-extract-certify pipeline is re-run, each time on the
+  circuit the previous round produced -/
+  rounds : Nat := 3
   /-- the lexicographic cost policy used for reporting -/
   costConfig : CostConfig := CostConfig.default
 deriving Repr, Inhabited
@@ -649,14 +683,37 @@ def saturatedGraph (cfg : Config) (c : Circuit n) : EGraph (QOp n) :=
   computeCostsF (saturateF cfg.fuel cfg.maxIter cfg.rebuildFuel (ofCircuit c).2
     ((quantumRules c).map fun psr => psr.rule)) egCostFn cfg.costFuel
 
-/-- The optimizer body, in a form whose branches can be reasoned about directly. -/
-def optimizeFrom (cfg : Config) (c : Circuit n) : Option (Circuit n × Certificate n) :=
+/-- **One optimization round.**  Saturate the circuit, extract the cheapest circuit the e-graph
+represents, and search for a derivation from the input to that extraction.  If extraction
+yields nothing, or no derivation is found within the search budget, the round is the identity
+round: it returns the input with the empty certificate.  Nothing here is trusted - the result
+is re-checked by 'finish'. -/
+def round (cfg : Config) (c : Circuit n) : Circuit n × Certificate n :=
   match extractAuto (saturatedGraph cfg c) (rootOf cfg c) with
-  | none => some (finish c c [])
+  | none => (c, [])
   | some c' =>
       match findDerivationCost cfg c c' with
-      | some cert => some (finish c c' cert)
-      | none => some (finish c c [])
+      | some cert => (c', cert)
+      | none => (c, [])
+
+/-- **Iterated rounds with certificate chaining.**  A single saturation pass is deliberately
+cheap (see the contracting bound in 'quantumRules' and the small default 'maxIter'), so the
+optimizer runs the pipeline several times, each time on the circuit the previous round
+extracted.  Because every round ends with a *smaller or equal* circuit, the e-graph stays
+small and the total work stays bounded, while the chained certificate
+`p₁ ++ p₂ ++ …` is a single derivation from the original input to the final output: the
+checker walks it in order, so no round boundary has to be trusted. -/
+def rounds {n : Nat} : (k : Nat) -> Config -> Circuit n -> Circuit n × Certificate n
+  | 0, _, c => (c, [])
+  | k + 1, cfg, c =>
+      let (c₁, p₁) := round cfg c
+      let (c₂, p₂) := rounds k cfg c₁
+      (c₂, p₁ ++ p₂)
+
+/-- The optimizer body, in a form whose branches can be reasoned about directly. -/
+def optimizeFrom (cfg : Config) (c : Circuit n) : Option (Circuit n × Certificate n) :=
+  let r := rounds cfg.rounds cfg c
+  some (finish c r.1 r.2)
 
 /-- Run the equality-saturation engine on a circuit and return the extracted circuit together
 with a certificate that the independent checker accepts.

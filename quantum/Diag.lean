@@ -60,6 +60,7 @@ def iso {n : Nat} (label : String) (c : Circuit n) : IO Unit := do
     trace ("  " ++ pair.1 ++ ": classes=" ++ toString gs.numClasses ++ " (" ++ toString (t1-t0) ++ " ms)")
 
 def one {n : Nat} (f it rf : Nat) (label : String) (c : Circuit n) (mode : String) : IO Unit := do
+  trace (label ++ ": alphabet=" ++ toString ((kindClosure c).length) ++ " rules=" ++ toString ((quantumRules c).length))
   let (root, g0) := ofCircuit c
   let t0 ← IO.monoMsNow
   let gSat := saturateF f it rf g0 ((quantumRules c).map fun psr => psr.rule)

@@ -77,6 +77,8 @@ def demoWith {n : Nat} (cfg : Config) (label : String) (c : Circuit n) : IO Unit
       IO.println s! "    {if ok then "ACCEPTS" else "REJECTS"}   (search took {t1 - t0} ms)"
       for s in cert do
         IO.println s! "    step {s.ruleId}{if s.backward then " (backward)" else ""}"
+      let g := greedy 40 c
+      IO.println ("  greedy baseline (only strictly cost-decreasing steps): " ++ showC g ++ "   [" ++ showCost (Cost.of g) ++ "]")
       if !ok then
         IO.println "  !! REJECTED - the optimizer must not have returned this"
 
@@ -177,11 +179,11 @@ def main (args : List String) : IO Unit := do
       (sg [Gate.x j0, Gate.z j1] : Circuit 2)
   if only sel "E" then
     demoWith fastConfig
-      "Example E: T T T T S S  ->  Z ; Z  (multi-step: tt, ss, re-bracketing; T-count 4 -> 0)"
+      "Example E: T T T T S S  ->  identity  (multi-step: tt, ss, zz; T-count 4 -> 0)"
       (sg [Gate.t i0, Gate.t i0, Gate.t i0, Gate.t i0, Gate.s i0, Gate.s i0] : Circuit 1)
   if only sel "F" then
     demoWith fastConfig
-      "Example F: X Z X Z  ->  X ; X  (engine; the cost-neutral step is the XZ <-> ZX commutation)"
+      "Example F: X Z X Z  ->  identity  (needs the cost-neutral XZ <-> ZX commutation)"
       (sg [Gate.x i0, Gate.z i0, Gate.x i0, Gate.z i0] : Circuit 1)
   if only sel "H" then
     demoWith fastConfig "Example H: T T T T  ->  Z (T-count 4 -> 0)"

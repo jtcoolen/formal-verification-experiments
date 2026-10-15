@@ -11,7 +11,7 @@
 
 ## Green state (this round)
 * `cd quantum && lake build` → "Build completed successfully (4447 jobs)", exit 0.
-* `lake exe quantum` → 171 lines, exit 0 (`quantum/demo_output.txt`).
+* `lake exe quantum` → 183 lines, exit 0, 15 ACCEPTS + 5 negative-test REJECTS (`quantum/demo_output.txt`).
 * `lake exe proptests` → "all metamorphic properties held"; 0 unaccepted certificates,
   0 mutated certificates wrongly accepted.
 * `lake env lean Axioms.lean` → 27 theorems audited, only
@@ -37,16 +37,32 @@
 6. `Diag.lean` rewritten: `diag iso | sat | extract | all [fuel iter rebuildFuel]`, tracing to
    /tmp/diag_trace.txt.
 
-## Measured pipeline (compiled, lake exe diag all 8 2 30)
-| ex | input | saturated classes | extracted | cert steps | checker | search |
-|----|-------|-------------------|-----------|-----------|---------|--------|
-| E | 6g TTTTSS | 193 | Z;Z (2g, T 4→0) | 9 | ACCEPTS | 793 ms |
-| F | 4g XZXZ | 29 | X;X (2g) | 4 | ACCEPTS | 550 ms |
-| I | 3g CX X CX | 10 | X (1g, 2q 2→0) | 4 | ACCEPTS | 50 ms |
-| H | 4g TTTT | — | Z (T 4→0) | 4 | ACCEPTS | 349 ms |
-| J | 6g compute;uncompute | — | one | 1 | ACCEPTS | 5 ms |
-The hand-built library certificates still go further: Examples.checkE takes TTTTSS to
-identity in 8 steps, Examples.checkFG takes XZXZ to identity in 5 steps.
+## Iterated rounds (the fix that made the engine actually win)
+One saturation pass at maxIter 2 is cheap but shallow; a third round explodes.  So the
+optimizer now runs the whole saturate-extract-certify pipeline `cfg.rounds` (default 3)
+times, each time on the circuit the previous round extracted, and **chains the
+certificates** (`p₁ ++ p₂ ++ …` — the checker walks the concatenation in one pass, so a
+round boundary is not a trust point).  `optimizeFrom` is now
+`some (finish c (rounds cfg.rounds cfg c).1 (rounds cfg.rounds cfg c).2)`, which also made
+`Correctness.lean` much smaller (`optimizeFrom_eq` + `optimizeFrom_spec` by `subst`).
+Also added: `kindClosure`/`kindsStep`/`kindsOf` — an **alphabet bound**: a rule instance is
+generated only if its source side's gate kinds lie in the closure of the input's kinds
+under the contracting orientations of the library (F: 1000+ instances → 16).
+
+| ex | input | engine output | cert | checker | time | greedy baseline |
+|----|-------|---------------|------|---------|------|-----------------|
+| A | H;H | one | 1 | ACCEPTS | 1 ms | one |
+| B | CX;CX | one | 1 | ACCEPTS | 1 ms | one |
+| C1 | S;S | Z | 1 | ACCEPTS | 1 ms | Z |
+| C2 | T;T | S (T 2→0) | 1 | ACCEPTS | 0 ms | S |
+| D | X(0);Z(1) | unchanged (neutral) | 0 | ACCEPTS | 9 ms | unchanged |
+| **E** | TTTTSS (6g, T4) | **one** (0g, T0) | **10** | ACCEPTS | 764 ms | TTTTZ (5g, T4) |
+| **F** | XZXZ (4g) | **one** (0g) | **5** | ACCEPTS | 383 ms | **XZXZ (4g) — stuck** |
+| H | TTTT | Z (T 4→0) | 4 | ACCEPTS | 291 ms | — |
+| **I** | CX X CX (3g, 2q2) | X (1g, 2q0) | 4 | ACCEPTS | 49 ms | — |
+| J | compute;uncompute (6g) | one | 1 | ACCEPTS | 5 ms | — |
+Example F is the spec's headline: the explicitly defined greedy baseline (strictly
+cost-decreasing steps only) cannot move, the saturating engine reaches identity.
 
 ## Known traps (do not rediscover)
 * The kernel does NOT reduce `Rat.add`/`Rat.mul`: `decide` fails on any proposition with an
@@ -61,8 +77,9 @@ identity in 8 steps, Examples.checkFG takes XZXZ to identity in 5 steps.
   `fs.writeFileSync` from arrays of single-quoted JS strings, or use heredocs.
 
 ## Remaining priorities
-1. **Reach identity with the engine on E and F** (needs one more saturation round; the fix is a
-   gate-kind closure filter so the rule set stays small enough for maxIter 4-6).
+1. ~~Reach identity with the engine on E and F~~ DONE (iterated rounds + alphabet bound).
+   Next: make a single round deeper (the third round still explodes; look at OptiSat's
+   rebuild cost with both assoc orientations present).
 2. `Quantum/Invariants.lean`: instantiate OptiSat's invariant chain at `QOp n`/`PhaseOp n`
    (`empty_consistent`, `add_leaf_miss_consistent`, `merge_consistent`, `processClass_consistent`,
    `rebuildF_preserves_cv`, `applyRulesF_preserves_cv`, `saturateF_preserves_consistent`,

@@ -53,41 +53,46 @@ Example A: H(0) ; H(0)  ->  identity
   input : H ; H   [gates=2 2q=0 T=0]
   output:    [gates=0 2q=0 T=0]
   certificate: 1 step(s); independent checker: 
-    ACCEPTS   (search took 1 ms)
+    ACCEPTS   (search took 2 ms)
     step uncompute
+  greedy baseline (only strictly cost-decreasing steps):    [gates=0 2q=0 T=0]
 ==============================================================================
 Example B: CNOT(0,1) ; CNOT(0,1)  ->  identity
   input : CX(0,1) ; CX(0,1)   [gates=2 2q=2 T=0]
   output:    [gates=0 2q=0 T=0]
   certificate: 1 step(s); independent checker: 
-    ACCEPTS   (search took 1 ms)
+    ACCEPTS   (search took 5 ms)
     step uncompute
+  greedy baseline (only strictly cost-decreasing steps):    [gates=0 2q=0 T=0]
 ==============================================================================
 Example C1: S(0) ; S(0)  ->  Z(0)
   input : S ; S   [gates=2 2q=0 T=0]
   output: Z   [gates=1 2q=0 T=0]
   certificate: 1 step(s); independent checker: 
-    ACCEPTS   (search took 1 ms)
+    ACCEPTS   (search took 2 ms)
     step ss
+  greedy baseline (only strictly cost-decreasing steps): Z   [gates=1 2q=0 T=0]
 ==============================================================================
 Example C2: T(0) ; T(0)  ->  S(0)
   input : T ; T   [gates=2 2q=0 T=2]
   output: S   [gates=1 2q=0 T=0]
   certificate: 1 step(s); independent checker: 
-    ACCEPTS   (search took 0 ms)
+    ACCEPTS   (search took 2 ms)
     step tt
+  greedy baseline (only strictly cost-decreasing steps): S   [gates=1 2q=0 T=0]
 ==============================================================================
 Example D: X(0) ; Z(1)  <->  Z(1) ; X(0) (cost-neutral commutation)
   input : X ; Z   [gates=2 2q=0 T=0]
   output: X ; Z   [gates=2 2q=0 T=0]
   certificate: 0 step(s); independent checker: 
-    ACCEPTS   (search took 1 ms)
+    ACCEPTS   (search took 6 ms)
+  greedy baseline (only strictly cost-decreasing steps): X ; Z   [gates=2 2q=0 T=0]
 ==============================================================================
-Example E: T T T T S S  ->  Z ; Z  (multi-step: tt, ss, re-bracketing; T-count 4 -> 0)
+Example E: T T T T S S  ->  identity  (multi-step: tt, ss, zz; T-count 4 -> 0)
   input : T ; T ; T ; T ; S ; S   [gates=6 2q=0 T=4]
-  output: Z ; Z   [gates=2 2q=0 T=0]
-  certificate: 9 step(s); independent checker: 
-    ACCEPTS   (search took 793 ms)
+  output:    [gates=0 2q=0 T=0]
+  certificate: 10 step(s); independent checker: 
+    ACCEPTS   (search took 861 ms)
     step ss
     step assoc (backward)
     step assoc (backward)
@@ -97,43 +102,50 @@ Example E: T T T T S S  ->  Z ; Z  (multi-step: tt, ss, re-bracketing; T-count 4
     step tt
     step assoc (backward)
     step ss
+    step uncompute
+  greedy baseline (only strictly cost-decreasing steps): T ; T ; T ; T ; Z   [gates=5 2q=0 T=4]
 ==============================================================================
-Example F: X Z X Z  ->  X ; X  (engine; the cost-neutral step is the XZ <-> ZX commutation)
+Example F: X Z X Z  ->  identity  (needs the cost-neutral XZ <-> ZX commutation)
   input : X ; Z ; X ; Z   [gates=4 2q=0 T=0]
-  output: X ; X   [gates=2 2q=0 T=0]
-  certificate: 4 step(s); independent checker: 
-    ACCEPTS   (search took 550 ms)
+  output:    [gates=0 2q=0 T=0]
+  certificate: 5 step(s); independent checker: 
+    ACCEPTS   (search took 437 ms)
     step assoc (backward)
     step xz
     step uncompute2
     step uncompute (backward)
+    step uncompute
+  greedy baseline (only strictly cost-decreasing steps): X ; Z ; X ; Z   [gates=4 2q=0 T=0]
 ==============================================================================
 Example H: T T T T  ->  Z (T-count 4 -> 0)
   input : T ; T ; T ; T   [gates=4 2q=0 T=4]
   output: Z   [gates=1 2q=0 T=0]
   certificate: 4 step(s); independent checker: 
-    ACCEPTS   (search took 349 ms)
+    ACCEPTS   (search took 394 ms)
     step tt
     step assoc (backward)
     step tt
     step ss
+  greedy baseline (only strictly cost-decreasing steps): T ; T ; S   [gates=3 2q=0 T=2]
 ==============================================================================
 Example I: CNOT(0,1) ; X(2) ; CNOT(0,1)  ->  X(2) (two-qubit count 2 -> 0)
   input : CX(0,1) ; X ; CX(0,1)   [gates=3 2q=2 T=0]
   output: X   [gates=1 2q=0 T=0]
   certificate: 4 step(s); independent checker: 
-    ACCEPTS   (search took 50 ms)
+    ACCEPTS   (search took 61 ms)
     step disjoint
     step assoc (backward)
     step cxcx
     step idL
+  greedy baseline (only strictly cost-decreasing steps): CX(0,1) ; X ; CX(0,1)   [gates=3 2q=2 T=0]
 ==============================================================================
 Example J: a block followed by its own uncomputation  ->  identity
   input : H ; CX(0,1) ; S ; S-dag ; CX(0,1) ; H   [gates=6 2q=2 T=0]
   output:    [gates=0 2q=0 T=0]
   certificate: 1 step(s); independent checker: 
-    ACCEPTS   (search took 5 ms)
+    ACCEPTS   (search took 36 ms)
     step uncompute
+  greedy baseline (only strictly cost-decreasing steps):    [gates=0 2q=0 T=0]
 ==============================================================================
 Pass: classical-control constant propagation (exact specialization)
   guarded ladder   : CX(0,1) ; X ; H
@@ -166,6 +178,6 @@ Negative test: tampered (reversed) derivation order
 Negative test: CNOT control/target exchanged in the output
   independent checker: REJECTS (as required)
 ==============================================================================
-real 1.80
-user 1.63
+real 1.88
+user 1.67
 sys 0.03

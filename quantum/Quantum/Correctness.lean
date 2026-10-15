@@ -51,49 +51,27 @@ theorem finish_spec {n : Nat} (c c' : Circuit n) (cert : Certificate n) :
   · rw [finish_rejected (c := c) (c' := c') cert (by simpa using h)]
     exact ⟨checkCertificate_refl c, PhaseEquivalent.refl c⟩
 
-/-! ### Branch equations of the optimizer body -/
+/-! ### The optimizer body -/
 
-theorem optimizeFrom_none {n : Nat} (cfg : Config) (c : Circuit n)
-    (h : (extractAuto (saturatedGraph cfg c) (rootOf cfg c) : Option (Circuit n)) = none) :
-    optimizeFrom cfg c = some (finish c c []) := by
-  classical
-  simp only [optimizeFrom, h]
-
-theorem optimizeFrom_found {n : Nat} (cfg : Config) (c x : Circuit n) (y : Certificate n)
-    (h : (extractAuto (saturatedGraph cfg c) (rootOf cfg c) : Option (Circuit n)) = some x)
-    (h2 : findDerivationCost cfg c x = some y) :
-    optimizeFrom cfg c = some (finish c x y) := by
-  classical
-  simp only [optimizeFrom, h, h2]
-
-theorem optimizeFrom_notFound {n : Nat} (cfg : Config) (c x : Circuit n)
-    (h : (extractAuto (saturatedGraph cfg c) (rootOf cfg c) : Option (Circuit n)) = some x)
-    (h2 : findDerivationCost cfg c x = none) :
-    optimizeFrom cfg c = some (finish c c []) := by
-  classical
-  simp only [optimizeFrom, h, h2]
+/-- The optimizer body is a single `finish`ed result: the chained certificate of all rounds,
+re-checked by the independent checker. -/
+theorem optimizeFrom_eq {n : Nat} (cfg : Config) (c : Circuit n) :
+    optimizeFrom cfg c =
+      some (finish c (rounds cfg.rounds cfg c).1 (rounds cfg.rounds cfg c).2) := rfl
 
 /-- Every branch of the optimizer body produces a `finish`ed result, so every branch is
 sound.  This is the case analysis that makes the end-to-end theorem below go through without
-trusting saturation, e-matching, congruence, extraction or the search. -/
+trusting saturation, e-matching, congruence, extraction or the search - and equally without
+trusting the round decomposition or the certificate chaining. -/
 theorem optimizeFrom_spec {n : Nat} (cfg : Config) (c : Circuit n)
     (p : Circuit n × Certificate n) (h : optimizeFrom cfg c = some p) :
     checkCertificate c p.1 p.2 = true ∧ PhaseEquivalent c p.1 := by
   classical
-  rcases h1 : (extractAuto (saturatedGraph cfg c) (rootOf cfg c) : Option (Circuit n)) with _ | x
-  · rw [optimizeFrom_none cfg c h1] at h
-    have hp : p = finish c c [] := (Option.some.inj h).symm
-    rw [hp]
-    exact finish_spec c c []
-  · rcases h2 : findDerivationCost cfg c x with _ | y
-    · rw [optimizeFrom_notFound cfg c x h1 h2] at h
-      have hp : p = finish c c [] := (Option.some.inj h).symm
-      rw [hp]
-      exact finish_spec c c []
-    · rw [optimizeFrom_found cfg c x y h1 h2] at h
-      have hp : p = finish c x y := (Option.some.inj h).symm
-      rw [hp]
-      exact finish_spec c x y
+  rw [optimizeFrom_eq] at h
+  have hp : p = finish c (rounds cfg.rounds cfg c).1 (rounds cfg.rounds cfg c).2 :=
+    (Option.some.inj h).symm
+  subst hp
+  exact finish_spec c _ _
 
 /-- **END-TO-END SOUNDNESS OF THE PUBLIC OPTIMIZER.**
 
@@ -118,12 +96,8 @@ they terminate on every input. -/
 theorem optimize_isSome {n : Nat} (cfg : Config) (c : Circuit n) :
     (optimize cfg c).isSome = true := by
   classical
-  rw [optimize_eq]
-  rcases h1 : (extractAuto (saturatedGraph cfg c) (rootOf cfg c) : Option (Circuit n)) with _ | x
-  · rw [optimizeFrom_none cfg c h1]; simp
-  · rcases h2 : findDerivationCost cfg c x with _ | y
-    · rw [optimizeFrom_notFound cfg c x h1 h2]; simp
-    · rw [optimizeFrom_found cfg c x y h1 h2]; simp
+  rw [optimize_eq, optimizeFrom_eq]
+  simp
 
 end Opt
 end Quantum

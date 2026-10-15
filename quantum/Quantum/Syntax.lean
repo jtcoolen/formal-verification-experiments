@@ -35,7 +35,7 @@ deriving DecidableEq, Repr
 /-- The sort of a gate, used by the architecture specification and by the cost model. -/
 inductive GateKind : Type where
   | h | x | y | z | s | t | sDag | tDag | rz | rx | ry | cx | cz | swap | crz | cp
-deriving DecidableEq
+deriving DecidableEq, BEq
 
 /-! ### Circuits -/
 
