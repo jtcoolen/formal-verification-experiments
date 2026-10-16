@@ -17,19 +17,20 @@ computation (`#guard`), and **none of them assumes anything about SHA3** - not c
 resistance, not injectivity, not even that the output is hard to invert.
 
 That is the point of the split: the correctness half of a Merkle tree is unconditional, and
-these examples exercise it end to end over a hash that actually ships. Where a security
-property is genuinely needed it is stated conditionally, and the file says so.
+these examples exercise it end to end over the installed hash. The security reductions below
+turn accepted false claims and equal-root distinct trees into hash collisions without assuming
+absolute injectivity.
 
 * `bytesSig` - SHA3-512 over byte-string leaves, the shape a real deployment uses.
 * `kvRoot` and the key-value examples - a four-entry store: pinned root, independent lookups,
   inclusion proof, tamper rejection.
 * `sparseSigRoot_eq` - a sparse all-default subtree, digested in `n` hashes instead of `2 ^ n`,
   with the cheap and expensive routes proved equal.
-* `log` and the ledger examples - a 16-entry append-only log: pinned root, inclusion, tamper
+* `log` and the ledger examples - a 16-entry authenticated log snapshot: pinned root, inclusion, tamper
   detection, and batch writes.
 * `cert` - a multi-inclusion certificate for three entries at once, checked against one root.
-* `binding_conditional` - the binding property, explicitly under the collision-freeness
-  hypothesis that `no_collision_free_sha3_512` shows cannot be discharged.
+* `binding_reduction` / `inclusion_reduction` - equal-root distinct trees and accepted
+  false claims produce hash collisions, without any injectivity assumption.
 -/
 
 namespace Merkle.Sha3.Examples
@@ -66,7 +67,7 @@ def entries : List Msg :=
 /-- The tree, built from the flat vector. -/
 def kv : Tree Msg 2 := ofLeaves 2 entries (by decide)
 
-/-- The committed root, computed by the Lean kernel and pinned against an independent
+/-- The committed root, computed and pinned against an independent
 implementation, so a change in the dependency or the tagging breaks the build. -/
 def kvRoot : String := Impl.toHex (bvBytes (sroot kv))
 
@@ -92,10 +93,9 @@ example : sfold (sofTree kv p3) (sleaf (kv.get p3)) = sroot kv :=
   Sig.complete (s := bytesSig) 2 kv p3
 
 -- **Tamper detection on real digests.** Claiming a different value at the same path does not
--- verify. This is a computation over SHA3-512, not a consequence of an axiom: the honest proof
--- simply produces a different digest.
--- Note what this is *not*: it is not a proof that no forged proof exists. That would need
--- collision-freeness - see `binding_conditional` below.
+-- verify. This computation checks that the honest proof produces a different digest.
+-- This finite check does not establish universal absence of forgeries. The theorem
+-- `inclusion_reduction` below shows that any accepted false claim would yield a hash collision.
 #guard sfold (sofTree kv p3) (sleaf entries[2]!) ≠ sroot kv
 
 
@@ -140,7 +140,7 @@ example : ∀ (q : Path 3), sparseTree.get q = [] := fun q => get_fill 3 [] q
 #guard sparseTree.hashCost = 15
 #guard (3 : Nat) + 1 = 4
 
-/-! ## An append-only log -/
+/-! ## An authenticated log snapshot -/
 
 /-- A 16-entry log; entry `i` is the single byte `i`. -/
 def logEntries : List Msg := List.ofFn fun i : Fin 16 => [UInt8.ofNat i.val]
@@ -224,8 +224,21 @@ theorem cert_verifies : ∀ c ∈ cert, verifiesAt (sroot log) c := by
 
 /-- The certificate is decidable, so a client can check it without a proof assistant. -/
 def allVerifyB (root : Digest) (cs : List (SigClaim 4)) : Bool :=
-  cs.all (fun c => c.proof.pathOf == c.path &&
-    (sfold c.proof (sleaf c.value) == root))
+  cs.all (fun c => decide (c.proof.pathOf = c.path ∧
+    sfold c.proof (sleaf c.value) = root))
+
+/-- The executable SHA3 checker establishes the complete claim predicate. -/
+theorem allVerifyB_eq (root : Digest) (cs : List (SigClaim 4)) :
+    allVerifyB root cs = true ↔ ∀ c ∈ cs, verifiesAt root c := by
+  unfold allVerifyB
+  rw [List.all_eq_true]
+  constructor
+  · intro h c hc
+    change c.proof.pathOf = c.path ∧ sfold c.proof (sleaf c.value) = root
+    exact of_decide_eq_true (h c hc)
+  · intro h c hc
+    exact decide_eq_true (show c.proof.pathOf = c.path ∧
+      sfold c.proof (sleaf c.value) = root from h c hc)
 
 #guard allVerifyB (sroot log) cert = true
 
@@ -235,23 +248,39 @@ def tampered : SigClaim 4 :=
 
 #guard allVerifyB (sroot log) (tampered :: cert) = false
 
-/-! ## The security property, stated honestly -/
+-- A proof with only its claimed position changed is also rejected.
+def mislabeled : SigClaim 4 :=
+  { path := logPath, value := log.get logPath0, proof := sofTree log logPath0 }
 
-/-- **Binding is conditional.** Two logs with the same root agree everywhere - *provided* the
-hash is collision-free. That hypothesis cannot be discharged: `no_collision_free_sha3_512`
-proves no `MerkleHash` over a 512-bit digest exists. So this theorem is a reduction, not a
-guarantee, and pretending otherwise would mean postulating a falsehood. -/
-theorem binding_conditional (t₁ t₂ : Tree Msg 4) :
-    SigCollisionFree (s := bytesSig) →
-      sroot t₁ = sroot t₂ → t₁ = t₂ := by
-  intro cf h
-  have e₁ := @sigRoot_eq_rootHash Msg Digest bytesSig cf 4 t₁
-  have e₂ := @sigRoot_eq_rootHash Msg Digest bytesSig cf 4 t₂
-  exact rootHash_injective (m := @merkleHashOfSig Msg Digest bytesSig cf) t₁ t₂
-    (e₁ ▸ e₂ ▸ h)
+#guard allVerifyB (sroot log) [mislabeled] = false
 
-/-- And the hypothesis is unreachable, so the theorem can never be applied to SHA3-512:
-`SigCollisionFree (s := bytesSig)` implies `False`. -/
+/-! ## Security reductions over the installed hash -/
+
+/-- Distinct snapshots with equal SHA3 roots produce a collision in `bytesSig`.
+No collision-freeness hypothesis is assumed. This is a deterministic reduction, without a
+probabilistic bound on the difficulty of finding such snapshots. -/
+theorem binding_reduction {n : Nat} (t₁ t₂ : Tree Msg n)
+    (heq : sroot t₁ = sroot t₂) (hne : t₁ ≠ t₂) : Collision (s := bytesSig) :=
+  collision_of_rootHash_eq (s := bytesSig) n t₁ t₂ heq hne
+
+/-- An accepted false claim yields a SHA3 collision. The claim's path must match the proof,
+which is checked by `verifiesAt` and the Boolean verifier. -/
+theorem inclusion_reduction {n : Nat} (t : Tree Msg n) (c : SigClaim n)
+    (hv : verifiesAt (sroot t) c) (hne : t.get c.path ≠ c.value) :
+    Collision (s := bytesSig) := by
+  apply collision_of_forgery (s := bytesSig) t c.proof c.value hv.2
+  rw [hv.1]
+  exact hne
+
+/-- End-to-end reduction: an executable accepted certificate containing a false claim
+produces a collision, with no assumptions about SHA3. -/
+theorem allVerifyB_false_claim_collision (t : Tree Msg 4) (cs : List (SigClaim 4))
+    (h : allVerifyB (sroot t) cs = true) (c : SigClaim 4) (hc : c ∈ cs)
+    (hne : t.get c.path ≠ c.value) : Collision (s := bytesSig) :=
+  inclusion_reduction t c ((allVerifyB_eq _ _).mp h c hc) hne
+
+/-- Absolute injectivity is impossible for this fixed-width signature. The reductions above
+therefore avoid using it as a premise. -/
 theorem bytesSig_not_collision_free : ¬ SigCollisionFree (s := bytesSig) := by
   intro cf
   exact no_collision_free_bitvec_of_two (α := Msg) [] [UInt8.ofNat 1]

@@ -301,4 +301,203 @@ theorem rel_complete {α β : Type} {R : α -> β -> Prop} [DecidableRel R]
     · simp [ay]
   · simp [ax]
 
+/-! ### Two-argument graph clauses -/
+
+/-- The graph clauses of a binary function f : α → β → γ between three one-hot groups:
+the assignment may not select x, y and z unless z = f x y.  One clause per triple. -/
+def graph2Clauses {α β γ : Type} [DecidableEq γ] (f : α -> β -> γ)
+    (o₁ : Oh α) (o₂ : Oh β) (o₃ : Oh γ) : CNF :=
+  ⟨(o₁.vals.flatMap fun x =>
+      (o₂.vals.flatMap fun y =>
+        (o₃.vals.filterMap fun z =>
+          if f x y = z then none
+          else some [neg (o₁.varOf x), neg (o₂.varOf y), neg (o₃.varOf z)])))⟩
+
+/-- Membership in the forbidden-triple clauses. -/
+theorem mem_graph2Clauses {α β γ : Type} [DecidableEq γ] {f : α -> β -> γ}
+    {o₁ : Oh α} {o₂ : Oh β} {o₃ : Oh γ} {cl : Clause} :
+    cl ∈ (graph2Clauses f o₁ o₂ o₃).clauses <->
+      ∃ x ∈ o₁.vals, ∃ y ∈ o₂.vals, ∃ z ∈ o₃.vals, f x y ≠ z ∧
+        cl = [neg (o₁.varOf x), neg (o₂.varOf y), neg (o₃.varOf z)] := by
+  constructor
+  · intro h
+    have h1 : cl ∈ (o₁.vals.flatMap fun x =>
+        (o₂.vals.flatMap fun y =>
+          (o₃.vals.filterMap fun z =>
+            if f x y = z then none
+            else some [neg (o₁.varOf x), neg (o₂.varOf y), neg (o₃.varOf z)]))) := h
+    rw [List.mem_flatMap] at h1
+    obtain ⟨x, hx, h2⟩ := h1
+    rw [List.mem_flatMap] at h2
+    obtain ⟨y, hy, h3⟩ := h2
+    rw [List.mem_filterMap] at h3
+    obtain ⟨z, hz, heq⟩ := h3
+    by_cases hne : f x y = z
+    · rw [if_pos hne] at heq
+      exact absurd heq (by simp)
+    · rw [if_neg hne] at heq
+      exact ⟨x, hx, y, hy, z, hz, hne, (Option.some.inj heq.symm)⟩
+  · rintro ⟨x, hx, y, hy, z, hz, hne, rfl⟩
+    have h1 : [neg (o₁.varOf x), neg (o₂.varOf y), neg (o₃.varOf z)] ∈
+        (o₁.vals.flatMap fun u =>
+          (o₂.vals.flatMap fun v =>
+            (o₃.vals.filterMap fun w =>
+              if f u v = w then none
+              else some [neg (o₁.varOf u), neg (o₂.varOf v), neg (o₃.varOf w)]))) := by
+      rw [List.mem_flatMap]
+      refine ⟨x, hx, ?_⟩
+      rw [List.mem_flatMap]
+      refine ⟨y, hy, ?_⟩
+      rw [List.mem_filterMap]
+      exact ⟨z, hz, by simp [hne]⟩
+    simpa [graph2Clauses] using h1
+
+/-- **Soundness of the binary graph encoding.** -/
+theorem graph2_correct {α β γ : Type} [DecidableEq γ] {f : α -> β -> γ}
+    {o₁ : Oh α} {o₂ : Oh β} {o₃ : Oh γ} {a : Assignment}
+    (h₁ : Sat a (o₁.clauses)) (h₂ : Sat a (o₂.clauses)) (h₃ : Sat a (o₃.clauses))
+    (hg : Sat a (graph2Clauses f o₁ o₂ o₃)) :
+    ∀ x y, o₁.decode a = some x -> o₂.decode a = some y -> o₃.decode a = some (f x y) := by
+  intro x y hdx hdy
+  obtain ⟨hxv, hxa⟩ := decodeGo_some o₁.vals o₁.varOf a x hdx
+  obtain ⟨hyv, hya⟩ := decodeGo_some o₂.vals o₂.varOf a y hdy
+  obtain ⟨z, hz⟩ := Oh.decode_some h₃
+  obtain ⟨hzv, hza⟩ := decodeGo_some o₃.vals o₃.varOf a z hz
+  have hf : f x y = z := by
+    by_contra e
+    have hmem : [neg (o₁.varOf x), neg (o₂.varOf y), neg (o₃.varOf z)] ∈
+        (graph2Clauses f o₁ o₂ o₃).clauses :=
+      (mem_graph2Clauses).mpr ⟨x, hxv, y, hyv, z, hzv, e, rfl⟩
+    have := hg _ hmem
+    simp [Clause.eval, List.any_cons, List.any_nil, neg_eval, hxa, hya, hza] at this
+  subst hf
+  exact hz
+
+/-- **Completeness of the binary graph encoding.** -/
+theorem graph2_correct_back {α β γ : Type} [DecidableEq γ] {f : α -> β -> γ}
+    {o₁ : Oh α} {o₂ : Oh β} {o₃ : Oh γ} {a : Assignment}
+    (h₁ : Sat a (o₁.clauses)) (h₂ : Sat a (o₂.clauses)) (h₃ : Sat a (o₃.clauses))
+    (h : ∀ x y, o₁.decode a = some x -> o₂.decode a = some y -> o₃.decode a = some (f x y)) :
+    Sat a (graph2Clauses f o₁ o₂ o₃) := by
+  intro cl hcl
+  obtain ⟨x, hx, y, hy, z, hz, hne, rfl⟩ := (mem_graph2Clauses).mp hcl
+  simp only [Clause.eval, List.any_cons, List.any_nil, neg_eval]
+  by_cases ax : a (o₁.varOf x) = true
+  · by_cases ay : a (o₂.varOf y) = true
+    · by_cases az : a (o₃.varOf z) = true
+      · exfalso
+        have hdx : o₁.decode a = some x := Oh.decode_of_true h₁ hx ax
+        have hdy : o₂.decode a = some y := Oh.decode_of_true h₂ hy ay
+        have hdz : o₃.decode a = some z := Oh.decode_of_true h₃ hz az
+        rw [h x y hdx hdy] at hdz
+        exact hne (Option.some.inj hdz)
+      · simp [az]
+    · simp [ay]
+  · simp [ax]
+
+/-! ### Forward (definitional) clauses
+
+For a function between one-hot domains the forbidden-pair clauses of graphClauses cost one
+clause per *pair* of domain elements.  Because the output group is itself one-hot, a
+single clause per input suffices: "not x, or y_{f x}".  These forward clauses are what
+ProtSat.Encode uses for its Tseitin gates, and they keep the encoding linear in the
+universe for unary operations and quadratic for binary ones rather than cubic.
+
+Each family is guarded by a list `ant` of antecedent literals: the implication is required
+to hold only when all of them are false.  This is how a step clause says "if session q acts
+while its program counter is c, then its next program counter is c+1" - the guard is
+(not acting, not at c). -/
+
+/-- The guarded forward clauses of a one-argument definition: for each x of the input
+group, the clause "some antecedent literal, or x is not the selected value, or g x". -/
+def fwdClausesOn {α : Type} (ant : List Lit) (o₁ : Oh α) (g : α -> Lit) : CNF :=
+  cnfOf (o₁.vals.map fun x => ant ++ [neg (o₁.varOf x), g x])
+
+/-- **Soundness of the forward encoding.**  If the antecedents are all false and the input
+group decodes to x, the output literal g x holds. -/
+theorem fwdClausesOn_correct {α : Type} {ant : List Lit} {o₁ : Oh α} {g : α -> Lit}
+    {a : Assignment} (h₁ : Sat a (o₁.clauses)) (hg : Sat a (fwdClausesOn ant o₁ g))
+    (hant : ∀ l ∈ ant, l.eval a = false) :
+    ∀ x, o₁.decode a = some x -> (g x).eval a = true := by
+  intro x hx
+  obtain ⟨hxv, hxa⟩ := decodeGo_some o₁.vals o₁.varOf a x hx
+  have hcl : (ant ++ [neg (o₁.varOf x), g x]) ∈ (fwdClausesOn ant o₁ g).clauses :=
+    List.mem_map.mpr ⟨x, hxv, rfl⟩
+  have h2 : Clause.eval a [neg (o₁.varOf x), g x] = true :=
+    clause_eval_append_of_false ant _ (hg _ hcl) hant
+  rw [Clause.eval_cons, neg_eval, hxa, Bool.not_true, Bool.false_or, Clause.eval,
+    List.any_cons, List.any_nil, Bool.or_false] at h2
+  exact h2
+
+/-- **Completeness of the forward encoding.**  If whenever the input group decodes to x
+the literal g x holds, the clauses are satisfied. -/
+theorem fwdClausesOn_complete {α : Type} {ant : List Lit} {o₁ : Oh α} {g : α -> Lit}
+    {a : Assignment} (h₁ : Sat a (o₁.clauses))
+    (h : ∀ x ∈ o₁.vals, o₁.decode a = some x -> (g x).eval a = true) :
+    Sat a (fwdClausesOn ant o₁ g) := by
+  intro cl hcl
+  rw [fwdClausesOn, cnfOf, List.mem_map] at hcl
+  obtain ⟨x, hx, heq⟩ := hcl
+  have hcl' : cl = ant ++ [neg (o₁.varOf x), g x] := by simpa using heq.symm
+  subst hcl'
+  by_cases ax : a (o₁.varOf x) = true
+  · have hdx : o₁.decode a = some x := Oh.decode_of_true h₁ hx ax
+    exact clause_eval_holds (g x)
+      (List.mem_append_right _ (List.Mem.tail _ (List.Mem.head _))) (h x hx hdx)
+  · exact clause_eval_holds (neg (o₁.varOf x)) (List.mem_append_right _ (List.Mem.head _))
+      (by simp [neg_eval, ax])
+
+/-- The guarded forward clauses of a two-argument definition. -/
+def fwd2ClausesOn {α β : Type} (ant : List Lit) (o₁ : Oh α) (o₂ : Oh β)
+    (g : α -> β -> Lit) : CNF :=
+  cnfOf (o₁.vals.flatMap fun x =>
+    o₂.vals.map fun y => ant ++ [neg (o₁.varOf x), neg (o₂.varOf y), g x y])
+
+/-- **Soundness of the binary forward encoding.** -/
+theorem fwd2ClausesOn_correct {α β : Type} {ant : List Lit} {o₁ : Oh α} {o₂ : Oh β}
+    {g : α -> β -> Lit} {a : Assignment}
+    (h₁ : Sat a (o₁.clauses)) (h₂ : Sat a (o₂.clauses))
+    (hg : Sat a (fwd2ClausesOn ant o₁ o₂ g)) (hant : ∀ l ∈ ant, l.eval a = false) :
+    ∀ x y, o₁.decode a = some x -> o₂.decode a = some y -> (g x y).eval a = true := by
+  intro x y hx hy
+  obtain ⟨hxv, hxa⟩ := decodeGo_some o₁.vals o₁.varOf a x hx
+  obtain ⟨hyv, hya⟩ := decodeGo_some o₂.vals o₂.varOf a y hy
+  have hcl : (ant ++ [neg (o₁.varOf x), neg (o₂.varOf y), g x y]) ∈
+      (fwd2ClausesOn ant o₁ o₂ g).clauses :=
+    List.mem_flatMap.mpr ⟨x, hxv, List.mem_map.mpr ⟨y, hyv, rfl⟩⟩
+  have h2 : Clause.eval a [neg (o₁.varOf x), neg (o₂.varOf y), g x y] = true :=
+    clause_eval_append_of_false ant _ (hg _ hcl) hant
+  rw [Clause.eval_cons, neg_eval, hxa, Bool.not_true, Bool.false_or, Clause.eval_cons,
+    neg_eval, hya, Bool.not_true, Bool.false_or, Clause.eval, List.any_cons, List.any_nil,
+    Bool.or_false] at h2
+  exact h2
+
+/-- **Completeness of the binary forward encoding.** -/
+theorem fwd2ClausesOn_complete {α β : Type} {ant : List Lit} {o₁ : Oh α} {o₂ : Oh β}
+    {g : α -> β -> Lit} {a : Assignment}
+    (h₁ : Sat a (o₁.clauses)) (h₂ : Sat a (o₂.clauses))
+    (h : ∀ x ∈ o₁.vals, ∀ y ∈ o₂.vals, o₁.decode a = some x -> o₂.decode a = some y ->
+      (g x y).eval a = true) :
+    Sat a (fwd2ClausesOn ant o₁ o₂ g) := by
+  intro cl hcl
+  rw [fwd2ClausesOn, cnfOf, List.mem_flatMap] at hcl
+  obtain ⟨x, hx, h2⟩ := hcl
+  rw [List.mem_map] at h2
+  obtain ⟨y, hy, heq⟩ := h2
+  have hcl' : cl = ant ++ [neg (o₁.varOf x), neg (o₂.varOf y), g x y] := by
+    simpa using heq.symm
+  subst hcl'
+  by_cases ax : a (o₁.varOf x) = true
+  · by_cases ay : a (o₂.varOf y) = true
+    · have hdx : o₁.decode a = some x := Oh.decode_of_true h₁ hx ax
+      have hdy : o₂.decode a = some y := Oh.decode_of_true h₂ hy ay
+      exact clause_eval_holds (g x y)
+        (List.mem_append_right _ (List.Mem.tail _ (List.Mem.tail _ (List.Mem.head _))))
+        (h x hx y hy hdx hdy)
+    · exact clause_eval_holds (neg (o₂.varOf y))
+        (List.mem_append_right _ (List.Mem.tail _ (List.Mem.head _)))
+        (by simp [neg_eval, ay])
+  · exact clause_eval_holds (neg (o₁.varOf x)) (List.mem_append_right _ (List.Mem.head _))
+      (by simp [neg_eval, ax])
+
 end ProtSat.OneHot

@@ -118,6 +118,13 @@ theorem sat_append {f g : CNF} {a : Assignment} :
     · exact h1 c hc
     · exact h2 c hc
 
+/-- Each half of a conjunction is satisfied. -/
+theorem sat_append_left {f g : CNF} {a : Assignment} (h : Sat a (f ++ g)) : Sat a f :=
+  fun c hc => h c (List.mem_append_left _ hc)
+
+theorem sat_append_right {f g : CNF} {a : Assignment} (h : Sat a (f ++ g)) : Sat a g :=
+  fun c hc => h c (List.mem_append_right _ hc)
+
 /-- A single clause as a formula. -/
 def clauseOf (cl : Clause) : CNF := ⟨[cl]⟩
 
@@ -339,5 +346,138 @@ def orClause (ls : List Lit) : CNF := clauseOf ls
 
 theorem sat_orClause {a : Assignment} {ls : List Lit} :
     Sat a (orClause ls) ↔ ls.any (fun l => l.eval a) = true := sat_clauseOf
+
+/-! ### Clause-list combinators
+
+The encoding generates most of its clauses as explicit lists of literal lists.  The
+combinators below let a whole clause family be written as one List (List Lit) and give the
+single lemma needed to discharge it: exhibit one literal of the clause that the assignment
+makes true. -/
+
+/-- A list of clauses as a formula. -/
+def cnfOf (l : List (List Lit)) : CNF := ⟨l⟩
+
+theorem sat_cnfOf {a : Assignment} {l : List (List Lit)} :
+    Sat a (cnfOf l) <-> ∀ cl ∈ l, Clause.eval a cl = true := by
+  simp [Sat, cnfOf]
+
+/-- A clause is satisfied as soon as one of its literals is. -/
+theorem clause_eval_holds {a : Assignment} {cl : Clause} (l : Lit) (h1 : l ∈ cl)
+    (h2 : Lit.eval a l = true) : Clause.eval a cl := by
+  rw [clause_eval_any]; exact ⟨l, h1, h2⟩
+
+/-- Adding a literal to a clause preserves satisfaction. -/
+theorem clause_eval_cons_of {a : Assignment} {l : Lit} {cl : Clause}
+    (h : Clause.eval a cl = true) : Clause.eval a (l :: cl) = true := by
+  rw [Clause.eval_cons, h, Bool.or_true]
+
+/-- Dropping a false literal preserves satisfaction of a clause. -/
+theorem clause_eval_cons_false {a : Assignment} {l : Lit} {cl : Clause}
+    (h : Clause.eval a (l :: cl) = true) (hl : l.eval a = false) :
+    Clause.eval a cl = true := by
+  rw [Clause.eval_cons, hl, Bool.false_or] at h; exact h
+
+/-- Dropping a prefix of false literals preserves satisfaction of a clause. -/
+theorem clause_eval_append_of_false {a : Assignment} : ∀ (ant : List Lit) (cl : Clause),
+    Clause.eval a (ant ++ cl) = true ->
+    (∀ l ∈ ant, l.eval a = false) -> Clause.eval a cl = true := by
+  intro ant
+  induction ant with
+  | nil => intro cl h _; simpa using h
+  | cons l rest ih =>
+      intro cl h hall
+      rw [List.cons_append] at h
+      exact ih cl (clause_eval_cons_false h (hall l (List.Mem.head _)))
+        (fun l' hl' => hall l' (List.Mem.tail _ hl'))
+
+/-- The complement of a literal. -/
+def Lit.flip (l : Lit) : Lit := ⟨l.var, !l.neg⟩
+
+@[simp] theorem Lit.flip_eval (a : Assignment) (l : Lit) : l.flip.eval a = !l.eval a := by
+  cases l with
+  | mk v n => cases n <;> simp [Lit.flip, Lit.eval]
+
+/-- A clause made of the complements of true literals is unsatisfied. -/
+theorem clause_eval_map_flip_false {a : Assignment} : ∀ (ls : List Lit),
+    (∀ l ∈ ls, l.eval a = true) -> Clause.eval a (ls.map Lit.flip) = false := by
+  intro ls
+  induction ls with
+  | nil => intro _; simp [Clause.eval]
+  | cons l rest ih =>
+      intro h
+      rw [List.map_cons, Clause.eval_cons]
+      have hl : l.eval a = true := h l (List.Mem.head _)
+      rw [Lit.flip_eval, hl, Bool.not_true, Bool.false_or]
+      exact ih (fun l' hl' => h l' (List.Mem.tail _ hl'))
+
+/-- **Definition of a conjunction by a fresh variable.**  andNDef aux ls is the standard
+Tseitin definition of aux <-> (l1 and ... and ln): one clause (not aux or l_i) per
+literal, plus the single clause (aux or not l_1 or ... or not l_n).  ProtSat.Encode uses
+it for the conjunctions that make up a violation condition. -/
+def andNDefClauses (aux : BVar) (ls : List Lit) : List Clause :=
+  (ls.map fun l => [neg aux, l]) ++ [pos aux :: ls.map Lit.flip]
+
+def andNDef (aux : BVar) (ls : List Lit) : CNF := ⟨andNDefClauses aux ls⟩
+
+theorem mem_andNDef_left {aux : BVar} {ls : List Lit} {l : Lit} (h : l ∈ ls) :
+    [neg aux, l] ∈ (andNDef aux ls).clauses :=
+  List.mem_append_left _ (List.mem_map.mpr ⟨l, h, rfl⟩)
+
+theorem mem_andNDef_right {aux : BVar} {ls : List Lit} :
+    (pos aux :: ls.map Lit.flip) ∈ (andNDef aux ls).clauses :=
+  List.mem_append_right _ (List.Mem.head _)
+
+/-- If every literal of ls is true and the clause (aux or not-ls) holds, aux is true. -/
+theorem aux_true_of_andN {a : Assignment} {aux : BVar} : ∀ (ls : List Lit),
+    Clause.eval a (pos aux :: ls.map Lit.flip) = true ->
+    (∀ l ∈ ls, l.eval a = true) -> a aux = true := by
+  intro ls
+  induction ls with
+  | nil =>
+      intro h _
+      simpa [Clause.eval, List.map_nil, List.any_cons, List.any_nil, Bool.or_false, pos_eval]
+        using h
+  | cons l rest ih =>
+      intro h hall
+      by_cases haux : a aux = true
+      · exact haux
+      · have h1 : Clause.eval a (Lit.flip l :: rest.map Lit.flip) = true :=
+          clause_eval_cons_false h (by simp [pos_eval, haux])
+        have hl : l.eval a = true := hall l (List.Mem.head _)
+        have h2 : Clause.eval a (rest.map Lit.flip) = true :=
+          clause_eval_cons_false h1 (by simp [Lit.flip_eval, hl])
+        exact ih (clause_eval_cons_of h2) (fun l' hl' => hall l' (List.Mem.tail _ hl'))
+
+theorem sat_andNDef {a : Assignment} {aux : BVar} {ls : List Lit} :
+    Sat a (andNDef aux ls) <->
+      ((a aux = true -> (∀ l ∈ ls, l.eval a = true)) ∧
+       ((∀ l ∈ ls, l.eval a = true) -> a aux = true)) := by
+  constructor
+  · intro h
+    refine ⟨fun haux l hls => ?_, fun hall => ?_⟩
+    · have h1 := h _ (mem_andNDef_left hls)
+      rw [Clause.eval_cons, neg_eval, haux, Bool.not_true, Bool.false_or, Clause.eval,
+        List.any_cons, List.any_nil, Bool.or_false] at h1
+      exact h1
+    · exact aux_true_of_andN ls (h _ mem_andNDef_right) hall
+  · rintro ⟨h1, h2⟩ cl hcl
+    rw [andNDef, andNDefClauses, List.mem_append, List.mem_map, List.mem_singleton] at hcl
+    rcases hcl with h | h
+    · obtain ⟨l, hl, rfl⟩ := h
+      by_cases haux : a aux = true
+      · exact clause_eval_holds l (List.Mem.tail _ (List.Mem.head _)) (h1 haux l hl)
+      · exact clause_eval_holds (neg aux) (List.Mem.head _) (by simp [neg_eval, haux])
+    · rcases h with rfl
+      by_cases haux : a aux = true
+      · exact clause_eval_holds (pos aux) (List.Mem.head _) haux
+      · by_cases hall : ∀ l ∈ ls, l.eval a = true
+        · exact absurd (h2 hall) haux
+        · push_neg at hall
+          obtain ⟨l, hl, hfalse⟩ := hall
+          refine clause_eval_holds l.flip
+            (List.Mem.tail _ (List.mem_map.mpr ⟨l, hl, rfl⟩)) ?_
+          have : l.eval a = false := by
+            cases h : l.eval a <;> simp_all
+          rw [Lit.flip_eval, this, Bool.not_false]
 
 end ProtSat

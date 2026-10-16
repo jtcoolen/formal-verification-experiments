@@ -1,4 +1,5 @@
 import Merkle.Free
+import Merkle.Complexity
 
 /-
 Copyright (c) 2026 Formally Verified Examples.
@@ -18,9 +19,8 @@ and every example is kernel-checked (`rfl`, `decide`, or a proved theorem), neve
 
 * **Vectors as trees.** `ofLeaves` builds a `Tree α n` from a flat list of exactly `2 ^ n`
   entries; `leaves_ofLeaves` and `ofLeaves_leaves` are the two round trips, and `get_ofLeaves`
-  identifies the entry a path reads out. The right index is `leafIndex`, the left-to-right
-  position - *not* `Path.toNat`, which numbers paths root-bit-first and so is a bit reversal of
-  the leaf order. `pathOfIndex` / `leafIndex_pathOfIndex` give the inverse direction.
+  identifies the entry a path reads out. `leafIndex` is an alias for `Path.toNat`, the
+  left-to-right position. `pathOfIndex` / `leafIndex_pathOfIndex` give the inverse direction.
 * **Sparse trees.** `fill` is the all-default subtree and `fillHash` its digest, computed with
   `n` uses of `node` instead of `2 ^ n` uses of `leaf` (`rootHash_fill`, `get_fill`,
   `leaves_fill`, `fill_eq_ofLeaves`).
@@ -30,7 +30,7 @@ and every example is kernel-checked (`rfl`, `decide`, or a proved theorem), neve
   says untouched leaves are untouched, `get_updateAll_last` says the last write wins, and
   `rootHash_updateAll` says the batched root equals folding `verify` over the individual
   incremental updates.
-* **Transparency log.** `history_binding` (equal heads agree at every position),
+* **Authenticated snapshots.** `history_binding` (equal heads agree at every position),
   `extension_changes_root` / `extension_preserves_root` (exactly the writes that change an entry
   move the head), and `forged_inclusion_rejected`.
 * **Set certificates.** `Claim` bundles `(path, value, proof)`; `multi_inclusion` turns a list
@@ -61,35 +61,12 @@ theorem length_nil_pow_zero_false {α : Type} : ¬ (([] : List α).length = 2 ^ 
   intro h
   rw [List.length_nil, Nat.pow_zero] at h
   omega
-/-- The left-to-right position of the leaf addressed by a path.
-
-`Path.toNat` numbers paths with the *root* branch as the most significant bit, which is the
-reverse of the order in which `Tree.leaves` lists them. `leafIndex` is the index that matches
-`leaves`: taking the right branch at depth `m + 1` skips the whole left subtree, i.e. `2 ^ m`
-leaves. -/
-def leafIndex : (n : Nat) → Path n → Nat
-  | 0, _ => 0
-  | m + 1, Path.left p => leafIndex m p
-  | m + 1, Path.right p => 2 ^ m + leafIndex m p
+/-- The left-to-right leaf index, using the same convention as `Path.toNat`. -/
+def leafIndex (n : Nat) (p : Path n) : Nat := p.toNat
 
 /-- A path never addresses a position beyond the end of the vector. -/
-theorem leafIndex_lt : ∀ (n : Nat) (p : Path n), leafIndex n p < 2 ^ n := by
-  intro n
-  induction n with
-  | zero => intro p; cases p; simp [leafIndex]
-  | succ n ih =>
-      intro p
-      cases p with
-      | left p =>
-          have h := ih p
-          have h2 : 2 ^ (n + 1) = 2 * 2 ^ n := by rw [Nat.pow_succ, Nat.mul_comm]
-          show leafIndex n p < 2 ^ (n + 1)
-          omega
-      | right p =>
-          have h := ih p
-          have h2 : 2 ^ (n + 1) = 2 * 2 ^ n := by rw [Nat.pow_succ, Nat.mul_comm]
-          show 2 ^ n + leafIndex n p < 2 ^ (n + 1)
-          omega
+theorem leafIndex_lt (n : Nat) (p : Path n) : leafIndex n p < 2 ^ n :=
+  Path.toNat_lt n p
 
 /-- Build the depth-`n` tree whose leaves, left to right, are the entries of `l`.
 
@@ -264,10 +241,23 @@ theorem leafIndex_pathOfIndex : ∀ (i : Nat) (n : Nat) (h : i < 2 ^ n),
 example : ofLeaves 2 [0, 1, 2, 3] rfl =
     Tree.node (Tree.node (Tree.leaf 0) (Tree.leaf 1)) (Tree.node (Tree.leaf 2) (Tree.leaf 3)) := rfl
 
-/-- Kernel check: `Path.toNat` and `leafIndex` disagree exactly by the bit reversal, and it is
-`leafIndex` that matches the leaf order. -/
-example : (Path.left (Path.right Path.nil)).toNat = 2 ∧
+/-- Both indexing APIs use the left-to-right leaf order. -/
+example : (Path.left (Path.right Path.nil)).toNat = 1 ∧
     leafIndex 2 (Path.left (Path.right Path.nil)) = 1 := ⟨rfl, rfl⟩
+
+/-- Looking up a path agrees with indexing the tree's leaf vector. -/
+theorem get_eq_leaves_get (t : Tree α n) (p : Path n) :
+    t.get p = t.leaves.get ⟨p.toNat, by
+      rw [Tree.leaves_length]; exact Path.toNat_lt n p⟩ := by
+  have h := get_ofLeaves_get n t.leaves (Tree.leaves_length n t) p
+  rw [ofLeaves_leaves] at h
+  exact h
+
+/-- Converting a path to its index and back preserves the path. -/
+theorem pathOfIndex_toNat (p : Path n) :
+    pathOfIndex p.toNat n (Path.toNat_lt n p) = p := by
+  apply Path.toNat_injective
+  exact leafIndex_pathOfIndex p.toNat n (Path.toNat_lt n p)
 
 example : (ofLeaves 2 [0, 1, 2, 3] rfl).get (Path.left (Path.right Path.nil)) = 1 := rfl
 
@@ -425,9 +415,9 @@ def updateStep {α β : Type} [m : MerkleHash α β] :
     (Tree α n × β) → Path n × α → Tree α n × β :=
   fun acc pa => (acc.1.update pa.1 pa.2, verify (ofTree (β := β) acc.1 pa.1) (m.leaf pa.2))
 
-/-- **Batch update correctness.** The root of the batched tree equals folding `verify` over the
-individual updates: `O(|l| * n)` hashes instead of `O(|l| * 2 ^ n)`, and this theorem says the
-shortcut agrees with hashing the whole result. -/
+/-- **Batch update correctness.** Folding the individual updates produces the final root.
+`updateStep` generates each path from an uncached tree, so it costs `O(2 ^ n)` hash invocations
+per update. An `O(n)` update requires an available proof or cached sibling digests. -/
 theorem rootHash_updateAll {α β : Type} [m : MerkleHash α β] :
     ∀ {n : Nat} (t : Tree α n) (l : List (Path n × α)),
       rootHash (m := m) (updateAll t l) =
@@ -443,7 +433,38 @@ theorem rootHash_updateAll {α β : Type} [m : MerkleHash α β] :
               (t.update p a, verify (ofTree t p) (m.leaf a)) xs).2
           rw [ih, rootHash_update (α := α) (β := β) (m := m) n t p a]
 
-/-! ### A transparency log / append-only ledger -/
+/-- Hash-invocation cost of the update steps, including generating every old proof. -/
+def updateStepsCost : Tree α n → List (Path n × α) → Nat
+  | _, [] => 0
+  | t, (p, a) :: xs => t.proofGenerationCost p + n + 1 + updateStepsCost (t.update p a) xs
+
+/-- Exact cost of uncached batch steps in the structural hash-invocation model. -/
+theorem updateStepsCost_eq (t : Tree α n) (l : List (Path n × α)) :
+    updateStepsCost t l = l.length * (2 ^ (n + 1) - 1) := by
+  induction l generalizing t with
+  | nil => simp [updateStepsCost]
+  | cons pa xs ih =>
+      obtain ⟨p, a⟩ := pa
+      change t.proofGenerationCost p + n + 1 + updateStepsCost (t.update p a) xs =
+        (xs.length + 1) * (2 ^ (n + 1) - 1)
+      rw [Tree.proofGenerationCost_add_depth, Tree.hashCost_eq_pow, ih,
+        Nat.add_mul, Nat.one_mul]
+      omega
+
+/-- Include the initial root computation performed by `rootHash_updateAll`'s right side. -/
+def batchHashCost (t : Tree α n) (l : List (Path n × α)) : Nat :=
+  t.hashCost + updateStepsCost t l
+
+theorem batchHashCost_eq (t : Tree α n) (l : List (Path n × α)) :
+    batchHashCost t l = (l.length + 1) * (2 ^ (n + 1) - 1) := by
+  rw [batchHashCost, Tree.hashCost_eq_pow, updateStepsCost_eq, Nat.add_mul, Nat.one_mul]
+  omega
+
+/-! ### Fixed-size authenticated log snapshots
+
+These operations establish binding and detect changed entries within one snapshot. They do
+not define append, growth, or consistency proofs between snapshots of different lengths.
+-/
 
 /-- A log of `2 ^ n` entries is just a `Tree α n`: the position is the path. -/
 abbrev Log (α : Type) (n : Nat) := Tree α n
@@ -464,7 +485,7 @@ theorem history_binding {α β : Type} [m : MerkleHash α β] :
   intro n t₁ t₂ h p
   exact rootHash_injective (m := m) t₁ t₂ h ▸ rfl
 
-/-- **Appending changes the head.** Writing a value at `p` that is not already there moves the
+/-- **Changing an entry changes the head.** Writing a new value at `p` moves the
 root, so a log cannot be edited in place without its head noticing. -/
 theorem extension_changes_root {α β : Type} [m : MerkleHash α β] :
     ∀ (n : Nat) (t : Log α n) (p : Path n) (a : α), logEntry t p ≠ a →
@@ -564,20 +585,52 @@ theorem honestClaims_correct {α β : Type} [m : MerkleHash α β] :
     multi_inclusion n t (honestClaims (m := m) t ps)
       (honestClaims_allVerify n t ps) (honestClaims_wellFormed n t ps) c hc
 
-/-- The boolean test a client would actually run: every claim in `cs` folds up to `root`. -/
+/-- A complete certificate checks both root agreement and every claimed position. -/
+def certificateValid {α β : Type} [m : MerkleHash α β] (root : β)
+    (cs : List (Claim α β n)) : Prop :=
+  allVerify (m := m) root cs ∧ ∀ c ∈ cs, wellFormed c
+
+/-- The client check validates both the proof's direction bits and its root digest. -/
 def allVerifyB {α β : Type} [DecidableEq β] [m : MerkleHash α β] (root : β)
     (cs : List (Claim α β n)) : Bool :=
-  cs.all (fun c => decide (verify c.proof (m.leaf c.value) = root))
+  cs.all (fun c => decide (Proof.pathOf c.proof = c.path) &&
+    decide (verify c.proof (m.leaf c.value) = root))
 
-/-- The boolean test agrees with the `Prop` it implements, so a client that runs it learns
-something true. -/
+/-- Boolean acceptance is equivalent to the complete certificate specification. -/
 theorem allVerifyB_eq {α β : Type} [DecidableEq β] [m : MerkleHash α β] (root : β)
     (cs : List (Claim α β n)) :
-    allVerifyB (m := m) root cs = true ↔ allVerify (m := m) root cs := by
-  show (cs.all (fun c => decide (verify c.proof (m.leaf c.value) = root)) = true) ↔
-    ∀ c ∈ cs, verify c.proof (m.leaf c.value) = root
+    allVerifyB (m := m) root cs = true ↔ certificateValid (m := m) root cs := by
+  unfold allVerifyB
   rw [List.all_eq_true]
-  refine ⟨fun h c hc => of_decide_eq_true (h c hc), fun h c hc => decide_eq_true (h c hc)⟩
+  constructor
+  · intro h
+    constructor
+    · intro c hc
+      change verify c.proof (m.leaf c.value) = root
+      exact of_decide_eq_true (Bool.and_eq_true_iff.mp (h c hc)).2
+    · intro c hc
+      change Proof.pathOf c.proof = c.path
+      exact of_decide_eq_true (Bool.and_eq_true_iff.mp (h c hc)).1
+  · rintro ⟨hv, hw⟩ c hc
+    exact Bool.and_eq_true_iff.mpr
+      ⟨decide_eq_true (show Proof.pathOf c.proof = c.path from hw c hc),
+       decide_eq_true (show verify c.proof (m.leaf c.value) = root from hv c hc)⟩
+
+/-- End-to-end soundness: acceptance certifies the value at the claimed position. -/
+theorem allVerifyB_sound {α β : Type} [DecidableEq β] [m : MerkleHash α β]
+    (t : Tree α n) (cs : List (Claim α β n)) :
+    allVerifyB (m := m) (rootHash t) cs = true →
+      ∀ c ∈ cs, t.get c.path = c.value := by
+  intro h
+  obtain ⟨hv, hw⟩ := (allVerifyB_eq (rootHash t) cs).mp h
+  exact multi_inclusion n t cs hv hw
+
+/-- Every honest certificate passes the executable checker. -/
+theorem allVerifyB_complete {α β : Type} [DecidableEq β] [m : MerkleHash α β]
+    (t : Tree α n) (ps : List (Path n)) :
+    allVerifyB (m := m) (rootHash t) (honestClaims t ps) = true :=
+  (allVerifyB_eq _ _).mpr
+    ⟨honestClaims_allVerify n t ps, honestClaims_wellFormed n t ps⟩
 
 /-! ### Concrete scenarios -/
 
@@ -623,6 +676,20 @@ example : allVerify (α := Nat) (β := Dig Nat) (rootHash balances)
 example : allVerifyB (α := Nat) (β := Dig Nat) (rootHash balances)
     ((honestClaims balances [acct1]).map (fun c => { c with value := 999 })) = false := by decide
 
+/-- A genuine proof relabeled as another account passes the root-only predicate. -/
+def mislabeledClaim : Claim Nat (Dig Nat) 2 :=
+  { path := acct2, value := 250, proof := ofTree balances acct1 }
+
+theorem mislabeledClaim_root_verifies : allVerify (rootHash balances) [mislabeledClaim] := by
+  intro c hc
+  have h : c = mislabeledClaim := List.mem_singleton.mp hc
+  subst c
+  exact verify_complete 2 balances acct1
+
+/-- The complete checker rejects it because its claimed position is false. -/
+theorem mislabeledClaim_position_false : balances.get mislabeledClaim.path ≠ mislabeledClaim.value := by decide
+theorem mislabeledClaim_rejected : allVerifyB (rootHash balances) [mislabeledClaim] = false := by decide
+
 /-- A batch transfer over two accounts, with the batched root computed by the kernel. -/
 example : rootHash (α := Nat) (β := Dig Nat) (updateAll balances [(acct1, 200), (acct2, 50)]) =
     Dig.node (Dig.node (Dig.leaf 100) (Dig.leaf 200)) (Dig.node (Dig.leaf 50) (Dig.leaf 75)) := rfl
@@ -634,7 +701,7 @@ example : (updateAll balances [(acct1, 200), (acct2, 50)]).get
     (Path.left (Path.left Path.nil)) (by decide)]
   rfl
 
-/-- A sixteen-entry append-only log. -/
+/-- A sixteen-entry authenticated log snapshot. -/
 def log16 : Tree Nat 4 :=
   ofLeaves 4 [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] (by simp)
 
@@ -652,7 +719,7 @@ example : verify (β := Dig Nat) (ofTree (β := Dig Nat) log16 pos11) (Dig.leaf 
 example : verify (β := Dig Nat) (ofTree (β := Dig Nat) log16 pos11) (Dig.leaf 12) ≠
     rootHash (α := Nat) (β := Dig Nat) log16 := by decide
 
-/-- Appending a replacement for entry 11 moves the head of the log. -/
+/-- Replacing entry 11 moves the head of the snapshot. -/
 example : rootHash (α := Nat) (β := Dig Nat) (log16.update pos11 111) ≠
     rootHash (α := Nat) (β := Dig Nat) log16 := by decide
 

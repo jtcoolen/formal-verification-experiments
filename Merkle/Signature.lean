@@ -25,7 +25,7 @@ signature, with no assumptions at all:
 
 * `Sig.complete` - the honest path verifies.
 * `Sig.update` - the incremental root equals the full rehash.
-* `Sig.root_eq_rootHash` - this layer agrees with `Merkle.rootHash` whenever the axioms do hold,
+* `sigRoot_eq_rootHash` - this layer agrees with `Merkle.rootHash` whenever the axioms do hold,
   so nothing is duplicated or re-proved differently.
 * `merkleHashOfSig` - adding `SigCollisionFree` recovers a full `MerkleHash`, so every theorem
   in `Merkle/Proof.lean` and `Merkle/Security.lean` applies unchanged.
@@ -152,8 +152,7 @@ instance merkleHashOfSig {α β : Type} [s : MerkleSig α β]
   leaf := s.leaf
   leafInjective := @SigCollisionFree.leafInjective α β s cf
 
-/-- With the axioms present, the signature layer agrees with `rootHash` definitionally, so
-nothing is proved twice in two different ways. -/
+/-- With the injectivity assumptions present, the two recursive root functions agree. -/
 theorem sigRoot_eq_rootHash {α β : Type} [s : MerkleSig α β]
     [cf : @SigCollisionFree α β s] :
     ∀ (n : Nat) (t : Tree α n),

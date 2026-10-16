@@ -26,10 +26,11 @@ values.
 * `sig_complete`, `sig_update` - the correctness theorems instantiated at real SHA3-512 and
   proved with **no assumptions whatsoever** about the hash: `#print axioms` reports only
   Lean's standard `propext` and `Quot.sound`.
-* `demoRootHex` - a Merkle root computed by the Lean kernel, cross-checked against
+* `demoRootHex` - a computed Merkle root, cross-checked against
   `hashlib.sha3_512`.
 * `no_collision_free_sha3_512` - and the limit: no `MerkleHash` over a 512-bit digest exists,
-  so the security theorems stay conditional. `512 < 2 ^ 10`, so the counting barrier of
+  so absolute-injectivity theorems do not apply. Assumption-free collision reductions remain
+  available. `512 < 2 ^ 10`, so the counting barrier of
   `Merkle/Security.lean` applies.
 -/
 
@@ -48,7 +49,7 @@ def bvBytes (b : Digest) : List UInt8 :=
 def bytesBv (bs : List UInt8) : Digest :=
   bs.foldl (fun acc x => acc.shiftLeft 8 ||| BitVec.ofNat 512 x.toNat) 0
 
-/-- The two-byte domain-separation tags, so a leaf encoding can never be mistaken for an
+/-- The two one-byte domain-separation tags, so a leaf encoding can never be mistaken for an
 internal node. No proof in this library needs them - `leaf` and `node` are already separate
 operations - but a real deployment must use them. -/
 def leafTag : UInt8 := 0x00
@@ -81,9 +82,9 @@ end
 be discharged here and the security theorems (`verify_sound`, `rootHash_injective`,
 `no_forgery`) cannot be applied to SHA3-512 unconditionally.
 
-They stay available *conditionally*: were the hash collision-free, they would follow by
-`merkleHashOfSig`. Postulating that here would make the theory inconsistent, since its negation
-is this theorem - which is why this file contains no `axiom`. -/
+Use `collision_of_rootHash_eq` and `collision_of_forgery` over the signature instead: they
+produce hash collisions from attacks without requiring absolute injectivity. Postulating that
+injectivity here would make the theory inconsistent. -/
 theorem no_collision_free_sha3_512 : ¬ Nonempty (MerkleHash Bool Digest) :=
   no_collision_free_bitvec 10 512 (by decide)
 
@@ -116,8 +117,8 @@ def demoTree : Tree Digest 2 :=
 /-- The path to the last leaf. -/
 def demoPath : Path 2 := Path.right (Path.right Path.nil)
 
-/-- The root of `demoTree` under real SHA3-512, as hex. Computed by the Lean kernel, not
-assumed: `Impl.sha3_512` is the FIPS 202 transcription from lean4-hash. -/
+/-- The root of `demoTree` under real SHA3-512, as hex. Evaluated from
+`Impl.sha3_512`, the FIPS 202 transcription from lean4-hash. -/
 def demoRootHex : String := Impl.toHex (bvBytes (Sig.root (s := sha3Sig) demoTree))
 
 -- `sha3Sig` must actually hash: the leaf digest differs from the leaf itself. (An earlier

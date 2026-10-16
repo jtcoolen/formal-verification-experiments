@@ -9,9 +9,9 @@ license information.
 /-!
 # Concrete complexity of Merkle operations
 
-The library is verified code, so its cost is a mathematical property of the definitions
-rather than a measurement. This file states the cost of every operation as an **exact
-closed form** and derives the asymptotic classification from those closed forms.
+This file defines structural hash-invocation costs and proves their **exact closed forms**.
+The model follows full hashing, proof generation, and proof folding separately; it is not a
+semantics or a timing model of the Lean compiler.
 
 Lean core has no asymptotic-analysis library, so we formalise the notion we need directly:
 
@@ -32,10 +32,11 @@ Lean core has no asymptotic-analysis library, so we formalise the notion we need
 * `Path.cost_eq`, `Proof.cost_eq` - addressing a leaf and verifying a proof each cost exactly
   `n` steps, and `n = Nat.log2 N`, i.e. **logarithmic in the number of leaves**.
 * `not_pow_isBigO_linear` - `2 ^ n` is **not** `O n`. This is the content of the claim that a
-  full rehash is genuinely super-linear, so the `O(log n)` incremental update is an
-  asymptotic separation and not a constant-factor optimisation.
+  full rehash is super-linear in depth. Folding an already available path costs `O(n)`
+  hashes; generating that path from an uncached tree costs `O(2 ^ n)` hashes.
 * `Proof.digestCount_eq` - an authentication path for a `2 ^ n`-leaf tree carries exactly
-  `n = log2 N` sibling digests: the proof size is optimal, not merely bounded.
+  `n = log2 N` sibling digests. This counts fields of this proof format, without a lower
+  bound on alternative encodings.
 -/
 
 namespace Merkle
@@ -161,8 +162,8 @@ theorem exists_forall_ge_mul_lt_two_pow :
 
 Read against `Tree.hashCost_eq_pow`: recomputing a root from scratch is genuinely
 super-linear in the depth. Combined with `Path.cost_eq` and `Proof.cost_eq`, this is the
-precise sense in which an incremental update (`n` hashes) beats a full rehash
-(`2 ^ (n + 1) - 1` hashes): an asymptotic separation, not a constant-factor win. -/
+sense in which folding an available authentication path (`n` node hashes plus one leaf hash)
+beats a full rehash (`2 ^ (n + 1) - 1` hashes). The cost of generating that path is separate. -/
 theorem not_pow_isBigO_linear : ¬ IsBigO (fun n => 2 ^ n) (fun n => n) := by
   intro ⟨c, N₀, bound⟩
   obtain ⟨n, hn₀, hn⟩ := exists_forall_ge_mul_lt_two_pow c N₀
@@ -258,6 +259,44 @@ theorem Path.cost_eq : ∀ (n : Nat) (p : Path n), p.cost = n := by
       | left q => show 1 + Path.cost q = n + 1; rw [ih q]; omega
       | right q => show 1 + Path.cost q = n + 1; rw [ih q]; omega
 
+/-- Hash invocations needed to generate a proof from an uncached tree. Every sibling
+subtree is rehashed by `ofTree` (or `Sig.ofTree`). -/
+def Tree.proofGenerationCost : Tree α n → Path n → Nat
+  | Tree.leaf _, Path.nil => 0
+  | Tree.node l r, Path.left p => l.proofGenerationCost p + r.hashCost
+  | Tree.node l r, Path.right p => r.proofGenerationCost p + l.hashCost
+
+/-- Generating the old proof and folding a newly hashed leaf costs a full rehash.
+The logarithmic update bound applies when the authentication path is already available. -/
+theorem Tree.proofGenerationCost_add_depth :
+    ∀ (n : Nat) (t : Tree α n) (p : Path n),
+      t.proofGenerationCost p + n + 1 = t.hashCost := by
+  intro n
+  induction n with
+  | zero => intro t p; cases t; cases p; rfl
+  | succ n ih =>
+      intro t p
+      cases t with
+      | node l r =>
+          cases p with
+          | left p =>
+              have h := ih l p
+              change l.proofGenerationCost p + r.hashCost + (n + 1) + 1 =
+                1 + l.hashCost + r.hashCost
+              omega
+          | right p =>
+              have h := ih r p
+              change r.proofGenerationCost p + l.hashCost + (n + 1) + 1 =
+                1 + l.hashCost + r.hashCost
+              omega
+
+/-- Exact proof-generation cost, excluding the new leaf and its verification fold. -/
+theorem Tree.proofGenerationCost_eq (t : Tree α n) (p : Path n) :
+    t.proofGenerationCost p = 2 ^ (n + 1) - 1 - (n + 1) := by
+  have h := Tree.proofGenerationCost_add_depth n t p
+  rw [Tree.hashCost_eq_pow] at h
+  omega
+
 /-- A depth-`n` path is addressed by exactly `n` direction bits. -/
 theorem Path.length_toBits : ∀ (n : Nat) (p : Path n), (Path.toBits p).length = n := by
   intro n
@@ -284,13 +323,9 @@ theorem Proof.cost_eq : ∀ (n : Nat) (h : Proof β n), h.cost = n := by
       | left h _ => show 1 + Proof.cost h = n + 1; rw [ih h]; omega
       | right h _ => show 1 + Proof.cost h = n + 1; rw [ih h]; omega
 
-/-- **Optimal proof size.** An authentication path for a depth-`n` tree carries exactly `n`
-sibling digests - and therefore exactly `Nat.log2 N` digests for a tree with `N` leaves.
-
-This is not merely an upper bound: the type `Proof β n` has no more and no fewer digest
-fields than this, so no proof can be larger, and a proof omitting a level would not have
-type `Proof β n`. Combined with `verify_complete` (which shows `n` digests *suffice*) this
-is the usual optimality statement for Merkle authentication paths. -/
+/-- **Exact size of this proof format.** A depth-`n` authentication path carries exactly
+`n` sibling digests. This theorem counts fields of `Proof`; it makes no optimality claim about
+compressed proofs or alternative certificate formats. -/
 theorem Proof.digestCount_eq : ∀ (n : Nat) (h : Proof β n), h.digestCount = n := by
   intro n
   induction n with

@@ -106,9 +106,9 @@ theorem le_maxNat (l : List Nat) (lo : Nat) : lo ≤ maxNat l lo := by
 
 /-- The index of the first occurrence of a in l, or 0 when a is absent.  Written by hand
 rather than with List.idxOf so that its unfolding is available to the proofs below. -/
-def pos [BEq α] (a : α) : List α -> Nat
+def ixOf [BEq α] (a : α) : List α -> Nat
   | [] => 0
-  | x :: xs => if x == a then 0 else pos a xs + 1
+  | x :: xs => if x == a then 0 else ixOf a xs + 1
 
 /-- Reading the head of a list at index 0. -/
 theorem rget_zero {α : Type} (x : α) (xs : List α) : rget (x :: xs) 0 = some x := rfl
@@ -139,18 +139,55 @@ theorem rget_oob_ge : ∀ (l : List α) (i : Nat), i ≥ l.length -> rget l i = 
           show rget xs i = none
           exact ih i (by simp [List.length_cons] at hi; omega)
 
+/-- An in-range read succeeds. -/
+theorem rget_lt {α : Type} : ∀ (l : List α) (i : Nat), i < l.length -> ∃ x, rget l i = some x := by
+  intro l
+  induction l with
+  | nil => intro i h; exact absurd h (Nat.not_lt_zero i)
+  | cons x xs ih =>
+      intro i hi
+      cases i with
+      | zero => exact ⟨x, rfl⟩
+      | succ i => exact ih i (by simpa [List.length_cons] using hi)
+
+/-- An in-range read returns an element of the list. -/
+theorem rget_mem {α : Type} : ∀ (l : List α) (i : Nat) (x : α), i < l.length ->
+    rget l i = some x -> x ∈ l := by
+  intro l
+  induction l with
+  | nil => intro i x _ h; cases h
+  | cons y ys ih =>
+      intro i x hi h
+      cases i with
+      | zero => cases h; exact List.Mem.head _
+      | succ i => exact List.Mem.tail _ (ih i x (by simpa [List.length_cons] using hi) h)
+
+/-- Whatever an in-bounds or out-of-bounds read returns is an element of the list. -/
+theorem rget_some_mem {α : Type} : ∀ (l : List α) (i : Nat) (x : α),
+    rget l i = some x -> x ∈ l := by
+  intro l
+  induction l with
+  | nil => intro i x h; cases h
+  | cons y ys ih =>
+      intro i x h
+      cases i with
+      | zero =>
+          cases h
+          exact List.Mem.head _
+      | succ i => exact List.Mem.tail _ (ih i x h)
+
 /-- The first occurrence of an element reads back as that element. -/
-theorem rget_pos [BEq α] [LawfulBEq α] : ∀ (l : List α) (a : α),
-    a ∈ l -> rget l (pos a l) = some a := by
+theorem rget_ixOf [BEq α] [LawfulBEq α] : ∀ (l : List α) (a : α),
+    a ∈ l -> rget l (ixOf a l) = some a := by
   intro l
   induction l with
   | nil => intro a h; cases h
   | cons x xs ih =>
       intro a h
       by_cases hx : x == a
-      · rw [pos, if_pos hx]
+      · rw [ixOf, if_pos hx]
         exact LawfulBEq.eq_of_beq hx ▸ rget_zero x xs
-      · rw [pos, if_neg hx, rget_succ]
+      · rw [ixOf, if_neg hx, rget_succ]
         rw [List.mem_cons] at h
         rcases h with rfl | h'
         · exact absurd (by simp) hx
@@ -175,7 +212,7 @@ def allExprs (P : Protocol) : List Expr :=
       | Action.commit _ peer v => Expr.subexpressions peer ++ Expr.subexpressions v).eraseDups
 
 /-- The index of an expression in the expression table. -/
-def eIdx (P : Protocol) (e : Expr) : Nat := pos e (allExprs P)
+def eIdx (P : Protocol) (e : Expr) : Nat := ixOf e (allExprs P)
 
 /-- The expression at a given table index. -/
 def eAt (P : Protocol) (k : Nat) : Expr := (rget (allExprs P) k).getD (Expr.agent 0)
@@ -201,6 +238,81 @@ structure Shape where
   /-- The number of distinct subexpressions over all roles. -/
   nE1 : Nat
 
+/-! ### Deduction instances -/
+
+/-- One instance of one of the attacker rules of specification section 2, expressed over the
+finite universe: the number of its conclusion, and the numbers of the universe messages it
+requires the attacker to already know.  The SAT encoding gives one event alternative to each
+instance, which is what turns the eleven deduction rules into propositional clauses without
+any exponential case split. -/
+structure DedInst where
+  /-- The index of the conclusion in the universe. -/
+  concl : Nat
+  /-- The indices of the premises in the universe. -/
+  prem : List Nat
+  deriving Repr, DecidableEq
+
+/-- The index of a message in the universe, if it is there at all. -/
+def tIx (sh : Shape) (t : Term) : Option Nat :=
+  if t ∈ sh.U then some (ixOf t sh.U) else none
+
+/-- The rule instances whose conclusion is the universe message with number u.  At most a
+constant number per message, so the whole list is linear in the size of the universe. -/
+def dedInstsOf (sh : Shape) (u : Nat) : List DedInst :=
+  match rget sh.U u with
+  | none => []
+  | some t =>
+      { concl := u, prem := [u] } ::
+      (match t with
+       | Term.agent _ => [{ concl := u, prem := [] }]
+       | Term.key (Key.pub _) => [{ concl := u, prem := [] }]
+       | Term.pair x y =>
+           match tIx sh x, tIx sh y with
+           | some a, some b => [{ concl := u, prem := [a, b] }]
+           | _, _ => []
+       | Term.encS m k =>
+           match tIx sh m, tIx sh (Term.key k) with
+           | some a, some b => [{ concl := u, prem := [a, b] }]
+           | _, _ => []
+       | Term.encA m _ =>
+           match tIx sh m with
+           | some a => [{ concl := u, prem := [a] }]
+           | none => []
+       | Term.hash m =>
+           match tIx sh m with
+           | some a => [{ concl := u, prem := [a] }]
+           | none => []
+       | _ => [])
+      ++ (sh.U.filterMap fun p =>
+          match p with
+          | Term.pair x y =>
+              if x == t then some { concl := u, prem := [ixOf p sh.U] }
+              else if y == t then some { concl := u, prem := [ixOf p sh.U] }
+              else none
+          | Term.encS m k =>
+              if m == t then
+                match tIx sh (Term.key k) with
+                | some b => some { concl := u, prem := [ixOf p sh.U, b] }
+                | none => none
+              else none
+          | Term.encA m a =>
+              if m == t then
+                match tIx sh (Term.key (Key.priv a)) with
+                | some b => some { concl := u, prem := [ixOf p sh.U, b] }
+                | none => none
+              else none
+          | _ => none)
+
+/-- Every rule instance supported by the universe. -/
+def dedInsts (sh : Shape) : List DedInst :=
+  (List.range sh.U.length).flatMap (dedInstsOf sh)
+
+/-- The number of deduction instances. -/
+def nInst (sh : Shape) : Nat := (dedInsts sh).length
+
+/-- The deduction instance with a given number, if the number is in range. -/
+def instAt (sh : Shape) (n : Nat) : Option DedInst := rget (dedInsts sh) n
+
 /-- Stride: number of sessions. -/
 def shS (sh : Shape) : Nat := sh.nS1 + 1
 /-- Stride: number of program-counter values. -/
@@ -213,9 +325,9 @@ def shVal (sh : Shape) : Nat := sh.U.length + 1
 def shD (sh : Shape) : Nat := sh.D.length + 1
 /-- Stride: number of expression-table entries (a dummy slot when there are none). -/
 def shE (sh : Shape) : Nat := sh.nE1 + 1
-/-- Stride: number of event alternatives: idle, one per session, one per universe
-message. -/
-def shEv (sh : Shape) : Nat := 1 + shS sh + sh.U.length
+/-- Stride: number of event alternatives: idle, one per session, one per deduction
+instance. -/
+def shEv (sh : Shape) : Nat := 1 + shS sh + nInst sh
 
 /-- Every stride is strictly positive: the fact the positional codes need. -/
 theorem shS_pos (sh : Shape) : 0 < shS sh := Nat.succ_pos _
@@ -377,7 +489,7 @@ def valAt (sh : Shape) (u : Nat) : Val := rget sh.U u
 /-- The number of a value: a universe message uses its first position, unset is last. -/
 def uIdx (sh : Shape) : Val -> Nat
   | none => sh.U.length
-  | some t => pos t sh.U
+  | some t => ixOf t sh.U
 
 /-- valAt of the unset index is unset. -/
 @[simp] theorem valAt_uIdx_none (sh : Shape) : valAt sh (uIdx sh none) = none :=
@@ -386,7 +498,53 @@ def uIdx (sh : Shape) : Val -> Nat
 /-- valAt inverts uIdx on universe messages. -/
 theorem valAt_uIdx_some (sh : Shape) {t : Term} (ht : t ∈ sh.U) :
     valAt sh (uIdx sh (some t)) = some t :=
-  rget_pos sh.U t ht
+  rget_ixOf sh.U t ht
+
+/-- tIx reads back through valAt. -/
+theorem tIx_valAt {sh : Shape} {t : Term} {n : Nat} (h : tIx sh t = some n) :
+    valAt sh n = some t := by
+  unfold tIx at h
+  by_cases hm : t ∈ sh.U
+  · rw [if_pos hm] at h
+    cases h
+    exact rget_ixOf sh.U t hm
+  · rw [if_neg hm] at h
+    exact absurd h (by simp)
+
+/-- The index recorded by tIx is within the universe. -/
+theorem tIx_lt {sh : Shape} {t : Term} {n : Nat} (h : tIx sh t = some n) :
+    n < sh.U.length := by
+  unfold tIx at h
+  by_cases hm : t ∈ sh.U
+  · rw [if_pos hm] at h
+    cases h
+    by_contra e
+    have h2 : rget sh.U (ixOf t sh.U) = none := rget_oob_ge sh.U _ (by omega)
+    have h3 : rget sh.U (ixOf t sh.U) = some t := rget_ixOf sh.U t hm
+    rw [h3] at h2; simp at h2
+  · rw [if_neg hm] at h
+    exact absurd h (by simp)
+
+/-- The index of a value is always within the stride: pos returns 0 for a message that is
+absent, so even a value outside the universe gets a legal (if meaningless) index. -/
+theorem uIdx_lt' (sh : Shape) (v : Val) : uIdx sh v < shVal sh := by
+  cases v with
+  | none => simp [uIdx, shVal]
+  | some t =>
+      have hle : ∀ (l : List Term) (a : Term), ixOf a l ≤ l.length := by
+        intro l
+        induction l with
+        | nil => intro a; simp [ixOf]
+        | cons x xs ih =>
+            intro a
+            have hi := ih a
+            by_cases hxa : x == a
+            · simp [ixOf, hxa]
+            · simp only [ixOf, if_neg hxa, List.length_cons]
+              omega
+      have h1 := hle sh.U t
+      show ixOf t sh.U < sh.U.length + 1
+      omega
 
 /-- The index of a value is within the stride. -/
 theorem uIdx_lt (sh : Shape) (v : Val) (hv : v ∈ sh.U.map some ++ [none]) :
@@ -398,10 +556,10 @@ theorem uIdx_lt (sh : Shape) (v : Val) (hv : v ∈ sh.U.map some ++ [none]) :
       rcases hv with h | h
       · obtain ⟨u, hu, hut⟩ := h
         have hut' : u = t := Option.some.inj hut
-        have h1 : rget sh.U (pos t sh.U) = some t := hut' ▸ rget_pos sh.U u hu
-        have hlt : pos t sh.U < sh.U.length := by
+        have h1 : rget sh.U (ixOf t sh.U) = some t := hut' ▸ rget_ixOf sh.U u hu
+        have hlt : ixOf t sh.U < sh.U.length := by
           by_contra e
-          have h2 : rget sh.U (pos t sh.U) = none := rget_oob_ge sh.U _ (by omega)
+          have h2 : rget sh.U (ixOf t sh.U) = none := rget_oob_ge sh.U _ (by omega)
           rw [h2] at h1; simp at h1
         simp only [uIdx]
         have : shVal sh = sh.U.length + 1 := rfl
@@ -413,24 +571,26 @@ theorem uIdx_lt (sh : Shape) (v : Val) (hv : v ∈ sh.U.map some ++ [none]) :
 /-- Event alternative codes. -/
 def evIdle (sh : Shape) (i : Nat) : Nat := vev sh i 0
 def evAct (sh : Shape) (i q : Nat) : Nat := vev sh i (1 + q)
-def evDed (sh : Shape) (i u : Nat) : Nat := vev sh i (1 + shS sh + u)
+def evDed (sh : Shape) (i n : Nat) : Nat := vev sh i (1 + shS sh + n)
 
 theorem evAct_lt (sh : Shape) (i q : Nat) (hq : q < shS sh) : 1 + q < shEv sh := by
   simp [shEv]; omega
-theorem evDed_lt (sh : Shape) (i u : Nat) (hu : u < sh.U.length) :
-    1 + shS sh + u < shEv sh := by
+theorem evDed_lt (sh : Shape) (i n : Nat) (hn : n < nInst sh) :
+    1 + shS sh + n < shEv sh := by
   simp [shEv]; omega
 
 /-! ### Decoding a configuration from an assignment -/
 
+/-- The pair the store group of slot x contributes to the decoded store: the slot keyed
+with the value it selects, or none when the slot is unset. -/
+def slotPair (sh : Shape) (a : Assignment) (i q x : Nat) : Option (Var × Term) :=
+  match stOh sh i q x |>.decode a with
+  | some u => (valAt sh u).map (fun t => (x, t))
+  | none => none
+
 /-- The store of session q at step i, read off the one-hot groups. -/
 def decodeStore (sh : Shape) (a : Assignment) (i q : Nat) : List (Var × Term) :=
-  (List.range sh.nV1).filterMap fun x =>
-    match stOh sh i q x |>.decode a with
-    | some u => match valAt sh u with
-        | some t => some (x, t)
-        | none => none
-    | none => none
+  (List.range (shV sh)).filterMap (slotPair sh a i q)
 
 /-- The attacker's knowledge at step i. -/
 def decodeKn (sh : Shape) (a : Assignment) (i : Nat) : List Term :=

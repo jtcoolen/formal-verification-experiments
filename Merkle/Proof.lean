@@ -26,7 +26,8 @@ adversary can produce a proof for a value that is not in the tree at the address
   verifies `a` against `rootHash t`.
 * `Merkle.rootHash_update` - incremental update: `rootHash (t.update p a) =`
   `verify (ofTree t p) (leaf a)`. Recomputing a root from an authentication path costs `O(n)`
-  hashes, and this theorem says the shortcut agrees with hashing the whole tree.
+  node hashes once the path is available. Generating it with `ofTree` rehashes uncached sibling
+  subtrees; `Tree.proofGenerationCost_add_depth` accounts for that cost.
 
 Note that `verify_sound` needs no domain-separation axiom beyond leaf injectivity: because the
 path is read out of the proof's own direction bits, the "wrong branch" forgeries that require
@@ -156,7 +157,8 @@ theorem verify_two_paths {α β : Type} [m : MerkleHash α β] :
   rw [verify_sound n t h₁ a hv₁, verify_sound n t h₂ a hv₂]
 
 /-- **Incremental root update.** Recomputing the root after writing `a` at `p` is exactly
-verifying the honest path of `t` against `leaf a`: `O(n)` hashes instead of `O(2 ^ n)`. -/
+verifying the honest path of `t` against `leaf a`. Folding an available proof costs `n` node
+hashes plus one leaf hash; generating it with `ofTree` from an uncached tree has a separate cost. -/
 theorem rootHash_update {α β : Type} [m : MerkleHash α β] :
     ∀ (n : Nat) (t : Tree α n) (p : Path n) (a : α),
       rootHash (t.update p a) = verify (ofTree t p) (m.leaf a) := by

@@ -6,8 +6,8 @@ Licensed under the MIT License. See the file LICENSE in the project root for
 license information.
 -/
 
--- A runnable demonstration: `lake exe merkleDemo`. Every value printed here is computed by
--- the Lean kernel from the definitions in the `Merkle` library; nothing is hard-coded.
+-- A runnable demonstration: `lake exe merkleDemo`. Values are computed by the executable
+-- from the definitions in the `Merkle` library. The theorems are checked separately by Lean.
 
 open Merkle Merkle.Free Merkle.Usage
 
@@ -30,12 +30,12 @@ def demoRoot : Dig Nat := rootHash (β := Dig Nat) demoTree
 def enc (a : Nat) : Dig Nat := MerkleHash.leaf (β := Dig Nat) a
 
 /-- Digests in the free algebra carry no `ToString`, so we render them by hand. -/
-partial def showDig : Dig Nat → String
+def showDig : Dig Nat → String
   | Dig.leaf a => toString a
   | Dig.node l r => "(" ++ showDig l ++ "," ++ showDig r ++ ")"
 
 def main : IO Unit := do
-  IO.println "Merkle tree demo - every value below is computed by the Lean kernel"
+  IO.println "Merkle tree demo - executable computations over verified definitions"
   IO.println ""
   IO.println s!"demoTree leaves : {demoTree.leaves}"
   IO.println s!"leaf count : {demoTree.leaves.length} (2 ^ 3 = {2 ^ 3})"
@@ -64,10 +64,13 @@ def main : IO Unit := do
   IO.println s!"full rehash of a depth-3 tree : {demoTree.hashCost} hashes"
   IO.println s!"  closed form 2^(3+1)-1       : {2 ^ (3 + 1) - 1}"
   IO.println s!"  2 * leaves - 1              : {2 * demoTree.leaves.length - 1}"
-  IO.println s!"incremental update            : {demoPath.cost} hashes"
+  IO.println s!"folding an available proof    : {proof.cost} node hashes"
+  IO.println s!"update with available proof   : {proof.cost + 1} hashes (including the leaf)"
+  IO.println s!"generating the uncached proof : {demoTree.proofGenerationCost demoPath} hashes"
+  IO.println s!"generate proof + update       : {demoTree.proofGenerationCost demoPath + proof.cost + 1} hashes"
   IO.println s!"proof carries                 : {proof.digestCount} sibling digests"
   IO.println s!"  = log2 of leaf count        : {Nat.log2 demoTree.leaves.length}"
-  IO.println s!"saving on this tree           : {demoTree.hashCost - demoPath.cost} hashes"
+  IO.println s!"saving with available proof   : {demoTree.hashCost - (proof.cost + 1)} hashes"
   IO.println ""
   IO.println "--- sparse subtrees (Merkle/Usage.lean) ---"
   let big : Tree Nat 10 := fill 10 0
@@ -84,6 +87,8 @@ def main : IO Unit := do
   let step1 := demoTree.update demoPath 100
   let folded := verify (ofTree (β := Dig Nat) step1 untouched) (enc 200)
   IO.println s!"batch root == folded updates : {decide (rootHash (β := Dig Nat) batch = folded)}"
+  IO.println s!"uncached folded batch cost   : {batchHashCost demoTree [(demoPath, 100), (untouched, 200)]} hashes (including initial root)"
+  IO.println s!"relabeled generic claim ok   : {allVerifyB (rootHash balances) [mislabeledClaim]}"
   IO.println ""
   IO.println "--- counting bound (Merkle/Security.lean) ---"
   IO.println s!"distinct depth-3 Boolean trees : {(Merkle.allTrees 3).length}"
@@ -110,7 +115,7 @@ def main : IO Unit := do
     (Sig.ofTree (s := Merkle.Sha3.sha3Sig) t pp)
     (Merkle.Sha3.sha3Sig.leaf (BitVec.ofNat 512 99))
   IO.println s!"tampered value verifies          : {decide (tampered = Sig.root (s := Merkle.Sha3.sha3Sig) t)}"
-  IO.println "sig_complete and sig_update hold for SHA3-512 with zero axioms;"
+  IO.println "sig_complete and sig_update hold without assumptions about SHA3-512;"
   IO.println "no_collision_free_sha3_512 proves the security axioms cannot be satisfied."
   IO.println ""
   IO.println "--- SHA3-512 worked examples (Merkle/Sha3/Examples.lean) ---"
@@ -132,5 +137,6 @@ def main : IO Unit := do
   IO.println ""
   IO.println "verify_complete, verify_sound and rootHash_update say these outcomes hold"
   IO.println "for every tree, every path, and every collision-free hash algebra."
-  IO.println "not_pow_isBigO_linear says the O(2^n) rehash cost cannot be improved to O(n)."
+  IO.println "not_pow_isBigO_linear separates full rehashing from folding an available proof."
+  IO.println "collision_of_forgery reduces accepted false openings to hash collisions without injectivity assumptions."
   IO.println "digest_cannot_be_small says no compressing collision-free hash can exist."

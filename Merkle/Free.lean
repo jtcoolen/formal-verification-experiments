@@ -29,16 +29,17 @@ A real deployment wants digests *shorter* than the data: `β = Fin (2 ^ 256)`, s
 collision-free `leaf : α → β` is injective, so it needs `|α| ≤ |β|`; and a collision-free
 `node : β → β → β` is injective on `β × β`, so it needs `|β|² ≤ |β|`. For finite `β` with
 `|β| ≥ 2` that inequality already fails. So **no finite digest type of bounded size can
-satisfy `MerkleHash` for an unbounded leaf type**, and the axioms can only be *assumed* of a
-concrete compression function, never proved. `Merkle/Security.lean` turns this into a theorem
-(`digest_cannot_be_small`) rather than a remark.
+satisfy `MerkleHash` for an unbounded leaf type**. Assuming absolute injectivity for a
+concrete fixed-width hash would contradict the counting results in `Merkle/Security.lean`.
 
-This is the standard, well-known status of hash assumptions, not a limitation of the
-formalization. What the formalization buys is that the reduction is exact and machine-checked:
-every attack on a Merkle root is exhibited as a collision in `node` or `leaf`. A production
-instantiation would add `axiom sha256CollFree : ...` and the rest would apply unchanged. We do
-not do that here: `#print axioms` on every theorem of this library reports only Lean's two
-standard logical axioms, `propext` and `Quot.sound`.
+Real hashes instead use `MerkleSig`, which carries no injectivity assumptions. The constructive
+reductions in `Merkle/Security.lean` show that distinct equal-root trees or accepted false leaf
+openings yield a collision in that signature. They do not assert that finding collisions is
+computationally infeasible, or give probabilistic security bounds.
+
+The free algebra here supplies a concrete model of the ideal injectivity assumptions; its
+digests grow with the input tree. The axiom audit of the Merkle theorems permits only
+`propext` and `Quot.sound`.
 -/
 
 namespace Merkle.Free

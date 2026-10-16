@@ -1,0 +1,7 @@
+name = "mini"
+version = "0.1.0"
+defaultTargets = ["Mini"]
+[[lean_lib]]
+name = "Mini"
+roots = ["Mini"]
+globs = ["Mini", "Mini.+"]

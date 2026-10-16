@@ -88,8 +88,8 @@ def toBits : Path n → List Bool
 /-- The leaf index addressed by a path, in left-to-right order (most significant bit first). -/
 def toNat : Path n → Nat
   | nil => 0
-  | left p => 2 * p.toNat
-  | right p => 2 * p.toNat + 1
+  | left p => p.toNat
+  | @right n p => 2 ^ n + p.toNat
 
 /-- A path addresses an index strictly below `2 ^ n`. -/
 theorem toNat_lt : ∀ (n : Nat) (p : Path n), p.toNat < 2 ^ n
@@ -97,19 +97,17 @@ theorem toNat_lt : ∀ (n : Nat) (p : Path n), p.toNat < 2 ^ n
   | n + 1, left p => by
       have h := toNat_lt n p
       have h2 : 2 ^ (n + 1) = 2 * 2 ^ n := by rw [Nat.pow_succ, Nat.mul_comm]
-      show 2 * p.toNat < 2 ^ (n + 1)
+      show p.toNat < 2 ^ (n + 1)
       omega
   | n + 1, right p => by
       have h := toNat_lt n p
       have h2 : 2 ^ (n + 1) = 2 * 2 ^ n := by rw [Nat.pow_succ, Nat.mul_comm]
-      show 2 * p.toNat + 1 < 2 ^ (n + 1)
+      show 2 ^ n + p.toNat < 2 ^ (n + 1)
       omega
 
 theorem left_ne_right : ∀ {n : Nat} (p q : Path n), Path.left p ≠ Path.right q := by
   intro n p q h
-  have := congrArg toNat h
-  simp only [toNat] at this
-  omega
+  cases h
 
 /-- A path is determined by the leaf index it addresses. -/
 theorem toNat_injective : ∀ {n : Nat}, Function.Injective (toNat (n := n)) := by
@@ -121,21 +119,23 @@ theorem toNat_injective : ∀ {n : Nat}, Function.Injective (toNat (n := n)) := 
       cases p with
       | left p =>
           cases q with
-          | left q =>
-              refine congrArg Path.left (ih ?_)
-              have h2 : 2 * p.toNat = 2 * q.toNat := h
-              omega
+          | left q => exact congrArg Path.left (ih h)
           | right q =>
-              have h2 : 2 * p.toNat = 2 * q.toNat + 1 := h
-              exact absurd h2 (by omega)
+              have hp := toNat_lt n p
+              change p.toNat = 2 ^ n + q.toNat at h
+              exfalso
+              omega
       | right p =>
           cases q with
           | left q =>
-              have h2 : 2 * p.toNat + 1 = 2 * q.toNat := h
-              exact absurd h2 (by omega)
+              have hq := toNat_lt n q
+              change 2 ^ n + p.toNat = q.toNat at h
+              exfalso
+              omega
           | right q =>
-              refine congrArg Path.right (ih ?_)
-              have h2 : 2 * p.toNat + 1 = 2 * q.toNat + 1 := h
+              apply congrArg Path.right
+              apply ih
+              change 2 ^ n + p.toNat = 2 ^ n + q.toNat at h
               omega
 
 instance : DecidableEq (Path n) := fun p q =>
@@ -329,8 +329,8 @@ class NodeAlgebra (β : Type) where
 * `collFree` - the node combiner has no collisions.
 
 A concrete instantiation must supply proofs of these two fields. See `Merkle/Free.lean` for
-a fully proved one, and for why a *compressing* collision-free hash cannot be exhibited here and
-can only be assumed. -/
+a fully proved one. Absolute injectivity cannot hold for a nontrivial fixed-width digest;
+real hashes use the assumption-free functions in `Merkle/Signature.lean`. -/
 class MerkleHash (α β : Type) extends NodeAlgebra β where
   leaf : α → β
   leafInjective : Function.Injective leaf

@@ -1,0 +1,13 @@
+Axioms.lean                49 lines,   1 decls,   23 proof-body lines
+Main.lean                 137 lines,   6 decls,  113 proof-body lines
+Merkle.lean                43 lines,   0 decls,    0 proof-body lines
+Merkle/Basic.lean         378 lines,  30 decls,  233 proof-body lines
+Merkle/Proof.lean         188 lines,  11 decls,  110 proof-body lines
+Merkle/Security.lean      536 lines,  34 decls,  327 proof-body lines
+Merkle/Sha3.lean          153 lines,  16 decls,   39 proof-body lines
+Merkle/Sha3/Examples.lean  265 lines,  36 decls,  100 proof-body lines
+Merkle/Complexity.lean    362 lines,  35 decls,  209 proof-body lines
+Merkle/Signature.lean     177 lines,   9 decls,  110 proof-body lines
+Merkle/Usage.lean         734 lines,  88 decls,  457 proof-body lines
+Merkle/Free.lean           84 lines,   6 decls,   46 proof-body lines
+TOTAL: 3106 lines, 272 decls, 1767 proof-body lines

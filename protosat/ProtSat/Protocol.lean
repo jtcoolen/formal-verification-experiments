@@ -252,16 +252,20 @@ structure Protocol where
 
 namespace Protocol
 
-/-- The action of session q's role at program counter pc; none means the session
-has finished (or the role index is out of range). -/
-def actionAt (P : Protocol) (q pc : Nat) : Option Action :=
-  match P.roles.drop q |>.head? with
-  | some r => (r.acts.drop pc).head?
+/-- The role played by session q: the role index recorded in the session list. -/
+def roleAt (P : Protocol) (q : Nat) : Option Role :=
+  match P.sessions.drop q |>.head? with
+  | some s => P.roles.drop s.role |>.head?
   | none => none
+
+/-- The action of session q's role at program counter pc; none means the session
+has finished (or there is no such session, or its role index is out of range). -/
+def actionAt (P : Protocol) (q pc : Nat) : Option Action :=
+  (P.roleAt q).map (fun r => (r.acts.drop pc).head?) |>.getD none
 
 /-- Number of actions of session q's role: its control state ranges over 0 .. len. -/
 def roleLen (P : Protocol) (q : Nat) : Nat :=
-  match P.roles.drop q |>.head? with
+  match P.roleAt q with
   | some r => r.acts.length
   | none => 0
 
@@ -296,5 +300,289 @@ def sessionVars (P : Protocol) (q : Nat) : List Var :=
     | _ => []
 
 end Protocol
+
+
+/-! ### One-step evaluation
+
+The SAT encoding represents the value of every protocol expression by a variable of a
+one-hot group and defines those variables one constructor at a time (a Tseitin-style
+translation, specification section 5).  The definitions below are the pieces of that
+step-by-step semantics; ProtSat.Bounded uses the same functions to close the term
+universe, so the encoding and the universe agree by construction. -/
+
+namespace Expr
+
+/-- The single child of a unary expression, or none for constants and binary forms. -/
+def child1 : Expr -> Option Expr
+  | encA m _ => some m
+  | hash m => some m
+  | fst m => some m
+  | snd m => some m
+  | decA m _ => some m
+  | _ => none
+
+/-- The two children of a binary expression. -/
+def child2 : Expr -> Option (Expr × Expr)
+  | pair a b => some (a, b)
+  | encS m k => some (m, k)
+  | decS m k => some (m, k)
+  | _ => none
+
+/-- One unary step of the expression semantics:
+    eval (op c) = stepEval1 (op c) (eval c).
+A stuck destructor yields none, exactly as Expr.eval does. -/
+def stepEval1 : Expr -> Option Term -> Option Term
+  | encA _ a, some x => some (Term.encA x a)
+  | hash _, some x => some (Term.hash x)
+  | fst _, some (Term.pair a _) => some a
+  | snd _, some (Term.pair _ b) => some b
+  | decA _ a, some (Term.encA b c) => if c = a then some b else none
+  | _, _ => none
+
+/-- One binary step of the expression semantics. -/
+def stepEval2 : Expr -> Option Term -> Option Term -> Option Term
+  | pair _ _, some x, some y => some (Term.pair x y)
+  | encS _ _, some x, some (Term.key k) => some (Term.encS x k)
+  | decS _ _, some (Term.encS x y), some (Term.key k) => if y = k then some x else none
+  | _, _, _ => none
+
+/-- The value of a closed expression: the constants of the DSL, none for anything that
+reads the store. -/
+def constVal : Expr -> Option Term
+  | agent A => some (Term.agent A)
+  | nonce N => some (Term.nonce N)
+  | shrk a b => some (Term.key (Key.shrk a b))
+  | pubk a => some (Term.key (Key.pub a))
+  | privk a => some (Term.key (Key.priv a))
+  | _ => none
+
+/-- The one-step decomposition lemmas: each constructor or destructor of the expression
+language is one step of evaluation applied to its children's values.  These are the
+specification of the Tseitin gates that ProtSat.Encode generates. -/
+
+theorem eval_encA (m : Expr) (a : Agent) (s : List (Var × Term)) :
+    Expr.eval (Expr.encA m a) s = stepEval1 (Expr.encA m a) (Expr.eval m s) := by
+  cases h : Expr.eval m s <;> simp [Expr.eval, stepEval1, h, Option.bind]
+
+theorem eval_hash (m : Expr) (s : List (Var × Term)) :
+    Expr.eval (Expr.hash m) s = stepEval1 (Expr.hash m) (Expr.eval m s) := by
+  cases h : Expr.eval m s <;> simp [Expr.eval, stepEval1, h, Option.bind]
+
+theorem eval_fst (m : Expr) (s : List (Var × Term)) :
+    Expr.eval (Expr.fst m) s = stepEval1 (Expr.fst m) (Expr.eval m s) := by
+  cases h : Expr.eval m s with
+  | none => simp [Expr.eval, stepEval1, h, Option.bind]
+  | some t => cases t <;> simp [Expr.eval, stepEval1, h, Option.bind]
+
+theorem eval_snd (m : Expr) (s : List (Var × Term)) :
+    Expr.eval (Expr.snd m) s = stepEval1 (Expr.snd m) (Expr.eval m s) := by
+  cases h : Expr.eval m s with
+  | none => simp [Expr.eval, stepEval1, h, Option.bind]
+  | some t => cases t <;> simp [Expr.eval, stepEval1, h, Option.bind]
+
+theorem eval_decA (m : Expr) (a : Agent) (s : List (Var × Term)) :
+    Expr.eval (Expr.decA m a) s = stepEval1 (Expr.decA m a) (Expr.eval m s) := by
+  cases h : Expr.eval m s with
+  | none => simp [Expr.eval, stepEval1, h, Option.bind]
+  | some t => cases t <;> simp [Expr.eval, stepEval1, h, Option.bind]
+
+theorem eval_pair (a b : Expr) (s : List (Var × Term)) :
+    Expr.eval (Expr.pair a b) s =
+      stepEval2 (Expr.pair a b) (Expr.eval a s) (Expr.eval b s) := by
+  cases h₁ : Expr.eval a s with
+  | none => simp [Expr.eval, stepEval2, h₁, Option.bind]
+  | some x =>
+      cases h₂ : Expr.eval b s with
+      | none => simp [Expr.eval, stepEval2, h₁, h₂, Option.bind]
+      | some y => simp [Expr.eval, stepEval2, h₁, h₂, Option.bind]
+
+theorem eval_encS (m k : Expr) (s : List (Var × Term)) :
+    Expr.eval (Expr.encS m k) s =
+      stepEval2 (Expr.encS m k) (Expr.eval m s) (Expr.eval k s) := by
+  cases h₁ : Expr.eval m s with
+  | none => simp [Expr.eval, stepEval2, h₁, Option.bind]
+  | some x =>
+      cases h₂ : Expr.eval k s with
+      | none => simp [Expr.eval, stepEval2, h₁, h₂, Option.bind]
+      | some y => cases y <;> simp [Expr.eval, stepEval2, h₁, h₂, Option.bind, Term.asKey]
+
+theorem eval_decS (m k : Expr) (s : List (Var × Term)) :
+    Expr.eval (Expr.decS m k) s =
+      stepEval2 (Expr.decS m k) (Expr.eval m s) (Expr.eval k s) := by
+  cases h₁ : Expr.eval m s with
+  | none => simp [Expr.eval, stepEval2, h₁, Option.bind]
+  | some x =>
+      cases x with
+      | encS m' k' =>
+          cases h₂ : Expr.eval k s with
+          | none => simp [Expr.eval, stepEval2, h₁, h₂, Option.bind, Term.asKey]
+          | some y => cases y <;> simp [Expr.eval, stepEval2, h₁, h₂, Option.bind, Term.asKey]
+      | _ =>
+          cases h₂ : Expr.eval k s with
+          | none => simp [Expr.eval, stepEval2, h₁, h₂, Option.bind]
+          | some y => cases y <;> simp [Expr.eval, stepEval2, h₁, h₂, Option.bind, Term.asKey]
+
+/-- A unary expression evaluates to one step applied to its child's value. -/
+theorem eval_child1 {e c : Expr} {s : List (Var × Term)} (h : child1 e = some c) :
+    Expr.eval e s = stepEval1 e (Expr.eval c s) := by
+  cases e with
+  | agent A | nonce N | shrk a b | pubk a | privk a | var x => cases h
+  | pair e₁ e₂ => cases h
+  | encS m k => cases h
+  | encA m a =>
+      have hc : m = c := by simpa [child1] using h
+      subst hc
+      exact eval_encA m a s
+  | hash e₁ =>
+      have hc : e₁ = c := by simpa [child1] using h
+      subst hc
+      exact eval_hash e₁ s
+  | fst e₁ =>
+      have hc : e₁ = c := by simpa [child1] using h
+      subst hc
+      exact eval_fst e₁ s
+  | snd e₁ =>
+      have hc : e₁ = c := by simpa [child1] using h
+      subst hc
+      exact eval_snd e₁ s
+  | decS m k => cases h
+  | decA m a =>
+      have hc : m = c := by simpa [child1] using h
+      subst hc
+      exact eval_decA m a s
+
+/-- A binary expression evaluates to one step applied to its two children's values. -/
+theorem eval_child2 {e a b : Expr} {s : List (Var × Term)}
+    (h : child2 e = some (a, b)) :
+    Expr.eval e s = stepEval2 e (Expr.eval a s) (Expr.eval b s) := by
+  cases e with
+  | agent A | nonce N | shrk x y | pubk x | privk x | var x => cases h
+  | pair e₁ e₂ =>
+      have h' : (e₁, e₂) = (a, b) := by simpa [child2] using h
+      cases h'
+      exact eval_pair a b s
+  | encS m k =>
+      have h' : (m, k) = (a, b) := by simpa [child2] using h
+      cases h'
+      exact eval_encS a b s
+  | decS m k =>
+      have h' : (m, k) = (a, b) := by simpa [child2] using h
+      cases h'
+      exact eval_decS a b s
+  | encA m _ | hash _ | fst _ | snd _ | decA _ _ => cases h
+
+/-- An expression that is neither unary nor binary nor a variable read is a constant, and
+its value does not depend on the store. -/
+theorem eval_constVal {e : Expr} {s : List (Var × Term)} (h1 : child1 e = none)
+    (h2 : child2 e = none) (hv : ∀ x, e ≠ Expr.var x) :
+    Expr.eval e s = constVal e := by
+  cases e
+  · simp [Expr.eval, constVal]
+  · simp [Expr.eval, constVal]
+  · simp [Expr.eval, constVal]
+  · simp [Expr.eval, constVal]
+  · simp [Expr.eval, constVal]
+  · exfalso
+    exact hv _ (by rfl)
+  · simp only [child2] at h2; simp at h2
+  · simp only [child2] at h2; simp at h2
+  · simp only [child1] at h1; simp at h1
+  · simp only [child1] at h1; simp at h1
+  · simp only [child1] at h1; simp at h1
+  · simp only [child1] at h1; simp at h1
+  · simp only [child2] at h2; simp at h2
+  · simp only [child1] at h1; simp at h1
+
+/-- Subexpressions are transitive: a subexpression of a subexpression is a
+subexpression.  This is what makes the expression table of ProtSat.Encode closed under the
+children of its entries, so that one Tseitin gate per table entry suffices. -/
+theorem subexpressions_trans : ∀ (e f : Expr), f ∈ e.subexpressions ->
+    ∀ g, g ∈ f.subexpressions -> g ∈ e.subexpressions := by
+  intro e
+  induction e with
+  | agent A =>
+      intro f hf g hg
+      simp only [Expr.subexpressions, List.mem_singleton] at hf
+      subst hf
+      simpa [Expr.subexpressions] using hg
+  | nonce N =>
+      intro f hf g hg
+      simp only [Expr.subexpressions, List.mem_singleton] at hf
+      subst hf
+      simpa [Expr.subexpressions] using hg
+  | shrk a b =>
+      intro f hf g hg
+      simp only [Expr.subexpressions, List.mem_singleton] at hf
+      subst hf
+      simpa [Expr.subexpressions] using hg
+  | pubk a =>
+      intro f hf g hg
+      simp only [Expr.subexpressions, List.mem_singleton] at hf
+      subst hf
+      simpa [Expr.subexpressions] using hg
+  | privk a =>
+      intro f hf g hg
+      simp only [Expr.subexpressions, List.mem_singleton] at hf
+      subst hf
+      simpa [Expr.subexpressions] using hg
+  | var x =>
+      intro f hf g hg
+      simp only [Expr.subexpressions, List.mem_singleton] at hf
+      subst hf
+      simpa [Expr.subexpressions] using hg
+  | pair a b ih1 ih2 =>
+      intro f hf g hg
+      simp only [Expr.subexpressions, List.mem_cons, List.mem_append] at hf ⊢
+      rcases hf with rfl | hf | hf
+      · simpa [Expr.subexpressions, List.mem_cons, List.mem_append] using hg
+      · exact Or.inr (Or.inl (ih1 f hf g hg))
+      · exact Or.inr (Or.inr (ih2 f hf g hg))
+  | encS a b ih1 ih2 =>
+      intro f hf g hg
+      simp only [Expr.subexpressions, List.mem_cons, List.mem_append] at hf ⊢
+      rcases hf with rfl | hf | hf
+      · simpa [Expr.subexpressions, List.mem_cons, List.mem_append] using hg
+      · exact Or.inr (Or.inl (ih1 f hf g hg))
+      · exact Or.inr (Or.inr (ih2 f hf g hg))
+  | encA a n iha =>
+      intro f hf g hg
+      simp only [Expr.subexpressions, List.mem_cons, List.mem_append] at hf ⊢
+      rcases hf with rfl | hf
+      · simpa [Expr.subexpressions, List.mem_cons, List.mem_append] using hg
+      · exact Or.inr (iha f hf g hg)
+  | hash a iha =>
+      intro f hf g hg
+      simp only [Expr.subexpressions, List.mem_cons, List.mem_append] at hf ⊢
+      rcases hf with rfl | hf
+      · simpa [Expr.subexpressions, List.mem_cons, List.mem_append] using hg
+      · exact Or.inr (iha f hf g hg)
+  | fst a iha =>
+      intro f hf g hg
+      simp only [Expr.subexpressions, List.mem_cons, List.mem_append] at hf ⊢
+      rcases hf with rfl | hf
+      · simpa [Expr.subexpressions, List.mem_cons, List.mem_append] using hg
+      · exact Or.inr (iha f hf g hg)
+  | snd a iha =>
+      intro f hf g hg
+      simp only [Expr.subexpressions, List.mem_cons, List.mem_append] at hf ⊢
+      rcases hf with rfl | hf
+      · simpa [Expr.subexpressions, List.mem_cons, List.mem_append] using hg
+      · exact Or.inr (iha f hf g hg)
+  | decS a b ih1 ih2 =>
+      intro f hf g hg
+      simp only [Expr.subexpressions, List.mem_cons, List.mem_append] at hf ⊢
+      rcases hf with rfl | hf | hf
+      · simpa [Expr.subexpressions, List.mem_cons, List.mem_append] using hg
+      · exact Or.inr (Or.inl (ih1 f hf g hg))
+      · exact Or.inr (Or.inr (ih2 f hf g hg))
+  | decA a n iha =>
+      intro f hf g hg
+      simp only [Expr.subexpressions, List.mem_cons, List.mem_append] at hf ⊢
+      rcases hf with rfl | hf
+      · simpa [Expr.subexpressions, List.mem_cons, List.mem_append] using hg
+      · exact Or.inr (iha f hf g hg)
+
+
+end Expr
 
 end ProtSat

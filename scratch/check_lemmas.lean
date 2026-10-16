@@ -1,0 +1,27 @@
+
+import Lean
+#check @Nat.le_two_pow
+#check @List.getD_eq_getElem?_getD
+#check @List.getD_eq_get
+#check @List.take_append_drop
+#check @List.take_of_length_le
+#check @List.drop_of_length_le
+#check @List.mem_filter
+#check @List.filter_cons_of_pos
+#check @List.filter_cons_of_neg
+#check @List.Pairwise.filter
+#check @List.nodup_cons
+#check @List.map_congr_left
+#check @List.flatMap_cons
+#check @List.length_flatMap
+#check @List.getElem?_take_of_lt
+#check @List.getElem?_drop
+#check @List.take_append_of_le_length
+#check @List.drop_append_of_le_length
+#check @BitVec.toNat_inj
+#check @Nat.one_le_two_pow
+#check @Nat.one_le_pow
+#check @Nat.pow_lt_pow_of_lt
+#check @Nat.log2_eq_iff
+#check @List.getLast?_cons_cons
+#check @List.replicate_append_replicate

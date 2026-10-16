@@ -1,4 +1,4 @@
-import Merkle.Proof
+import Merkle.Signature
 
 /-
 Copyright (c) 2026 Formally Verified Examples.
@@ -14,9 +14,8 @@ bounds of two independent kinds.
 
 ## 1. Exact reductions (constructive, no probability)
 
-Every attack on a tree is exhibited as a concrete collision in the hash algebra, together with
-the witness that breaks it. There is no slack: the *only* way to break the scheme is to break
-the algebra.
+Distinct equal-root trees and accepted false leaf openings yield a collision in the installed
+signature. The reductions do not assume that either hash operation is injective.
 
 * `Collision` - the two ways an algebra can fail to be collision-free: two distinct messages
   with equal leaf digests, or two distinct digest pairs with equal node digests.
@@ -51,33 +50,19 @@ the probabilistic statement rather than faking it.
 namespace Merkle
 
 section
-variable {α β : Type}
-variable {m : MerkleHash α β}
+variable {α β : Type} [s : MerkleSig α β]
 
-/-- **A concrete collision** in the hash algebra: evidence that the algebra is *not*
-collision-free, packaged as a witness an adversary could publish.
-
-The two constructors mirror the two operations the security proofs consume. A `Collision` is
-exactly a refutation of those assumptions, so producing one is the only way to refute the
-theorems of `Merkle/Proof.lean`. -/
+/-- A collision for a bare signature. No injectivity assumption is required to describe or
+exhibit distinct inputs with equal outputs. -/
 inductive Collision : Prop where
-  /-- Two distinct messages hash to the same leaf digest: `leafInjective` fails. -/
-  | leaf : ∀ (a b : α), a ≠ b → m.leaf a = m.leaf b → Collision
-  /-- Two distinct digest pairs combine to the same digest: `collFree` fails. -/
-  | node : ∀ (a b c d : β), (a ≠ c ∨ b ≠ d) → m.node a b = m.node c d → Collision
+  | leaf : ∀ (a b : α), a ≠ b → s.leaf a = s.leaf b → Collision
+  | node : ∀ (a b c d : β), (a ≠ c ∨ b ≠ d) → s.node a b = s.node c d → Collision
 
-/-- **The main reduction, constructively.** Two trees with the same root digest either are
-distinct - in which case we hand you a concrete collision in the hash algebra - or they are
-equal.
-
-This is the constructive form of collision resistance: it does not merely say "if the hash is
-collision-free then so is `rootHash`", it *exhibits* the collision by walking down to the
-first level at which the two trees differ. Note that it decides `Collision ∨ t₁ = t₂` without
-any classical case split on propositional equality, so the whole development stays constructive
-apart from Lean's two standard proof-irrelevance axioms. -/
-theorem collision_or_eq :
-    ∀ (n : Nat) (t₁ t₂ : Tree α n), rootHash (m := m) t₁ = rootHash (m := m) t₂ →
-      Collision (m := m) ∨ t₁ = t₂ := by
+/-- Equal roots imply equal trees or a concrete hash collision. Decidable equality permits
+constructive comparisons of leaf values and child digests; no collision-freeness is assumed. -/
+theorem collision_or_eq [DecidableEq α] [DecidableEq β] :
+    ∀ (n : Nat) (t₁ t₂ : Tree α n), Sig.root (s := s) t₁ = Sig.root (s := s) t₂ →
+      Collision (s := s) ∨ t₁ = t₂ := by
   intro n
   induction n with
   | zero =>
@@ -85,39 +70,93 @@ theorem collision_or_eq :
       cases t₁ with
       | leaf a =>
           cases t₂ with
-          | leaf b => exact Or.inr (congrArg Tree.leaf (m.leafInjective heq))
+          | leaf b =>
+              by_cases hab : a = b
+              · exact Or.inr (congrArg Tree.leaf hab)
+              · exact Or.inl (Collision.leaf a b hab heq)
   | succ n ih =>
       intro t₁ t₂ heq
       cases t₁ with
       | node l₁ r₁ =>
           cases t₂ with
           | node l₂ r₂ =>
-              obtain ⟨hl, hr⟩ := m.collFree heq
-              cases ih l₁ l₂ hl with
-              | inl c => exact Or.inl c
-              | inr e₁ =>
-                  cases ih r₁ r₂ hr with
+              by_cases hl : Sig.root (s := s) l₁ = Sig.root (s := s) l₂
+              · by_cases hr : Sig.root (s := s) r₁ = Sig.root (s := s) r₂
+                · cases ih l₁ l₂ hl with
                   | inl c => exact Or.inl c
-                  | inr e₂ => exact Or.inr (e₁ ▸ e₂ ▸ rfl)
+                  | inr el =>
+                      cases ih r₁ r₂ hr with
+                      | inl c => exact Or.inl c
+                      | inr er => exact Or.inr (el ▸ er ▸ rfl)
+                · exact Or.inl (Collision.node _ _ _ _ (Or.inr hr) heq)
+              · exact Or.inl (Collision.node _ _ _ _ (Or.inl hl) heq)
 
-/-- **The main reduction.** Two *distinct* trees with the same root digest yield a concrete
-collision in the hash algebra: the left disjunct of `collision_or_eq`. -/
-theorem collision_of_rootHash_eq :
-    ∀ (n : Nat) (t₁ t₂ : Tree α n), rootHash (m := m) t₁ = rootHash (m := m) t₂ →
-      t₁ ≠ t₂ → Collision (m := m) := by
-  intro n t₁ t₂ heq hne
+/-- Distinct trees with equal roots yield a collision, for any signature. -/
+theorem collision_of_rootHash_eq [DecidableEq α] [DecidableEq β]
+    (n : Nat) (t₁ t₂ : Tree α n) (heq : Sig.root (s := s) t₁ = Sig.root (s := s) t₂)
+    (hne : t₁ ≠ t₂) : Collision (s := s) := by
   cases collision_or_eq n t₁ t₂ heq with
   | inl c => exact c
   | inr h => exact absurd h hne
 
-/-- **Collision resistance of `rootHash`.** If the algebra admits no collision then two
-*distinct* trees have *distinct* roots: the root digest is a perfect commitment to the whole
-tree, and nothing can be swapped inside it without the root noticing. -/
-theorem rootHash_ne_of_ne :
-    ∀ (n : Nat) (t₁ t₂ : Tree α n), ¬ Collision (m := m) →
-      t₁ ≠ t₂ → rootHash (m := m) t₁ ≠ rootHash (m := m) t₂ := by
-  intro n t₁ t₂ hnc hne heq
+/-- With no collision for this signature, distinct trees have distinct roots. -/
+theorem rootHash_ne_of_ne [DecidableEq α] [DecidableEq β]
+    (n : Nat) (t₁ t₂ : Tree α n) (hnc : ¬ Collision (s := s)) (hne : t₁ ≠ t₂) :
+    Sig.root (s := s) t₁ ≠ Sig.root (s := s) t₂ := by
+  intro heq
   exact hnc (collision_of_rootHash_eq n t₁ t₂ heq hne)
+
+/-- The ideal injectivity assumptions exclude both collision constructors. This assumption
+is used only for this corollary, not for extraction. -/
+theorem collisionFree_no_collision [cf : SigCollisionFree (s := s)] :
+    ¬ Collision (s := s) := by
+  intro c
+  cases c with
+  | leaf a b hne heq => exact hne (cf.leafInjective heq)
+  | node a b c d hne heq =>
+      obtain ⟨hl, hr⟩ := cf.nodeInjective heq
+      cases hne with
+      | inl h => exact h hl
+      | inr h => exact h hr
+
+/-- An accepted proof authenticates the value at its own path, or yields a hash collision.
+This reduction also applies to fixed-width hashes, without impossible injectivity assumptions. -/
+theorem verify_collision_or_eq [DecidableEq α] [DecidableEq β] :
+    ∀ (n : Nat) (t : Tree α n) (h : Proof β n) (a : α),
+      Sig.fold (s := s.toNodeSig) h (s.leaf a) = Sig.root (s := s) t →
+      Collision (s := s) ∨ t.get h.pathOf = a := by
+  intro n
+  induction n with
+  | zero =>
+      intro t h a hv
+      cases t with
+      | leaf b =>
+          cases h
+          by_cases hba : b = a
+          · exact Or.inr hba
+          · exact Or.inl (Collision.leaf a b (Ne.symm hba) hv)
+  | succ n ih =>
+      intro t h a hv
+      cases t with
+      | node l r =>
+          cases h with
+          | left h b =>
+              by_cases hd : Sig.fold (s := s.toNodeSig) h (s.leaf a) = Sig.root (s := s) l
+              · exact ih l h a hd
+              · exact Or.inl (Collision.node _ _ _ _ (Or.inl hd) hv)
+          | right h b =>
+              by_cases hd : Sig.fold (s := s.toNodeSig) h (s.leaf a) = Sig.root (s := s) r
+              · exact ih r h a hd
+              · exact Or.inl (Collision.node _ _ _ _ (Or.inr hd) hv)
+
+/-- A forged accepted value produces a collision for the installed signature. -/
+theorem collision_of_forgery [DecidableEq α] [DecidableEq β]
+    (t : Tree α n) (h : Proof β n) (a : α)
+    (hv : Sig.fold (s := s.toNodeSig) h (s.leaf a) = Sig.root (s := s) t)
+    (hne : t.get h.pathOf ≠ a) : Collision (s := s) := by
+  cases verify_collision_or_eq n t h a hv with
+  | inl c => exact c
+  | inr he => exact absurd he hne
 
 end
 
@@ -343,8 +382,8 @@ bits of data - needs at least `2 ^ (2 ^ n)` digest values, i.e. at least `2 ^ n`
 digest. **No compressing collision-free hash exists.** This is not a limitation of the
 formalization but a theorem about any hash whatsoever, and it is why `Merkle/Free.lean`
 instantiates the axioms with the non-compressing free algebra `Dig` instead of a fixed-width
-digest, and why a production instantiation must *assume* an ideal hash rather than construct
-one. -/
+digest, and why a concrete fixed-width hash uses the assumption-free signature and collision
+reductions instead of postulating absolute injectivity. -/
 theorem digest_cannot_be_small {β : Type} [hsh : MerkleHash Bool β]
     (n k : Nat) (f : β → Fin k)
     (hf : Function.Injective f) (h : k < 2 ^ (2 ^ n)) : False := by
@@ -415,8 +454,8 @@ both verify against the root of `t`, they certify the *same* value.
 This is the exact counting form of the forgery bound: for a fixed tree `t` and a fixed path
 `p`, the set of values `a` for which *some* proof selecting `p` verifies `a` against
 `rootHash t` has **at most one** element. An adversary who fixes a target leaf cannot have two
-different winning values, so a random guess succeeds with probability at most `1 / |α|` - and
-the theorem behind that bound is this one. -/
+different winning values. A uniformly sampled value from a finite `α` can be accepted only
+when it equals that unique value. No probability distribution or adversary success probability is formalized here. -/
 theorem accepting_value_unique :
     ∀ (n : Nat) (t : Tree α n) (p : Path n) (a₁ a₂ : α) (h₁ h₂ : Proof β n),
       Proof.pathOf h₁ = p → Proof.pathOf h₂ = p →
@@ -456,10 +495,10 @@ theorem bvToFin_injective (w : Nat) : Function.Injective (bvToFin w) := by
 elements, so a collision-free `MerkleHash Bool (BitVec w)` would have to commit to `2 ^ (2 ^ n)`
 depth-`n` Boolean trees using `2 ^ w` values - possible only while `w ≥ 2 ^ n`.
 
-Read as a design rule: a `w`-bit Merkle digest can be collision-free only over trees with fewer
-than `2 ^ w` leaves, i.e. depth below `log2 w`. Every real deployment violates this, which is
-exactly why collision-freeness is an assumption about an *ideal* hash rather than a theorem
-about a *concrete* one. -/
+Injectivity on depth-`n` Boolean trees requires `2 ^ n ≤ w`: the digest needs at least as
+many bits as the input leaf vector. This is only a necessary counting condition for that fixed
+shape. The stronger global `MerkleHash` node injectivity assumption cannot hold for any
+nontrivial finite digest type, regardless of the chosen tree depth. -/
 theorem no_collision_free_bitvec (n w : Nat) (h : w < 2 ^ n) :
     ¬ Nonempty (MerkleHash Bool (BitVec w)) := by
   rintro ⟨hsh⟩
