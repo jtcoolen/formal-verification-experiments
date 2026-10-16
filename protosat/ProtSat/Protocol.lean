@@ -187,6 +187,22 @@ inductive Action where
   | commit (tag : Tag) (peer v : Expr)
   deriving Repr, DecidableEq
 
+namespace Action
+
+/-- The expressions an action evaluates: the subexpressions of everything the action reads.
+These are the entries the SAT encoding's expression table must contain. -/
+def exprs : Action -> List Expr
+  | Action.fresh _ _ => []
+  | Action.send _ e => Expr.subexpressions e
+  | Action.recv _ _ => []
+  | Action.assign _ e => Expr.subexpressions e
+  | Action.check e1 e2 => e1.subexpressions ++ e2.subexpressions
+  | Action.secret e => Expr.subexpressions e
+  | Action.claim _ peer v => peer.subexpressions ++ v.subexpressions
+  | Action.commit _ peer v => peer.subexpressions ++ v.subexpressions
+
+end Action
+
 /-- A role is a program: a list of actions executed in order. -/
 structure Role where
   acts : List Action

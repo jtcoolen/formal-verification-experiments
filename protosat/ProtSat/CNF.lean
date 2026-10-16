@@ -390,6 +390,16 @@ theorem clause_eval_append_of_false {a : Assignment} : ∀ (ant : List Lit) (cl 
       exact ih cl (clause_eval_cons_false h (hall l (List.Mem.head _)))
         (fun l' hl' => hall l' (List.Mem.tail _ hl'))
 
+/-- A disjunction splits over an append. -/
+theorem Clause.eval_append {a : Assignment} : ∀ (xs ys : Clause),
+    Clause.eval a (xs ++ ys) = (Clause.eval a xs || Clause.eval a ys) := by
+  intro xs
+  induction xs with
+  | nil => intro ys; simp [Clause.eval]
+  | cons x rest ih =>
+      intro ys
+      rw [List.cons_append, Clause.eval_cons, ih, Clause.eval_cons, Bool.or_assoc]
+
 /-- The complement of a literal. -/
 def Lit.flip (l : Lit) : Lit := ⟨l.var, !l.neg⟩
 

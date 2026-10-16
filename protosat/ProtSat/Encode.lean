@@ -110,6 +110,19 @@ def ixOf [BEq α] (a : α) : List α -> Nat
   | [] => 0
   | x :: xs => if x == a then 0 else ixOf a xs + 1
 
+/-- The first-occurrence index never exceeds the length: an absent element gets index 0. -/
+theorem ixOf_le [BEq α] : ∀ (l : List α) (a : α), ixOf a l ≤ l.length := by
+  intro l
+  induction l with
+  | nil => intro a; simp [ixOf]
+  | cons x xs ih =>
+      intro a
+      have hi := ih a
+      by_cases h : x == a
+      · simp [ixOf, h]
+      · simp only [ixOf, if_neg h, List.length_cons]
+        omega
+
 /-- Reading the head of a list at index 0. -/
 theorem rget_zero {α : Type} (x : α) (xs : List α) : rget (x :: xs) 0 = some x := rfl
 
@@ -199,17 +212,7 @@ theorem rget_ixOf [BEq α] [LawfulBEq α] : ∀ (l : List α) (a : α),
 subexpression of a member of this list is again a member, which is what makes the
 Tseitin clauses below close. -/
 def allExprs (P : Protocol) : List Expr :=
-  (P.roles.flatMap fun r =>
-    r.acts.flatMap fun a =>
-      match a with
-      | Action.fresh _ _ => []
-      | Action.send _ e => Expr.subexpressions e
-      | Action.recv _ _ => []
-      | Action.assign _ e => Expr.subexpressions e
-      | Action.check e1 e2 => Expr.subexpressions e1 ++ Expr.subexpressions e2
-      | Action.secret e => Expr.subexpressions e
-      | Action.claim _ peer v => Expr.subexpressions peer ++ Expr.subexpressions v
-      | Action.commit _ peer v => Expr.subexpressions peer ++ Expr.subexpressions v).eraseDups
+  (P.roles.flatMap fun r => r.acts.flatMap Action.exprs).eraseDups
 
 /-- The index of an expression in the expression table. -/
 def eIdx (P : Protocol) (e : Expr) : Nat := ixOf e (allExprs P)

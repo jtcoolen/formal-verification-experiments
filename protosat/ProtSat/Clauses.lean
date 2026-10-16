@@ -459,7 +459,7 @@ def sendPublisher (sh : Shape) (P : Protocol) (i q c u : Nat) : List Lit :=
 /-- The conjunction saying "the deduction instance concluding in u fires at step i". -/
 def instPublisher (sh : Shape) (i n u : Nat) : List Lit :=
   match instAt sh n with
-  | some inst => if inst.concl == u then [pos (evDed sh i n)] else []
+  | some inst => if inst.concl = u then [pos (evDed sh i n)] else []
   | none => []
 
 /-- The auxiliary variable defining the conjunction "session q acts at step i with program
@@ -484,13 +484,17 @@ def pubAuxClauses (sh : Shape) (P : Protocol) : CNF :=
   cnfOf (eachStep sh fun i => eachSess sh fun q => eachPc sh fun c =>
     (List.range sh.U.length).flatMap fun u => pubAuxEntry sh P i q c u)
 
+/-- The publisher literal of one (session, counter) position: the auxiliary variable of the
+conjunction "this session sends a value equal to u", present only for send actions. -/
+def sendPubLit (sh : Shape) (P : Protocol) (i q c u : Nat) : List Lit :=
+  match P.actionAt q c with
+  | some (Action.send _ _) => [pos (vpb sh i q c u)]
+  | _ => []
+
 /-- All the ways the message with number u can be published at step i, as the disjunction of
 the deduction-instance events concluding in u and the publisher conjunctions. -/
 def publisherLits (sh : Shape) (P : Protocol) (i u : Nat) : List Lit :=
-  (litsSess sh fun q => litsPc sh fun c =>
-      if (match P.actionAt q c with
-          | some (Action.send _ _) => true
-          | _ => false) then [pos (vpb sh i q c u)] else [])
+  (litsSess sh fun q => litsPc sh fun c => sendPubLit sh P i q c u)
     ++ litsInst sh fun n => instPublisher sh i n u
 
 /-- Knowledge is justified: a message known at step i+1 was known at step i, or is the
