@@ -1,0 +1,18 @@
+name = "verified-ll1"
+version = "0.1.0"
+defaultTargets = ["VerifiedLL1", "verifiedLL1Demo"]
+
+[leanOptions]
+pp.unicode.fun = true
+
+[[lean_lib]]
+name = "VerifiedLL1"
+globs = ["VerifiedLL1", "VerifiedLL1.+"]
+
+[[lean_exe]]
+name = "verifiedLL1Demo"
+root = "Main"
+
+[[lean_exe]]
+name = "axioms"
+root = "Axioms"

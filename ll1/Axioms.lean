@@ -1,0 +1,40 @@
+/-
+Copyright (c) 2026 Formally Verified Examples.
+Licensed under the MIT License. See the file LICENSE in the project root for
+license information.
+-/
+import VerifiedLL1
+
+/-!
+# Axiom audit
+
+Run with `lake exe axioms`.  Every declaration of this development must depend
+only on the standard foundational axioms of Lean.  `sorryAx` or any user-declared
+axiom appearing below is a bug.
+-/
+
+#print axioms VerifiedLL1.Sym.finiteEnum
+#print axioms VerifiedLL1.Grammar.wellFormed
+#print axioms VerifiedLL1.MatchList.length_eq
+#print axioms VerifiedLL1.MatchList.append
+#print axioms VerifiedLL1.MatchList.split
+#print axioms VerifiedLL1.MatchList.valid_of_mem
+#print axioms VerifiedLL1.Valid.subtree_valid
+#print axioms VerifiedLL1.derives_ctx
+#print axioms VerifiedLL1.derives_append
+#print axioms VerifiedLL1.derives_toks_inj
+#print axioms VerifiedLL1.matchList_derives
+#print axioms VerifiedLL1.valid_derives
+#print axioms VerifiedLL1.substitute
+#print axioms VerifiedLL1.derives_valid
+#print axioms VerifiedLL1.tree_iff_derives
+#print axioms VerifiedLL1.Grammar.language_iff_tree
+#print axioms VerifiedLL1.Examples.Toy.wellFormed
+#print axioms VerifiedLL1.Examples.Toy.tree_ab_valid
+#print axioms VerifiedLL1.Examples.Toy.not_valid_pb
+#print axioms VerifiedLL1.Examples.Toy.not_language_H_a
+
+def main : IO Unit := do
+  IO.println "The axiom audit above is produced when this module is built."
+  IO.println "Re-run it with:  lake env lean Axioms.lean"
+  IO.println "No declaration may depend on sorryAx or on a user-declared axiom."
