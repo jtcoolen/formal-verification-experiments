@@ -50,6 +50,24 @@ axiom appearing below is a bug.
 #print axioms VerifiedLL1.Examples.Toy.tree_ab_valid
 #print axioms VerifiedLL1.Examples.Toy.not_valid_pb
 #print axioms VerifiedLL1.Examples.Toy.not_language_H_a
+#print axioms VerifiedLL1.Examples.Loop.M_correct
+#print axioms VerifiedLL1.Examples.Loop.not_progressing
+#print axioms VerifiedLL1.Examples.Loop.not_cycleFree
+#print axioms VerifiedLL1.Examples.Loop.never_accepts_a
+#print axioms VerifiedLL1.Examples.Loop.never_accepts_nil
+
+-- Phase 3
+#print axioms VerifiedLL1.monotone
+#print axioms VerifiedLL1.parseSym_mono
+#print axioms VerifiedLL1.parseForest_mono
+#print axioms VerifiedLL1.nodeCode_child
+#print axioms VerifiedLL1.complete_core
+#print axioms VerifiedLL1.complete_of_match
+#print axioms VerifiedLL1.language_imp_accepts
+#print axioms VerifiedLL1.parse_ok_imp_language
+#print axioms VerifiedLL1.never_accepts_of_not_language
+#print axioms VerifiedLL1.parse_ok_imp_shape
+#print axioms VerifiedLL1.language_iff_accepts
 
 def main : IO Unit := do
   IO.println "The axiom audit above is produced when this module is built."

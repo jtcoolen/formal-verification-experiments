@@ -9,7 +9,7 @@ audit — nothing here contains `sorry`, `admit`, `unsafe` or user-declared axio
 | **Merkle trees** | Indexed binary Merkle trees: collision resistance of the root digest, authentication-path completeness and soundness, no-forgery, incremental-update correctness, complexity bounds, and a signature layer instantiated at SHA3-512. | Lean core + [lean4-hash](https://github.com/pure-algebra/lean4-hash) (no Mathlib) | [`Merkle/README.md`](Merkle/README.md) |
 | **Quantum circuit optimizer** | Deeply embedded quantum circuits with an independent matrix semantics over `Matrix (Fin n → Bool) (Fin n → Bool) ℂ`; equivalence modulo global phase; 35 machine-checked rewrite rules; an OptiSat equality-saturation engine; an **independent executable certificate checker** with a proved soundness theorem; end-to-end `optimize_sound`; a bug-regression suite built from documented quantum-compiler defects. | Lean core + Mathlib `v4.26.0` + vendored OptiSat | [`quantum/README.md`](quantum/README.md) |
 | **Dijkstra shortest paths** | Dijkstra's algorithm on finite directed `ℕ`-weighted graphs: termination, relaxation correctness, finalization (cut) correctness, global optimality against an independent `WithTop ℕ` specification, path reconstruction, and determinism of the answer. | Lean core + Mathlib `v4.34.1` | [`dijkstra/README.md`](dijkstra/README.md) |
-| **LL(1) parser generator** | Context-free grammars, parse trees and derivations with a proved correspondence (`tree_iff_derives`); on track for a table-driven parser with proved soundness, completeness, termination and LL(1) table correctness. | Lean core only (no Mathlib) | [`ll1/README.md`](ll1/README.md) |
+| **LL(1) parser generator** | Context-free grammars, parse trees and derivations with a proved correspondence (`tree_iff_derives`); a fuelled table-driven parser with proved soundness, completeness (under an explicit progress condition), rejection of non-members and a counterexample showing the progress condition is necessary. Generator and `FIRST`/`FOLLOW` analyses in progress. | Lean core only (no Mathlib) | [`ll1/README.md`](ll1/README.md) |
 
 ## Layout
 
@@ -53,7 +53,7 @@ lake env lean Axioms.lean  # axiom audit
 Requires [elan](https://github.com/leanprover/elan); the pinned toolchain is in
 `lean-toolchain`.
 
-### LL(1) parser generator (Phase 1)
+### LL(1) parser generator (Phases 1–3)
 
 ```sh
 cd ll1

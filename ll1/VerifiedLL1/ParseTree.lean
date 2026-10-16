@@ -171,6 +171,15 @@ theorem match_toks (ws : List T) : MatchList G (toks ws) (ws.map Tree.leaf) := b
       show MatchList G (Sym.tok w :: toks rest) (Tree.leaf w :: rest.map Tree.leaf)
       exact MatchList.tok ih
 
+/-- The only forest matching a *terminal* sentential form is the forest of leaves. -/
+theorem match_toks_unique {ws : List T} {ts : List (Tree T N)} (h : MatchList G (toks ws) ts) :
+    ts = ws.map Tree.leaf := by
+  induction ws generalizing ts with
+  | nil => exact eq_nil h
+  | cons w rest ih =>
+      obtain ⟨ts', rfl, hrest⟩ := eq_leaf_cons h
+      simp [ih hrest]
+
 /-- Concatenation of matched forests. -/
 theorem append {rhs rhs' : List (Sym T N)} {ts ts' : List (Tree T N)}
     (h : MatchList G rhs ts) (h' : MatchList G rhs' ts') :

@@ -131,6 +131,22 @@ def main : IO Unit := do
   IO.println ""
 
   IO.println line
+  IO.println "PHASE 3 — COMPLETENESS, REJECTION, TERMINATION"
+  IO.println line
+  IO.println "  complete_of_match : Correct M + Progressing M w  =>  every matched forest is"
+  IO.println "                      accepted for some fuel"
+  IO.println "  language_iff_accepts : G.language ws <-> exists fuel t, parse = ok t [eof]"
+  IO.println "  never_accepts_of_not_language : ws not in G.language -> rejected at every fuel"
+  IO.println ""
+  IO.println "Why the progress hypothesis is needed (Examples/Loop.lean):"
+  IO.println "  grammar p -> p | a | eps, table M p x = [var p] for every lookahead x"
+  IO.println "  Loop.M_correct      : the table is Sound, Adequate and Complete"
+  IO.println "  Loop.a_in_language  : [a] IS in the language"
+  IO.println "  Loop.never_accepts_a: but parse L M fuel ... = error outOfFuel for every fuel"
+  IO.println "  Loop.not_progressing: and no ranking w makes the table Progressing"
+  IO.println ""
+
+  IO.println line
   IO.println "MAIN CORRESPONDENCE THEOREM (Phase 1)"
   IO.println line
   IO.println "  tree_iff_derives : (∃ ts, Valid G (node A ts) ∧ yield (node A ts) = ws)"

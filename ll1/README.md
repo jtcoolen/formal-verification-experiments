@@ -18,7 +18,7 @@ lake env lean Axioms.lean # prints the axiom dependencies of every main theorem
 |---|---|---|
 | 1 | Context-free grammars, parse trees, yield, derivation relation, correspondence theorem | **done** |
 | 2 | Predictive table type, table-driven parser, independent table-correctness predicate, soundness | **done** |
-| 3 | Completeness, termination, rejection of non-members | not started |
+| 3 | Completeness, termination, rejection of non-members | **done** |
 | 4 | `NULLABLE` / `FIRST` / `FOLLOW` specifications + fixed-point computations, soundness/completeness/termination | not started |
 | 5 | `SELECT` sets, LL(1) conflict check, table generation, end-to-end theorem | not started |
 | 6 | Quantum circuit DSL as a worked instance | grammar + trees + derivations done (Phase 1 slice) |
@@ -36,9 +36,11 @@ ll1/
 │   ├── Leftmost.lean           # leftmost derivations, the leftmost-derivation lemma
 │   ├── Table.lean              # LTok (with eof), Table, Sound/Adequate/Complete, soundCheck
 │   ├── Parser.lean             # fuelled table-driven parser + soundness
+│   ├── Completeness.lean       # monotonicity, rank, completeness, rejection
 │   └── Examples/
 │       ├── Toy.lean            # ε-productions, acceptance *and* rejection proofs
-│       └── Circuits.lean       # quantum circuit DSL grammar (Phase 6 language)
+│       ├── Circuits.lean       # quantum circuit DSL grammar (Phase 6 language)
+│       └── Loop.lean           # a Correct table that loops: progress is necessary
 ├── Main.lean                   # lake exe verifiedLL1Demo
 ├── Axioms.lean                 # axiom audit
 └── README.md
@@ -152,8 +154,9 @@ The correspondence theorem and its ingredients depend only on `propext` and
 
 ## Limitations of the current state
 
-* Phases 2–5 are not implemented yet: there is no parser, no table, no
-  `FIRST`/`FOLLOW` computation and no LL(1) condition.
+* Phases 4–5 are not implemented yet: there is no `FIRST`/`FOLLOW` computation and
+  no LL(1) condition, so no table has yet been *generated* — the example tables are
+  hand-written and certified against the Phase 2 predicate.
 * `Grammar.wellFormed` is stated but not yet *used* by any theorem; when Phase 5
   states the generator's correctness it will appear as an explicit hypothesis.
 * `Leftmost.lean` proves that parse trees, general derivations and leftmost
@@ -241,18 +244,94 @@ A hand-written 18-entry predictive table `M` for the circuit grammar, certified 
 * `parse_truncated_err` — a missing terminator fails with `tokenMismatch ; eof`;
 * `parse_hcx_out_of_fuel` — fuel 3 reports `outOfFuel` instead of looping.
 
-## Next step (Phase 3)
+## Phase 3 — completeness, rejection and termination
 
-Completeness and termination:
+### The mathematical set-up
 
-* prove that with `Table.Correct` (in particular `Complete`) the parser accepts every
-  word of the language — formally: `Derives G [var A] (toks ws)` and enough fuel
-  imply `parse …` succeeds — by lifting the parse along a **leftmost** derivation
-  (`Leftmost.lean` is exactly the preparation for this);
-* handle the non-consuming expansion cycle: exhibit a grammar and table for which
-  the parser would loop, and state the hypothesis (no `A ⇒⁺ A` cycle, or a
-  well-foundedness condition on `Adequate`) under which a fuel bound exists;
-* construct a computable fuel bound from `G` and the input, giving a **total**
-  parser, and prove the two-sided characterisation
-  `parse G M (bound input) input = ok t [eof] ↔ G.language (tokensOf input)`
-  plus rejection of every word outside the language.
+Write `Lang G syms ws` for `∃ ts, MatchList G syms ts ∧ yieldForest ts = ws`; by
+Phase 1 this is exactly `Derives G syms (toks ws)`.  Completeness then reads: if the
+table admits the remaining input, the parser can consume it.
+
+Two things are needed beyond `Table.Correct`.
+
+1. **Progress.**  A correct table can still loop (see `Examples/Loop.lean`), so the
+   theorem is stated with an explicit rank `w : N → Nat`:
+
+   `Table.Progressing G M w` — whenever `M.get A x = some rhs`, `ts = pre ++ t :: post`
+   matches `rhs` with `yieldForest ts = ws`, the node `t` is rooted at `B`, *every*
+   tree of `pre` yields `ε`, and `lookaheadOf (ws ++ rest) = x`, then `w B < w A`.
+
+   In words: a child that starts at the *same* input position as its parent must have
+   strictly smaller rank.  A child that starts later is fine, because the tokens its
+   left siblings consumed are gone.  This is exactly the non-consuming-cycle
+   condition, and it is stated purely about `G` and `M` — never about the parser — so
+   the specification stays non-circular.  Right recursion (`instrs → instr instrs`) is
+   *not* excluded: the recursive child is preceded by `instr`, which never yields `ε`.
+
+2. **A single well-founded measure.**  The pair (tokens still to consume, rank) is a
+   lexicographic variant.  It is packed into one natural number
+
+   `nodeCode K w t = |yield t| · (K+1) + w(root t) + 1` for a node, `0` for a leaf,
+
+   with `forestCode K w ts = max` of the children's codes.  The `+1` keeps node ranks
+   strictly positive, so `forestCode ts < nodeCode (node A …)` holds even for the empty
+   forest — the case that arises when a table entry expands `A` to an `ε`-production.
+
+### Theorems
+
+| Theorem | Statement (schematic) |
+|---|---|
+| `monotone`, `parseSym_mono`, `parseForest_mono` | more fuel never hurts: a parse that succeeds with `fuel` succeeds with any `fuel' ≥ fuel` |
+| `nodeCode_child` | every child of a table expansion has strictly smaller `nodeCode` |
+| `complete_core` | the mutual symbol/forest statement, by strong induction on the rank bound |
+| `complete_of_match` | `Correct M + Progressing M w` ⇒ every matched forest is parsed for *some* fuel |
+| `language_imp_accepts` | **completeness**: `G.language ws → ∃ fuel t, parse = ok t [eof] ∧ Valid ∧ yield = ws` |
+| `parse_ok_imp_language` | **rejection**: for *any* table, acceptance implies membership (uses only `Sound`) |
+| `never_accepts_of_not_language` | a non-member is rejected at *every* fuel value |
+| `parse_ok_imp_shape` | acceptance of a well-formed stream consumes exactly its token word |
+| **`language_iff_accepts`** | the two-sided characterisation: accepted **exactly** when in the language |
+
+`complete_core` proves the symbol statement and the forest statement together by
+`Nat.strongRecOn` on the rank bound; inside a fixed bound the forest part is an
+ordinary induction on the symbol list (the tail does not decrease the bound, only its
+length).
+
+### Epsilon, end-of-input and malformed input
+
+* An `ε`-production is a table entry with `rhs = []`; `parseForest … []\, input = ok []
+  input` consumes nothing, and `Progressing` is what forces such an expansion to
+  decrease the rank (the `pre`-all-ε hypothesis in `nodeCode_child` is exactly the
+  case `ws = []`).
+* End-of-input is a real symbol: `lookaheadOf [] = eof`, so the entry consulted for
+  the last position is the `eof` entry, and `Complete` is what guarantees one exists
+  whenever the tail of the input is derivable.
+* Malformed streams (no `eof`, or tokens after `eof`) are never accepted:
+  `parse_ok_imp_shape` shows acceptance forces `yield t = tokensOf input`, and
+  `parse` itself rejects any leftover input with `trailing`.
+
+### Counterexample: why `Progressing` cannot be dropped (`Examples/Loop.lean`)
+
+Grammar `p → p ∣ a ∣ ε` with start `p` (language `{[], [a]}`) and the table
+`M p x = [var p]` for every lookahead `x`.  Then
+
+* `M_correct : M.Correct L` — sound (certified by `decide`), adequate (the entry
+  repeats the symbol it expands) and complete (each of the three productions is
+  simulated by one forward step `p ⇒ p`, `p ⇒ a`, `p ⇒ ε`);
+* `a_in_language : L.language [a]` and `nil_in_language : L.language []`;
+* `never_accepts_a`, `never_accepts_nil` — for **every** fuel the parse fails with
+  `outOfFuel`;
+* `not_progressing : ∀ w, ¬ Table.Progressing L M w` — the child `node p []` of the
+  expansion `p ⇒ p` yields `ε` at the same position, so any rank would have to satisfy
+  `w p < w p`;
+* `not_cycleFree : ¬ cycleFree L` — the grammar has the non-consuming cycle `p ⇒ p`.
+
+So the extra hypothesis of `language_iff_accepts` is not an artefact of the proof
+technique.
+
+## Next step (Phase 4)
+
+Grammar analysis: `NULLABLE`, `FIRST` and `FOLLOW` as *specifications* (inductive
+predicates), each computed by a finite monotone iteration over an explicit finite
+representation, with soundness, completeness and termination of the iteration proved
+against the specification.  `Grammar.nonterminals`/`terminals` and `FiniteEnum` already
+provide the enumerations the iteration needs.

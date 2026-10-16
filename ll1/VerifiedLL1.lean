@@ -9,8 +9,10 @@ import VerifiedLL1.Derivation
 import VerifiedLL1.Leftmost
 import VerifiedLL1.Table
 import VerifiedLL1.Parser
+import VerifiedLL1.Completeness
 import VerifiedLL1.Examples.Toy
 import VerifiedLL1.Examples.Circuits
+import VerifiedLL1.Examples.Loop
 
 /-!
 # A formally verified LL(1) parser generator in Lean 4
@@ -23,6 +25,7 @@ import VerifiedLL1.Examples.Circuits
 * `VerifiedLL1.Leftmost`  - leftmost derivations, the leftmost-derivation lemma
 * `VerifiedLL1.Table`     - lookaheads, predictive tables, table correctness
 * `VerifiedLL1.Parser`    - the fuelled table-driven parser and its soundness
+* `VerifiedLL1.Examples.Loop` - a correct table that loops: why progress is needed
 * `VerifiedLL1.Examples.Toy` - a worked example grammar with acceptance *and*
   rejection proofs
 

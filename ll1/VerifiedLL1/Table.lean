@@ -89,6 +89,20 @@ def tokensOf {T : Type u} : List (LTok T) → List T :=
   | nil => rfl
   | cons w rest ih => simp [List.map, ih]
 
+/-- A token word as a lookahead stream. -/
+def ltoks {T : Type u} (ws : List T) : List (LTok T) := ws.map LTok.tok
+
+@[simp] theorem ltoks_nil {T : Type u} : @ltoks T [] = [] := rfl
+@[simp] theorem ltoks_cons {T : Type u} (t : T) (ws : List T) :
+    ltoks (t :: ws) = LTok.tok t :: ltoks ws := rfl
+@[simp] theorem ltoks_append {T : Type u} (ws vs : List T) :
+    ltoks (ws ++ vs) = ltoks ws ++ ltoks vs := List.map_append
+@[simp] theorem tokensOf_ltoks {T : Type u} (ws : List T) :
+    tokensOf (ltoks ws) = ws := by
+  induction ws with
+  | nil => rfl
+  | cons w rest => simp [ltoks]
+
 /-- A stream is a *well-formed input* when it is a token word followed by exactly
 one end-of-input marker. -/
 def WellFormedInput {T : Type u} (input : List (LTok T)) : Prop :=
