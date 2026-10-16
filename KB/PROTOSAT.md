@@ -179,3 +179,92 @@ New since round 3:
   not determine the variables (e.g. `decCode`) must take them as explicit parameters.
 * `decide (p ≠ q)` inside a filter: use the Prop `≠` in writeVar so if_pos/if_neg take Prop
   proofs.
+
+## Round 5 - 8A IS PROVED (encoding_sound).  Read this first.
+
+Verified state at commit 'ProtSat 8A COMPLETE':
+* cd protosat && export ELAN_HOME=$PWD/../.elan && lake build ProtSat  ->  'Build completed
+  successfully (701 jobs)', exit 0.
+* lake env lean Axioms.lean  ->  'theorems audited in ProtSat.*: 862 / OK - every theorem
+  depends only on propext, Classical.choice, Quot.sound'.
+* ProtSat/Deduce.lean (1211 lines, spec 2 executable attacker: deduce_sound, oneStep_mem,
+  dedIn_deduce, deduce_mono, encS_decS_step + 8 decide-checked example groups) exists and
+  checks clean on its own; it is NOT yet imported by ProtSat.lean - add 'import ProtSat.Deduce'.
+
+### What 8A now says
+ProtSat.Encoding.encoding_sound : univClosed (shapeOf P B) P -> Sat a (encode P B) ->
+Attack P (decEvsFrom P B a B.steps), with encoding_sound_bounded adding trace length <=
+B.steps.  Chain: rel_agrees -> agrees_decRun -> decRunFrom_runs -> decRun_trace ->
+violation_leak -> encoding_sound.
+
+### New in Encoding.lean (file order)
+* decSt_some_vst, decXe_some_vxe: decoded value implies its variable is true.
+* init_kn_complete, kn_frame, decLearn_kn, kn_complete: knowledge completeness (converse of
+  kn_sound; needed because Rel.rFresh's side condition is negative).
+* sendPublish_mem, dedConcl_mem.
+* StoreWF + reworked Agrees (5 components: pc, readVar=decSt, kn=decKnSeq, StoreWF of every
+  session store, C.sess.length = nS1).  Agrees.storeVals_iff derives the store-value
+  correspondence; storeWF_writeVar is the preservation lemma.
+* frame helpers: evAct_false_of_other, pcOf_succ_act, decSt_succ_write, decSt_succ_keep,
+  storeWF_succ_keep, storeWF_succ_write, decKn_succ_none, agrees_of_frame,
+  agrees_succ_advance.
+* decoding helpers: decodeFr_val, decodeDl_val, mem_dedInsts, mem_rget, lt_shV_of_written,
+  lt_shV_of_mem, fresh_body, bool_not_true, dedInstsOf_prem_lt (every premise index of a
+  universe instance is in range: case analysis over the 11 rule shapes).
+* rel_agrees: the big case split (idle / ded-instance / act x 8 actions).
+* decEvsFrom / decCfgsFrom (built by cons so they line up with Runs), decRunFrom_runs,
+  decCfgsFrom_mem, decRun_trace, violationLits_cases, violation_leak, encoding_sound,
+  decEvsFrom_length, encoding_sound_bounded.
+
+### Other modules touched
+* Operational.lean: Runs.cons FIXED to 'Runs P C (e::tr) (C :: rest)' (it used to drop the
+  start configuration and duplicate the last one; runs_length and the docstring give the
+  intended meaning).  Added rput_length, rget_lt_aux, sessAt_lt, pcOf_succ*_other,
+  storeOf_succ*_other/same, sessLength_succ*, pcOf_succ*' (length-hypothesis versions).
+* Protocol.lean: Expr.eval_congr (evaluation depends only on the readings of the free
+  variables - this is what lets a store be represented by per-variable one-hot groups).
+* Clauses.lean: stepKeepClauses/writtenVar refactor, advClause, keepClause,
+  stepClausesAt_some (the unfolding every clause-membership proof now starts with, because
+  stepClausesAt's match does not reduce under rw), keepClause_mem_stepClausesAt,
+  advClause_mem_stepClausesAt.
+
+### Traps learned in round 5 (add to the list above)
+* NEVER use s.indexOf + slice to truncate a Lean file on a pattern that may occur earlier
+  than expected: it silently destroyed 1000 lines of Encoding.lean (recovered from git).
+  Use unique anchors, assert the index, or append only.
+* rw does not iota-reduce 'match some x with ...'; use simp, or state the reduced form with
+  show, or add a ..._some lemma (stepClausesAt_some).
+* rw [h] at h2 where h's LHS is a def (valAt, readVar, storeOf, sessAt, evDed) fails:
+  unfold in the goal first (unfold storeOf sessAt; rw [...]) or pass the defeq term
+  explicitly (show rget C.sess q = some st from hst).
+* subst on 'r = q' may eliminate the variable you wanted to keep; write the branch using the
+  surviving name.
+* Anonymous constructors against a right-nested And: when a component's expected type has
+  metavariables (e.g. ?C.kn = ...) the elaborator instantiates ?C from the goal, so ascribe
+  the term: (decKn_succ_none h hag hlearn : C.kn = decKnSeq ...).
+* Bool.or_eq_false and List.contains_eq_true do not exist; use by_contra + Bool.or_eq_true /
+  List.any_eq_true and 'by simpa using h' for contains.
+* rw's automatic rfl uses reducible transparency: '(some t).toList' needs an explicit rfl.
+* omega does not unfold defs like shVal/shD/shS: supply 'have hs : shVal sh = sh.U.length + 1
+  := rfl' and rewrite with it first.
+* cases h : e with does not always abstract e from the goal when e is a def application;
+  'simp only [h] at hgoal' is more robust.
+* List.mem_append_left l (h : a in l1) : a in l1 ++ l takes the RIGHT list explicitly;
+  List.mem_append_right l1 (h : a in l2) : a in l1 ++ l2 takes the LEFT one.
+
+### Remaining (priority order)
+1. 8B encoding_complete: from a bounded attack build a satisfying assignment.  Plan: define
+   assignOf block by block over the semantic facts of the run (bounded List.any over the
+   index ranges so it stays computable), then prove each of the 11 clause groups satisfied.
+   Target statement: a bounded attack (Runs from initCfg, length <= B.steps, Leak) implies
+   Satisfiable (encode P B).
+2. DPLL 8D/8E (subagent on ProtSat/DPLL.lean: propagate by well-founded recursion on clause
+   length, dpllAux branching on the variable list, dpll_sound / dpll_unsat).
+3. Certificate 8C (subagent): certificate = list of events + configs; the checker builds Rel
+   proofs; it must not import CNF/DPLL/Encode.
+4. Analyzer 8F/8G/8H + Main.lean + the six examples + README + theorem inventory.
+5. Theory.lean (raw syntax + convergent rewriter + eq_iff_norm) - optional; the normal-form
+   design already satisfies spec 1 via Attacker's constructor/destructor laws.
+6. Authentication violations in the encoding: AuthBreak is defined in Operational but the
+   violation clause only encodes Leak.  Either add a claim/commit clause group or present the
+   Lowe attack as a secrecy breach (B's nonce leaks) and say so explicitly in the README.

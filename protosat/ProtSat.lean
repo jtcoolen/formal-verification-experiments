@@ -1,9 +1,12 @@
 import ProtSat.Syntax
 import ProtSat.CNF
 import ProtSat.Attacker
+import ProtSat.Deduce
 import ProtSat.Protocol
 import ProtSat.Operational
 import ProtSat.Bounded
 import ProtSat.DPLL
 import ProtSat.OneHot
 import ProtSat.Encode
+import ProtSat.Clauses
+import ProtSat.Encoding
