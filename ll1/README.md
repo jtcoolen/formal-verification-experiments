@@ -19,7 +19,7 @@ lake env lean Axioms.lean # prints the axiom dependencies of every main theorem
 | 1 | Context-free grammars, parse trees, yield, derivation relation, correspondence theorem | **done** |
 | 2 | Predictive table type, table-driven parser, independent table-correctness predicate, soundness | **done** |
 | 3 | Completeness, termination, rejection of non-members | **done** |
-| 4 | `NULLABLE` / `FIRST` / `FOLLOW` specifications + fixed-point computations, soundness/completeness/termination | not started |
+| 4 | `NULLABLE` / `FIRST` / `FOLLOW` specifications + fixed-point computations, soundness/completeness/termination | `NULLABLE` **done**; `FIRST`/`FOLLOW` in progress |
 | 5 | `SELECT` sets, LL(1) conflict check, table generation, end-to-end theorem | not started |
 | 6 | Quantum circuit DSL as a worked instance | grammar + trees + derivations done (Phase 1 slice) |
 
@@ -37,6 +37,8 @@ ll1/
 │   ├── Table.lean              # LTok (with eof), Table, Sound/Adequate/Complete, soundCheck
 │   ├── Parser.lean             # fuelled table-driven parser + soundness
 │   ├── Completeness.lean       # monotonicity, rank, completeness, rejection
+│   ├── Fixpoint.lean           # generic finite monotone fixed-point iteration
+│   ├── Nullable.lean           # NULLABLE spec + computation + soundness/completeness
 │   └── Examples/
 │       ├── Toy.lean            # ε-productions, acceptance *and* rejection proofs
 │       ├── Circuits.lean       # quantum circuit DSL grammar (Phase 6 language)
@@ -354,10 +356,55 @@ Grammar `p → p ∣ a ∣ ε` with start `p` (language `{[], [a]}`) and the tab
 So the extra hypothesis of `language_iff_accepts` is not an artefact of the proof
 technique.
 
-## Next step (Phase 4)
+## Phase 4 — grammar analysis
 
-Grammar analysis: `NULLABLE`, `FIRST` and `FOLLOW` as *specifications* (inductive
-predicates), each computed by a finite monotone iteration over an explicit finite
-representation, with soundness, completeness and termination of the iteration proved
-against the specification.  `Grammar.nonterminals`/`terminals` and `FiniteEnum` already
-provide the enumerations the iteration needs.
+### `Fixpoint.lean` — one generic termination argument
+
+All three analyses are least fixed points of monotone rules over a *finite* carrier.
+Rather than repeat the termination proof, `VerifiedLL1.Fixpoint` provides it once:
+
+* a set is a boolean predicate on a finite enumeration `carrier`; the set as a list is
+  `carrier.filter p`;
+* `iterP P n` applies the monotone transformer `P` to the empty predicate `n` times
+  (`PMono` is the explicit pointwise monotonicity hypothesis);
+* `iterP_increasing` / `iterP_le_limit` — the approximants grow;
+* `length_filter_le`, `length_filter_le_of_le`, `length_filter_lt_of_new` — a strict
+  increase between two steps makes the filtered list strictly longer;
+* `exists_le_of_not_forall_le` — a bounded search for a non-growing step;
+* **`iterP_stable`** — *termination*: if `carrier` enumerates the whole type then
+  `iterP P (carrier.length + 1) = iterP P carrier.length`, i.e. the limit is a fixed
+  point; the proof is the pigeonhole argument "at most `|carrier|` strict increases";
+* `iterP_closed` — the closure property each analysis consumes:
+  `iterP P |carrier| x = true ↔ P (iterP P |carrier|) x = true`.
+
+### `Nullable.lean` — NULLABLE
+
+* **Specification** (algorithm-free): `G.Nullable A := Derives G [var A] []`.
+* **Computation**: `nullableTest G S A` adds `A` when some production `A → rhs` has
+  every symbol of `rhs` already known nullable (a terminal never is; the empty
+  right-hand side passes vacuously, which is exactly how the ε-rule is represented).
+  `Grammar.nullable A` is `iterP (nullableP G) |N| A`; `Grammar.nullableSet` is the
+  same answer as an explicit finite list.
+* **Theorems**: `nullableP_mono` (monotone), `nullable_sound` (soundness, by induction
+  on the iteration stage), `nullable_backward` + `nullable_complete` (completeness, by
+  induction on the derivation, transporting nullability *backwards* through a
+  derivation step and using `iterP_closed` at the rewritten symbol), `nullable_iff`,
+  `nullableSet_iff`, and `nullable_eps_tree` — the ε-behaviour in parse-tree terms:
+  `A` is computed nullable exactly when some valid tree rooted at `A` has empty yield.
+* **Example** (`Examples/Toy.lean`): for `s → p q; p → a | ε; q → b q | ε`,
+  `nullableSet_eq : G.nullableSet = [s, p, q]` is discharged by `decide`, and
+  `not_nullable_u` shows the computation rejecting the one nonterminal that has no
+  production at all.
+
+## Next step (Phase 4, continued)
+
+`FIRST` and `FOLLOW` in the same style:
+
+* `G.FirstList xs x` := (∃ ys, Derives G xs (tok t :: ys)) for a token `x = tok t`, and
+  `Derives G xs []` for `x = eof` — the standard `FIRST_1`, stated with derivations;
+* `G.FollowSym A x` := ∃ pre post, Derives G [var start] (toks pre ++ [var A] ++ post)
+  ∧ G.FirstList post x — the classical `S ⇒* α A β` with `x ∈ FIRST(β)`, which puts
+  `eof ∈ FOLLOW(A)` exactly when `A` can be followed by nothing;
+* both computed by `Fixpoint.iterP` over the finite enumerations of `Sym T N` and
+  `N × LTok T`, with NULLABLE as a fixed input, each with soundness, completeness and
+  the characterisation theorem.

@@ -189,7 +189,7 @@ This is the finiteness notion used by the executable analyses: a fixed-point
 iteration over `α` is only computable if `α` can be enumerated, and we prefer to
 carry that enumeration as data rather than let typeclass synthesis build an
 exponential search space. -/
-class FiniteEnum (α : Type) where
+class FiniteEnum (α : Type u) where
   /-- A list containing every element of `α`. -/
   elems : List α
   /-- `elems` really is exhaustive. -/

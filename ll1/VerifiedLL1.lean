@@ -10,6 +10,8 @@ import VerifiedLL1.Leftmost
 import VerifiedLL1.Table
 import VerifiedLL1.Parser
 import VerifiedLL1.Completeness
+import VerifiedLL1.Fixpoint
+import VerifiedLL1.Nullable
 import VerifiedLL1.Examples.Toy
 import VerifiedLL1.Examples.Circuits
 import VerifiedLL1.Examples.Loop
@@ -26,6 +28,8 @@ import VerifiedLL1.Examples.Continuation
 * `VerifiedLL1.Leftmost`  - leftmost derivations, the leftmost-derivation lemma
 * `VerifiedLL1.Table`     - lookaheads, predictive tables, table correctness
 * `VerifiedLL1.Parser`    - the fuelled table-driven parser and its soundness
+* `VerifiedLL1.Fixpoint`    - generic finite monotone fixed-point iteration
+* `VerifiedLL1.Nullable`     - NULLABLE: specification, computation, soundness, completeness
 * `VerifiedLL1.Examples.Loop` - a correct table that loops: why progress is needed
 * `VerifiedLL1.Examples.Continuation` - why table correctness needs reachability
 * `VerifiedLL1.Examples.Toy` - a worked example grammar with acceptance *and*

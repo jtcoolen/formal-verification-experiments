@@ -3,7 +3,7 @@ Copyright (c) 2026 Formally Verified Examples.
 Licensed under the MIT License. See the file LICENSE in the project root for
 license information.
 -/
-import VerifiedLL1.Derivation
+import VerifiedLL1.Nullable
 
 /-!
 # Phase 1.4 — A worked example grammar
@@ -233,4 +233,86 @@ section Computations
 
 end Computations
 
+
+/-- A concatenation is empty only if both parts are. -/
+theorem eq_nil_of_append_eq_nil {α : Type} {as bs : List α} (h : as ++ bs = []) :
+    as = [] ∧ bs = [] := by
+  cases as with
+  | nil => exact ⟨rfl, by simpa using h⟩
+  | cons a rest => exact absurd h (by simp)
+
+section Nullable
+
+/-- The example grammar is finite, so the Phase 4 analyses can run on it. -/
+instance : FiniteEnum Tok where
+  elems := [a, b, c]
+  complete := by
+    intro x
+    cases x <;> simp
+
+instance : FiniteEnum Var where
+  elems := [s, p, q, u]
+  complete := by
+    intro x
+    cases x <;> simp
+
+/-- `p ⇒ ε\' and `q ⇒ ε\' are derivations of the empty word. -/
+theorem nullable_spec_p : G.Nullable p := derives_production p [] mem_pe
+theorem nullable_spec_q : G.Nullable q := derives_production q [] mem_qe
+
+/-- `s ⇒ p q ⇒ ε q ⇒ ε\': the start symbol is nullable, through two ε-productions. -/
+theorem nullable_spec_s : G.Nullable s := by
+  refine derives_trans (derives_production s [var p, var q] mem_sq) ?_
+  have h1 : Derives G [var p] [] := derives_production p [] mem_pe
+  have h2 : Derives G [var q] [] := derives_production q [] mem_qe
+  simpa using derives_append h1 h2
+
+/-- The computed set agrees with the specification. -/
+theorem nullable_p : G.nullable p = true := (nullable_iff G p).mpr nullable_spec_p
+theorem nullable_q : G.nullable q = true := (nullable_iff G q).mpr nullable_spec_q
+theorem nullable_s : G.nullable s = true := (nullable_iff G s).mpr nullable_spec_s
+
+/-- `u\' occurs in the enumeration but has no production: nothing can be derived from it
+except itself. -/
+theorem forms_u : ∀ ys, Derives G [Sym.var u] ys → ys = [Sym.var u] := by
+  intro ys h
+  induction h with
+  | refl => rfl
+  | @tail mid fin hrec hstep ih =>
+      subst ih
+      obtain ⟨B, rhs, pre, post, hp, e1, e2⟩ := derives1_decompose hstep
+      -- `[var u] = pre ++ var B :: post\' forces `pre = []\', `B = u\', `post = []\'
+      have hpre : pre = [] := by
+        cases pre with
+        | nil => rfl
+        | cons a as' =>
+            rw [List.cons_append] at e1
+            obtain ⟨ha, hrest⟩ := List.cons.inj e1
+            subst ha
+            obtain ⟨_, h4⟩ := eq_nil_of_append_eq_nil hrest.symm
+            exact absurd h4 (by simp)
+      subst hpre
+      rw [List.nil_append] at e1
+      obtain ⟨hBu, hpost⟩ := List.cons.inj e1
+      subst hpost
+      cases hBu
+      -- now `B` is `u`
+      -- but `u\' has no production at all
+      exact absurd hp (by simp [G, List.mem_cons])
+
+/-- `u\' is *not* nullable, and the computation knows it. -/
+theorem not_nullable_u : ¬ (G.nullable u = true) := by
+  intro h
+  have hspec : G.Nullable u := (nullable_iff G u).mp h
+  have h1 : ([] : List (Sym Tok Var)) = [Sym.var u] := forms_u [] hspec
+  exact absurd h1 (by simp)
+
+/-- The computed NULLABLE set of the example grammar: exactly `s, p, q\'. -/
+theorem nullableSet_eq : G.nullableSet = [s, p, q] := by
+  unfold Grammar.nullableSet
+  decide
+
+#eval G.nullableSet
+
+end Nullable
 end VerifiedLL1.Examples.Toy

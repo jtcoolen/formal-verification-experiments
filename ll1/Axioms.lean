@@ -57,6 +57,18 @@ axiom appearing below is a bug.
 #print axioms VerifiedLL1.Examples.Loop.never_accepts_nil
 #print axioms VerifiedLL1.Examples.Continuation.not_complete_strong
 
+-- Phase 4
+#print axioms VerifiedLL1.Fixpoint.iterP_stable
+#print axioms VerifiedLL1.Fixpoint.iterP_closed
+#print axioms VerifiedLL1.nullableP_mono
+#print axioms VerifiedLL1.nullable_sound
+#print axioms VerifiedLL1.nullable_complete
+#print axioms VerifiedLL1.nullable_iff
+#print axioms VerifiedLL1.nullableSet_iff
+#print axioms VerifiedLL1.nullable_eps_tree
+#print axioms VerifiedLL1.Examples.Toy.nullableSet_eq
+#print axioms VerifiedLL1.Examples.Toy.not_nullable_u
+
 -- Phase 3
 #print axioms VerifiedLL1.monotone
 #print axioms VerifiedLL1.parseSym_mono
