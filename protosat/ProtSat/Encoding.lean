@@ -3332,3 +3332,228 @@ theorem rel_agrees (hU : univClosed (shapeOf P B) P) (h : Sat a (encode P B))
             rfl
           · intro r hr; exact hag.2.2.2.1 r hr
           · rw [sessLength_succDed, hag.2.2.2.2]
+
+/-! ### The decoded run is a trace (specification 8A, continued) -/
+
+/-- At every step the decoded configuration agrees with the assignment: the base case is
+ProtSat.Encoding.agrees_zero and the induction step is ProtSat.Encoding.rel_agrees. -/
+theorem agrees_decRun (h : Sat a (encode P B)) (hU : univClosed (shapeOf P B) P) :
+    ∀ (k : Nat), k ≤ B.steps → Agrees P B a (decRun P B a k) k := by
+  intro k
+  induction k with
+  | zero => intro _; exact agrees_zero h
+  | succ k ih =>
+      intro hk
+      have h1 := rel_agrees hU h (by omega) (ih (by omega))
+      exact h1.2
+
+/-- The events the assignment selects in the last n steps, in increasing order of the step.
+For n = B.steps this is the whole decoded trace.  It is built by cons so that it lines up
+with the inductive predicate ProtSat.Runs, which also conses at the front. -/
+def decEvsFrom (P : Protocol) (B : Bounds) (a : Assignment) : Nat → List Ev
+  | 0 => []
+  | n + 1 => decEv (shapeOf P B) P a (B.steps - (n + 1)) :: decEvsFrom P B a n
+
+/-- The configurations the decoded run visits over the last n steps: n + 1 of them, from
+decRun (steps - n) to decRun steps. -/
+def decCfgsFrom (P : Protocol) (B : Bounds) (a : Assignment) : Nat → List Cfg
+  | 0 => [decRun P B a B.steps]
+  | n + 1 => decRun P B a (B.steps - (n + 1)) :: decCfgsFrom P B a n
+
+/-- The decoded run is a trace of the operational semantics. -/
+theorem decRunFrom_runs (h : Sat a (encode P B)) (hU : univClosed (shapeOf P B) P) :
+    ∀ (n : Nat), n ≤ B.steps ->
+      Runs P (decRun P B a (B.steps - n)) (decEvsFrom P B a n) (decCfgsFrom P B a n) := by
+  intro n
+  induction n with
+  | zero => intro _; exact Runs.nil P (decRun P B a B.steps)
+  | succ n ih =>
+      intro hn
+      have hlt : B.steps - (n + 1) < B.steps := by omega
+      have hag := agrees_decRun h hU (B.steps - (n + 1)) (by omega)
+      have h1 := rel_agrees hU h hlt hag
+      have hstep : decRun P B a (B.steps - (n + 1) + 1) = decStep P B a (decRun P B a (B.steps - (n + 1))) (B.steps - (n + 1)) := rfl
+      have hrel : Rel P (decRun P B a (B.steps - (n + 1)))
+          (decEv (shapeOf P B) P a (B.steps - (n + 1)))
+          (decRun P B a (B.steps - (n + 1) + 1)) := by
+        rw [hstep]
+        exact h1.1
+      have h2 := ih (by omega)
+      have harith : B.steps - (n + 1) + 1 = B.steps - n := by omega
+      have h2' : Runs P (decRun P B a (B.steps - (n + 1) + 1))
+          (decEvsFrom P B a n) (decCfgsFrom P B a n) := by
+        rw [harith]
+        exact h2
+      exact Runs.cons hrel h2'
+
+/-- The decoded trace visits every decoded configuration. -/
+theorem decCfgsFrom_mem (P : Protocol) (B : Bounds) (a : Assignment) :
+    ∀ (n j : Nat), j ≤ n -> decRun P B a (B.steps - j) ∈ decCfgsFrom P B a n := by
+  intro n
+  induction n with
+  | zero =>
+      intro j hj
+      have hz : j = 0 := by omega
+      subst hz
+      simp [decCfgsFrom]
+  | succ n ih =>
+      intro j hj
+      rw [decCfgsFrom]
+      by_cases hz : j = n + 1
+      · subst hz
+        exact List.Mem.head _
+      · exact List.Mem.tail _ (ih j (by omega))
+
+/-- The full decoded trace is a run of the protocol from its initial configuration. -/
+theorem decRun_trace (h : Sat a (encode P B)) (hU : univClosed (shapeOf P B) P) :
+    Runs P (initCfg P) (decEvsFrom P B a B.steps) (decCfgsFrom P B a B.steps) := by
+  have h0 : decRun P B a (B.steps - B.steps) = initCfg P := by
+    rw [Nat.sub_self]
+    unfold decRun
+    rfl
+  rw [← h0]
+  exact decRunFrom_runs h hU B.steps (Nat.le_refl _)
+
+/-! ### The violation clause yields a real leak (specification 8A, conclusion) -/
+
+/-- The literals of the violation clause, decomposed: a true literal names either a step at
+which a closed declared secret's kn variable is true, or a step at which a store-secret leak
+auxiliary is true. -/
+theorem violationLits_cases {l : Lit} (hl : l ∈ violationLits (shapeOf P B) P) :
+    (∃ i u t, i ≤ B.steps ∧ u < (shapeOf P B).U.length ∧
+        l = pos (vkn (shapeOf P B) i u) ∧ valAt (shapeOf P B) u = some t ∧
+        t ∈ P.closedSecretTerms)
+    ∨ (∃ i q x u, i ≤ B.steps ∧ q < shS (shapeOf P B) ∧ x < shV (shapeOf P B) ∧
+        u < (shapeOf P B).U.length ∧ l = pos (vau (shapeOf P B) i q x u) ∧
+        storeSecret (shapeOf P B) P q x = true) := by
+  rw [violationLits, litsStep1, List.mem_flatMap] at hl
+  obtain ⟨i, hi, hl2⟩ := hl
+  have hle : i < (shapeOf P B).steps + 1 := List.mem_range.mp hi
+  rw [List.mem_append] at hl2
+  rcases hl2 with hl2 | hl2
+  · left
+    rw [closedLeakLits, List.mem_filterMap] at hl2
+    obtain ⟨u, hu, hl3⟩ := hl2
+    have hlt : u < (shapeOf P B).U.length := List.mem_range.mp hu
+    cases hv : valAt (shapeOf P B) u with
+    | none => rw [hv] at hl3; simp at hl3
+    | some t =>
+        simp only [hv] at hl3
+        by_cases hs : t ∈ P.closedSecretTerms
+        · have hred : (if t ∈ P.closedSecretTerms then some (pos (vkn (shapeOf P B) i u))
+              else none) = some (pos (vkn (shapeOf P B) i u)) := if_pos hs
+          rw [hred] at hl3
+          cases hl3
+          exact ⟨i, u, t, by rw [steps_eq] at hle; omega, hlt, rfl, hv, hs⟩
+        · have hred : (if t ∈ P.closedSecretTerms then some (pos (vkn (shapeOf P B) i u))
+              else none) = none := if_neg hs
+          rw [hred] at hl3; simp at hl3
+  · right
+    simp only [storeLeakLits, litsSess, litsVar, List.mem_flatMap] at hl2
+    obtain ⟨q, hq, hl3⟩ := hl2
+    obtain ⟨x, hx, hl4⟩ := hl3
+    rw [storeLeakLitsAt] at hl4
+    by_cases hs : storeSecret (shapeOf P B) P q x
+    · rw [if_pos hs] at hl4
+      rw [List.mem_map] at hl4
+      obtain ⟨u, hu, rfl⟩ := hl4
+      exact ⟨i, q, x, u, by rw [steps_eq] at hle; omega, List.mem_range.mp hq,
+        List.mem_range.mp hx, List.mem_range.mp hu, rfl, hs⟩
+    · rw [if_neg hs] at hl4; simp at hl4
+
+/-- **A satisfying assignment leaks** (specification 8A).  The violation clause is not a
+free-floating Boolean demand: some configuration of the decoded run has a declared secret in
+the attacker's knowledge, either a closed secret or a session's store secret. -/
+theorem violation_leak (hU : univClosed (shapeOf P B) P) (h : Sat a (encode P B)) :
+    ∃ (i : Nat), i ≤ B.steps ∧ Leak P (decRun P B a i) := by
+  have hv : Clause.eval a (violationLits (shapeOf P B) P) = true :=
+    sat_violation h (violationLits (shapeOf P B) P) (by
+      unfold violationClauses cnfOf
+      exact List.Mem.head _)
+  rw [Clause.eval, List.any_eq_true] at hv
+  obtain ⟨l, hl, hal⟩ := hv
+  have hle : l.eval a = true := hal
+  rcases violationLits_cases hl with ⟨i, u, t, hi, hu, rfl, hut, hs⟩ |
+      ⟨i, q, x, u, hi, hq, hx, hu2, rfl, hsec⟩
+  · -- a closed declared secret is known to the attacker
+    have hk : a (vkn (shapeOf P B) i u) = true := by simpa using hle
+    have hag := agrees_decRun h hU i hi
+    exact ⟨i, hi, Or.inl ⟨t, hs, by rw [hag.2.2.1]; exact kn_sound h hut i hi hk⟩⟩
+  · -- a store secret: the leak auxiliary says the session holds it and the attacker knows it
+    have hsat : Sat a (andNDef (vau (shapeOf P B) i q x u)
+        [pos (vst (shapeOf P B) i q x u), pos (vkn (shapeOf P B) i u)]) := by
+      intro cl hcl
+      refine sat_leakAux h cl (by
+        unfold leakAuxClauses cnfOf eachStep1 eachSess eachVar
+        refine List.mem_flatMap.mpr ⟨i, List.mem_range.mpr (Nat.lt_succ_of_le hi),
+          List.mem_flatMap.mpr ⟨q, List.mem_range.mpr hq,
+            List.mem_flatMap.mpr ⟨x, List.mem_range.mpr hx, ?_⟩⟩⟩
+        rw [leakAuxEntry, if_pos hsec]
+        exact List.mem_flatMap.mpr ⟨u, List.mem_range.mpr hu2, hcl⟩)
+    have hall := ((sat_andNDef).mp hsat).1 (by simpa using hle)
+    have hvst' : a (vst (shapeOf P B) i q x u) = true := by
+      have h1 := hall _ (List.Mem.head _)
+      simpa using h1
+    have hvkn' : a (vkn (shapeOf P B) i u) = true := by
+      have h1 := hall _ (List.Mem.tail _ (List.Mem.head _))
+      simpa using h1
+    obtain ⟨t, ht⟩ := rget_lt (shapeOf P B).U u hu2
+    rw [storeSecret] at hsec
+    rw [Bool.and_eq_true] at hsec
+    obtain ⟨hq1, hq2⟩ := hsec
+    have hq' : q < (shapeOf P B).nS1 := of_decide_eq_true hq1
+    have hsec' : (Secret.store q x) ∈ P.secrets := of_decide_eq_true hq2
+    have hdec : decSt (shapeOf P B) a i q x = some t := by
+      unfold decSt decVal
+      have h5 : (stOh (shapeOf P B) i q x).decode a = some u :=
+        Oh.decode_of_true (sat_stOh hi (lt_shS hq') hx h)
+          (List.mem_range.mpr (by show u < (shapeOf P B).U.length + 1; omega)) hvst'
+      rw [h5]
+      show valAt (shapeOf P B) u = some t
+      exact ht
+    have hag := agrees_decRun h hU i hi
+    have hkn : t ∈ (decRun P B a i).kn := by
+      rw [hag.2.2.1]
+      exact kn_sound h ht i hi hvkn'
+    have hread : (sessAt (decRun P B a i) q).map (fun st => readVar x st.store) = some (some t) := by
+      obtain ⟨st, hst⟩ :=
+        sessAt_lt (C := decRun P B a i) (by rw [hag.2.2.2.2]; exact hq')
+      have h1 : readVar x st.store = some t := by
+        have hso : storeOf (decRun P B a i) q = st.store := by
+          unfold storeOf sessAt
+          rw [show rget (decRun P B a i).sess q = some st from hst]
+          rfl
+        rw [← hso, hag.2.1 q x hq' hx, hdec]
+      rw [hst]
+      simpa using h1
+    exact ⟨i, hi, Or.inr ⟨q, x, t, hsec', hread, hkn⟩⟩
+
+/-- **Encoding soundness** (specification 8A).  Every satisfying assignment of the CNF
+produced by ProtSat.Encode.encode corresponds to a valid bounded protocol execution that
+exhibits the requested violation: the decoded events form a run of ProtSat.Rel from the
+initial configuration, and that run leaks a declared secret. -/
+theorem encoding_sound (hU : univClosed (shapeOf P B) P) (h : Sat a (encode P B)) :
+    Attack P (decEvsFrom P B a B.steps) := by
+  obtain ⟨i, hi, hleak⟩ := violation_leak hU h
+  refine ⟨decCfgsFrom P B a B.steps, decRun_trace h hU, Or.inl ?_⟩
+  unfold runsLeaks
+  have hmem : decRun P B a i ∈ decCfgsFrom P B a B.steps := by
+    have h1 : decRun P B a (B.steps - (B.steps - i)) ∈ decCfgsFrom P B a B.steps :=
+      decCfgsFrom_mem P B a B.steps (B.steps - i) (by omega)
+    rw [Nat.sub_sub_self (by omega : i ≤ B.steps)] at h1
+    exact h1
+  exact ⟨decRun P B a i, hmem, hleak⟩
+
+/-- The decoded attack trace has exactly the length of the step bound. -/
+theorem decEvsFrom_length (P : Protocol) (B : Bounds) (a : Assignment) (n : Nat) :
+    (decEvsFrom P B a n).length = n := by
+  induction n with
+  | zero => rfl
+  | succ n ih => simp [decEvsFrom, ih]
+
+/-- **8A with the bound stated explicitly.**  A satisfying assignment yields an attack whose
+trace length is at most the step bound. -/
+theorem encoding_sound_bounded (hU : univClosed (shapeOf P B) P) (h : Sat a (encode P B)) :
+    Attack P (decEvsFrom P B a B.steps) ∧
+      (decEvsFrom P B a B.steps).length ≤ B.steps :=
+  ⟨encoding_sound hU h, by rw [decEvsFrom_length]⟩

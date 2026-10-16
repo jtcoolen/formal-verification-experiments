@@ -379,7 +379,7 @@ inductive Runs : Protocol -> Cfg -> List Ev -> List Cfg -> Prop
   | nil : ∀ (P : Protocol) (C : Cfg), Runs P C [] [C]
   /-- One more step: e takes C to C' and the rest of the trace continues from C'. -/
   | cons : ∀ {P : Protocol} {C C' : Cfg} {e : Ev} {tr : List Ev} {rest : List Cfg},
-      Rel P C e C' -> Runs P C' tr rest -> Runs P C (e :: tr) (C' :: rest)
+      Rel P C e C' -> Runs P C' tr rest -> Runs P C (e :: tr) (C :: rest)
 
 /-- Trace P C0 tr: tr is a valid execution of P from C0 (for some visit list). -/
 def Trace (P : Protocol) (C0 : Cfg) (tr : List Ev) : Prop := ∃ Cs, Runs P C0 tr Cs
