@@ -347,8 +347,8 @@ theorem shEv_pos (sh : Shape) : 0 < shEv sh := by
 def shapeOf (P : Protocol) (B : Bounds) : Shape :=
   { nS1 := P.sessions.length,
     nPc1 := maxNat ((List.range P.sessions.length).map fun q => P.roleLen q) 0,
-    nV1 := maxNat ((List.range P.sessions.length).map fun q =>
-                     maxNat (P.sessionVars q) 0) 0,
+    nV1 := maxNat ((P.roles.flatMap fun r =>
+                     (r.acts.flatMap fun a => a.written ++ a.exprs.flatMap Expr.vars))) 0,
     U := Bounded.univ P B,
     D := P.nonceDomain,
     steps := B.steps,

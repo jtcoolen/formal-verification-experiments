@@ -562,14 +562,14 @@ theorem mem_pubAux {i q c u : Nat} {cl : Clause} (hi : i < B.steps) (hq : q < sh
       List.mem_flatMap.mpr ⟨c, List.mem_range.mpr hc,
         List.mem_flatMap.mpr ⟨u, List.mem_range.mpr hu, h⟩⟩⟩⟩
 
-theorem mem_eval {i q e : Nat} {cl : Clause} (hi : i ≤ B.steps) (hq : q < shS (shapeOf P B))
-    (he : e < shE (shapeOf P B))
-    (h : cl ∈ evalClausesEntry (shapeOf P B) P i q e) :
+theorem mem_eval {i q : Nat} {e : Expr} {cl : Clause} (hi : i ≤ B.steps)
+    (hq : q < shS (shapeOf P B)) (he : e ∈ allExprs P)
+    (h : cl ∈ evalGate (shapeOf P B) P i q e) :
     cl ∈ (evalClauses (shapeOf P B) P).clauses := by
-  unfold evalClauses cnfOf eachStep1 eachSess evalClausesAt eachExpr
-  refine List.mem_flatMap.mpr ⟨i, List.mem_range.mpr (Nat.lt_succ_of_le hi),
+  unfold evalClauses cnfOf eachStep1 eachSess evalClausesAt
+  refine List.mem_flatMap.mpr ⟨i, List.mem_range.mpr (by show i < B.steps + 1; omega),
     List.mem_flatMap.mpr ⟨q, List.mem_range.mpr hq,
-      List.mem_flatMap.mpr ⟨e, List.mem_range.mpr he, h⟩⟩⟩
+      List.mem_flatMap.mpr ⟨e, he, h⟩⟩⟩
 
 theorem mem_fresh {i q c : Nat} {cl : Clause} (hi : i < B.steps) (hq : q < shS (shapeOf P B))
     (hc : c < shPc (shapeOf P B)) (h : cl ∈ freshClausesAt (shapeOf P B) P i q c) :
@@ -1026,3 +1026,413 @@ theorem kn_sound (h : Sat a (encode P B)) {u : Nat} {t : Term}
             rw [hsome]
             simp
 
+
+/-! ### The evaluation correspondence -/
+
+/-- Reading the expression table at its own index returns the expression. -/
+theorem eAt_eIdx {e : Expr} (he : e ∈ allExprs P) : eAt P (eIdx P e) = e := by
+  unfold eAt
+  have h : rget (allExprs P) (eIdx P e) = some e := rget_ixOf (allExprs P) e he
+  rw [h]
+  simp
+
+/-- A value is admissible exactly when it belongs to the value domain of the universe. -/
+theorem admissible_iff_vals {sh : Shape} {v : Val} :
+    admissible sh v = true <-> v ∈ vals sh.U := by
+  cases v with
+  | none => simp [admissible, vals]
+  | some t =>
+      simp only [admissible, vals, List.mem_cons, List.mem_map]
+      rw [contains_mem]
+      constructor
+      · intro h; exact Or.inr ⟨t, h, rfl⟩
+      · rintro (h | ⟨u, hu, hu2⟩)
+        · exact absurd h (by simp)
+        · have h2 : u = t := Option.some.inj hu2
+          subst h2
+          exact hu
+
+
+/-! ### The evaluation correspondence -/
+
+/-- A variable that is an expression of some action has a store slot in the shape. -/
+theorem le_maxNat_of_mem {lo : Nat} : ∀ (l : List Nat) (y : Nat), y ∈ l -> y ≤ maxNat l lo := by
+  intro l
+  induction l with
+  | nil => intro y h; cases h
+  | cons x xs ih =>
+      intro y h
+      rw [List.mem_cons] at h
+      rcases h with h | h
+      · subst h
+        exact Nat.le_max_left _ _
+      · exact Nat.le_trans (ih y h) (Nat.le_max_right _ _)
+
+/-- Every variable mentioned by a protocol expression has a store slot in the shape. -/
+theorem var_lt_shV {e : Expr} (he : e ∈ allExprs P) {x : Nat} (hx : x ∈ Expr.vars e) :
+    x < shV (shapeOf P B) := by
+  have hmem : x ∈ (P.roles.flatMap fun r =>
+      r.acts.flatMap fun a => a.written ++ a.exprs.flatMap Expr.vars) := by
+    rw [allExprs, List.mem_eraseDups] at he
+    rcases List.mem_flatMap.mp he with ⟨r, hr, he2⟩
+    rcases List.mem_flatMap.mp he2 with ⟨act, hact, he3⟩
+    refine List.mem_flatMap.mpr ⟨r, hr, List.mem_flatMap.mpr ⟨act, hact, ?_⟩⟩
+    rw [List.mem_append]
+    exact Or.inr (List.mem_flatMap.mpr ⟨e, he3, hx⟩)
+  have hle := le_maxNat_of_mem (lo := 0) _ x hmem
+  have h2 : (shapeOf P B).nV1 = maxNat (P.roles.flatMap fun r =>
+      r.acts.flatMap fun a => a.written ++ a.exprs.flatMap Expr.vars) 0 := rfl
+  show x < (shapeOf P B).nV1 + 1
+  rw [h2]
+  omega
+
+/-- An expression cannot be both unary and binary. -/
+theorem child1_none_of_child2 {e c₁ c₂ : Expr} (h : Expr.child2 e = some (c₁, c₂)) :
+    Expr.child1 e = none := by
+  cases e with
+  | agent A | nonce N | shrk a b | pubk a | privk a | var x => rfl
+  | pair a b | encS a b | decS a b => rfl
+  | encA m a | hash m | fst m | snd m | decA m a => cases h
+
+/-- The expression list of an action is closed under taking subexpressions. -/
+theorem Action.closed_exprs : ∀ (act : Action) (e : Expr), e ∈ act.exprs ->
+    ∀ f ∈ e.subexpressions, f ∈ act.exprs := by
+  intro act
+  cases act with
+  | fresh x N | recv x y =>
+      intro e h _ _
+      simp [Action.exprs] at h
+  | send _ x | assign _ x | secret x =>
+      intro e h f hf
+      simp only [Action.exprs] at h ⊢
+      exact Expr.subexpressions_trans x e h f hf
+  | check x y | claim _ x y | commit _ x y =>
+      intro e h f hf
+      simp only [Action.exprs, List.mem_append] at h ⊢
+      rcases h with h | h
+      · exact Or.inl (Expr.subexpressions_trans x e h f hf)
+      · exact Or.inr (Expr.subexpressions_trans y e h f hf)
+
+/-- The expression table is closed under subexpressions. -/
+theorem mem_allExprs_sub {e f : Expr} (he : e ∈ allExprs P) (hf : f ∈ e.subexpressions) :
+    f ∈ allExprs P := by
+  rw [allExprs, List.mem_eraseDups] at he ⊢
+  rcases List.mem_flatMap.mp he with ⟨r, hr, he2⟩
+  rcases List.mem_flatMap.mp he2 with ⟨act, hact, he3⟩
+  refine List.mem_flatMap.mpr ⟨r, hr,
+    List.mem_flatMap.mpr ⟨act, hact, Action.closed_exprs act e he3 f hf⟩⟩
+
+/-- The child of a table expression is again in the table. -/
+theorem mem_allExprs_child1 {e c : Expr} (he : e ∈ allExprs P) (h : Expr.child1 e = some c) :
+    c ∈ allExprs P := by
+  have hsub : c ∈ e.subexpressions := by
+    cases e with
+    | agent A | nonce N | shrk a b | pubk a | privk a | var x => cases h
+    | pair a b | encS a b | decS a b => cases h
+    | encA m a | decA m a =>
+        have h3 : m = c := Option.some.inj (h : some m = some c)
+        subst h3
+        rw [Expr.subexpressions]
+        exact List.mem_cons.mpr (Or.inr (Expr.mem_subexpressions _))
+    | hash m | fst m | snd m =>
+        have h3 : m = c := Option.some.inj (h : some m = some c)
+        subst h3
+        rw [Expr.subexpressions]
+        exact List.mem_cons.mpr (Or.inr (Expr.mem_subexpressions _))
+  exact mem_allExprs_sub he hsub
+
+/-- Both children of a table expression are again in the table. -/
+theorem mem_allExprs_child2 {e c₁ c₂ : Expr} (he : e ∈ allExprs P)
+    (h : Expr.child2 e = some (c₁, c₂)) : c₁ ∈ allExprs P ∧ c₂ ∈ allExprs P := by
+  have hsub : c₁ ∈ e.subexpressions ∧ c₂ ∈ e.subexpressions := by
+    cases e with
+    | agent A | nonce N | shrk a b | pubk a | privk a | var x => cases h
+    | encA m a | hash m | fst m | snd m | decA m a => cases h
+    | pair a b =>
+        have h3 : (a, b) = (c₁, c₂) :=
+          Option.some.inj (h : some (a, b) = some (c₁, c₂))
+        cases h3
+        rw [Expr.subexpressions]
+        exact ⟨List.mem_cons.mpr (Or.inr (List.mem_append_left _ (Expr.mem_subexpressions _))),
+          List.mem_cons.mpr (Or.inr (List.mem_append_right _ (Expr.mem_subexpressions _)))⟩
+    | encS a b =>
+        have h3 : (a, b) = (c₁, c₂) :=
+          Option.some.inj (h : some (a, b) = some (c₁, c₂))
+        cases h3
+        rw [Expr.subexpressions]
+        exact ⟨List.mem_cons.mpr (Or.inr (List.mem_append_left _ (Expr.mem_subexpressions _))),
+          List.mem_cons.mpr (Or.inr (List.mem_append_right _ (Expr.mem_subexpressions _)))⟩
+    | decS a b =>
+        have h3 : (a, b) = (c₁, c₂) :=
+          Option.some.inj (h : some (a, b) = some (c₁, c₂))
+        cases h3
+        rw [Expr.subexpressions]
+        exact ⟨List.mem_cons.mpr (Or.inr (List.mem_append_left _ (Expr.mem_subexpressions _))),
+          List.mem_cons.mpr (Or.inr (List.mem_append_right _ (Expr.mem_subexpressions _)))⟩
+  exact ⟨mem_allExprs_sub he hsub.1, mem_allExprs_sub he hsub.2⟩
+
+/-- The gate clauses of a unary expression. -/
+theorem evalGate_unary {sh : Shape} {P : Protocol} {i q : Nat} {e c : Expr}
+    (hchild : Expr.child1 e = some c) :
+    evalGate sh P i q e =
+      (fwdClausesOn [] (xeOh sh i q (eIdx P c))
+        (fun u => pos (vxe sh i q (eIdx P e) (f1 sh e u)))).clauses := by
+  unfold evalGate
+  rw [hchild]
+
+/-- The gate clauses of a binary expression. -/
+theorem evalGate_binary {sh : Shape} {P : Protocol} {i q : Nat} {e c₁ c₂ : Expr}
+    (hchild : Expr.child2 e = some (c₁, c₂)) :
+    evalGate sh P i q e =
+      (fwd2ClausesOn [] (xeOh sh i q (eIdx P c₁)) (xeOh sh i q (eIdx P c₂))
+        (fun u v => pos (vxe sh i q (eIdx P e) (f2 sh e u v)))).clauses := by
+  unfold evalGate
+  rw [child1_none_of_child2 hchild, hchild]
+
+/-- The gate clauses of a variable read. -/
+theorem evalGate_var {sh : Shape} {P : Protocol} {i q x : Nat} :
+    evalGate sh P i q (Expr.var x) =
+      (fwdClausesOn [] (stOh sh i q x)
+        (fun u => pos (vxe sh i q (eIdx P (Expr.var x)) u))).clauses := by
+  unfold evalGate evalLeafGate
+  simp [Expr.child1, Expr.child2]
+
+/-- The gate clauses of a constant expression. -/
+theorem evalGate_konst {sh : Shape} {P : Protocol} {i q : Nat} {E : Expr}
+    (h1 : Expr.child1 E = none) (h2 : Expr.child2 E = none) (hv : ∀ x, E ≠ Expr.var x) :
+    evalGate sh P i q E =
+      [[pos (vxe sh i q (eIdx P E) (uIdx sh (Expr.constVal E)))]] := by
+  unfold evalGate evalLeafGate
+  rw [h1, h2]
+  cases E with
+  | var x => exact absurd rfl (hv x)
+  | _ => rfl
+
+/-- The gate clauses of a table expression are satisfied by any satisfying assignment. -/
+theorem sat_gate {e : Expr} (he : e ∈ allExprs P) (hi : i ≤ B.steps)
+    (hq : q < shS (shapeOf P B)) (h : Sat a (encode P B)) :
+    ∀ cl ∈ evalGate (shapeOf P B) P i q e, Clause.eval a cl = true :=
+  fun cl hcl => sat_eval h cl (mem_eval hi hq he hcl)
+
+/-- The index selected by an evaluation group is in range. -/
+theorem decodeXe_lt {i q : Nat} {e : Expr} (he : e ∈ allExprs P) (hi : i ≤ B.steps)
+    (hq : q < shS (shapeOf P B)) (h : Sat a (encode P B)) :
+    ∃ v, (xeOh (shapeOf P B) i q (eIdx P e)).decode a = some v ∧ v < shVal (shapeOf P B) ∧
+      a (vxe (shapeOf P B) i q (eIdx P e) v) = true := by
+  have hix : eIdx P e < shE (shapeOf P B) := eIdx_lt he
+  have hoh := sat_xeOh hi hq hix h
+  obtain ⟨v, hv⟩ := Oh.decode_some hoh
+  exact ⟨v, hv, List.mem_range.mp ((decodeGo_some _ _ _ _ hv).1),
+    (decodeGo_some _ _ _ _ hv).2⟩
+
+/-- **Unary Tseitin gate.**  The value decoded for a unary expression is one evaluation step
+applied to the value decoded for its child. -/
+theorem xe_unary {e c : Expr} (he : e ∈ allExprs P) (hc : c ∈ allExprs P)
+    (hchild : Expr.child1 e = some c)
+    (hU : univClosed (shapeOf P B) P) (h : Sat a (encode P B))
+    (hi : i ≤ B.steps) (hq : q < shS (shapeOf P B)) :
+    decXe (shapeOf P B) P a i q e =
+      Expr.stepEval1 e (decXe (shapeOf P B) P a i q c) := by
+  obtain ⟨v, hv, hvlt, hvv⟩ := decodeXe_lt hc hi hq h
+  have hixc : eIdx P c < shE (shapeOf P B) := eIdx_lt hc
+  have hixe : eIdx P e < shE (shapeOf P B) := eIdx_lt he
+  have hg : Sat a (fwdClausesOn [] (xeOh (shapeOf P B) i q (eIdx P c))
+      (fun u => pos (vxe (shapeOf P B) i q (eIdx P e) (f1 (shapeOf P B) e u)))) := by
+    intro cl hcl
+    exact sat_gate he hi hq h cl (by rw [evalGate_unary hchild]; exact hcl)
+  have h1 := fwdClausesOn_correct (sat_xeOh hi hq hixc h) hg
+    (fun l hl => absurd hl (by simp)) v hv
+  have h2 : a (vxe (shapeOf P B) i q (eIdx P e)
+      (f1 (shapeOf P B) e v)) = true := by simpa using h1
+  have h3 : (xeOh (shapeOf P B) i q (eIdx P e)).decode a =
+      some (f1 (shapeOf P B) e v) :=
+    Oh.decode_of_true (sat_xeOh hi hq hixe h)
+      (List.mem_range.mpr (uIdx_lt' (shapeOf P B) _)) h2
+  have hval : valAt (shapeOf P B) (f1 (shapeOf P B) e v) =
+      Expr.stepEval1 e (valAt (shapeOf P B) v) := by
+    show valAt (shapeOf P B) (uIdx (shapeOf P B) (Expr.stepEval1 e (valAt (shapeOf P B) v))) = _
+    refine valAt_uIdx_adm ?_
+    exact hU.1 e he (valAt (shapeOf P B) v)
+      (((admissible_iff_vals (sh := shapeOf P B) (v := valAt (shapeOf P B) v)).mp (admissible_valAt hvlt)))
+  have hc' : decXe (shapeOf P B) P a i q c = valAt (shapeOf P B) v := by
+    unfold decXe decVal
+    rw [hv]
+  rw [hc']
+  unfold decXe decVal
+  rw [h3]
+  simpa using hval
+
+/-- **Binary Tseitin gate.** -/
+theorem xe_binary {e c₁ c₂ : Expr} (he : e ∈ allExprs P) (hc₁ : c₁ ∈ allExprs P)
+    (hc₂ : c₂ ∈ allExprs P) (hchild : Expr.child2 e = some (c₁, c₂))
+    (hU : univClosed (shapeOf P B) P) (h : Sat a (encode P B))
+    (hi : i ≤ B.steps) (hq : q < shS (shapeOf P B)) :
+    decXe (shapeOf P B) P a i q e =
+      Expr.stepEval2 e (decXe (shapeOf P B) P a i q c₁)
+        (decXe (shapeOf P B) P a i q c₂) := by
+  obtain ⟨v₁, hv₁, hvl₁, _⟩ := decodeXe_lt hc₁ hi hq h
+  obtain ⟨v₂, hv₂, hvl₂, _⟩ := decodeXe_lt hc₂ hi hq h
+  have hg : Sat a (fwd2ClausesOn [] (xeOh (shapeOf P B) i q (eIdx P c₁))
+      (xeOh (shapeOf P B) i q (eIdx P c₂))
+      (fun u v => pos (vxe (shapeOf P B) i q (eIdx P e) (f2 (shapeOf P B) e u v)))) := by
+    intro cl hcl
+    exact sat_gate he hi hq h cl (by rw [evalGate_binary hchild]; exact hcl)
+  have hix1 : eIdx P c₁ < shE (shapeOf P B) := eIdx_lt hc₁
+  have hix2 : eIdx P c₂ < shE (shapeOf P B) := eIdx_lt hc₂
+  have hixe : eIdx P e < shE (shapeOf P B) := eIdx_lt he
+  have h1 := fwd2ClausesOn_correct (sat_xeOh hi hq hix1 h)
+    (sat_xeOh hi hq hix2 h) hg (fun l hl => absurd hl (by simp)) v₁ v₂ hv₁ hv₂
+  have h2 : a (vxe (shapeOf P B) i q (eIdx P e)
+      (f2 (shapeOf P B) e v₁ v₂)) = true := by simpa using h1
+  have h3 : (xeOh (shapeOf P B) i q (eIdx P e)).decode a =
+      some (f2 (shapeOf P B) e v₁ v₂) :=
+    Oh.decode_of_true (sat_xeOh hi hq hixe h) (List.mem_range.mpr (uIdx_lt' (shapeOf P B) _)) h2
+  have hval : valAt (shapeOf P B) (f2 (shapeOf P B) e v₁ v₂) =
+      Expr.stepEval2 e (valAt (shapeOf P B) v₁) (valAt (shapeOf P B) v₂) := by
+    show valAt (shapeOf P B) (uIdx (shapeOf P B)
+        (Expr.stepEval2 e (valAt (shapeOf P B) v₁) (valAt (shapeOf P B) v₂))) = _
+    refine valAt_uIdx_adm ?_
+    exact hU.2.1 e he (valAt (shapeOf P B) v₁)
+      (((admissible_iff_vals (sh := shapeOf P B) (v := valAt (shapeOf P B) v₁)).mp (admissible_valAt hvl₁)))
+      (valAt (shapeOf P B) v₂)
+      (((admissible_iff_vals (sh := shapeOf P B) (v := valAt (shapeOf P B) v₂)).mp (admissible_valAt hvl₂)))
+  have h1' : decXe (shapeOf P B) P a i q c₁ = valAt (shapeOf P B) v₁ := by
+    unfold decXe decVal; rw [hv₁]
+  have h2' : decXe (shapeOf P B) P a i q c₂ = valAt (shapeOf P B) v₂ := by
+    unfold decXe decVal; rw [hv₂]
+  rw [h1', h2']
+  unfold decXe decVal
+  rw [h3]
+  simpa using hval
+
+/-- **Variable gate.**  The value decoded for a variable read is the store slot. -/
+theorem xe_var {x : Nat} (he : Expr.var x ∈ allExprs P) (hx : x < shV (shapeOf P B))
+    (h : Sat a (encode P B)) (hi : i ≤ B.steps) (hq : q < shS (shapeOf P B)) :
+    decXe (shapeOf P B) P a i q (Expr.var x) = decSt (shapeOf P B) a i q x := by
+  obtain ⟨v, hv, hvlt, _⟩ := decodeXe_lt he hi hq h
+  have hsat := sat_stOh hi hq hx h
+  have hg : Sat a (fwdClausesOn [] (stOh (shapeOf P B) i q x)
+      (fun u => pos (vxe (shapeOf P B) i q (eIdx P (Expr.var x)) u))) := by
+    intro cl hcl
+    exact sat_gate he hi hq h cl (by rw [evalGate_var]; exact hcl)
+  obtain ⟨w, hw⟩ := Oh.decode_some hsat
+  have h1 := fwdClausesOn_correct hsat hg (fun l hl => absurd hl (by simp)) w hw
+  have h2 : a (vxe (shapeOf P B) i q (eIdx P (Expr.var x)) w) = true := by simpa using h1
+  have hwlt : w < shVal (shapeOf P B) := by
+    show w < shVal (shapeOf P B)
+    exact List.mem_range.mp ((decodeGo_some _ _ _ _ hw).1)
+  have h3 : (xeOh (shapeOf P B) i q (eIdx P (Expr.var x))).decode a = some w :=
+    Oh.decode_of_true (sat_xeOh hi hq (eIdx_lt he) h) (List.mem_range.mpr hwlt) h2
+  have h4 : some w = some v := by rw [← h3, ← hv]
+  have hwv : w = v := Option.some.inj h4
+  subst hwv
+  unfold decXe decSt decVal
+  rw [hv, hw]
+
+/-- **Constant gate.**  The value decoded for a constant is its message. -/
+theorem xe_konst {E : Expr} (he : E ∈ allExprs P) (h1 : Expr.child1 E = none)
+    (h2 : Expr.child2 E = none) (hv : ∀ x, E ≠ Expr.var x)
+    (hU : univClosed (shapeOf P B) P) (h : Sat a (encode P B))
+    (hi : i ≤ B.steps) (hq : q < shS (shapeOf P B)) :
+    decXe (shapeOf P B) P a i q E = Expr.constVal E := by
+  have hg : Sat a (cnfOf
+      [[pos (vxe (shapeOf P B) i q (eIdx P E) (uIdx (shapeOf P B) (Expr.constVal E)))]]) := by
+    intro cl hcl
+    have hmem : cl ∈ evalGate (shapeOf P B) P i q E := by
+      rw [evalGate_konst h1 h2 hv]
+      simpa [cnfOf] using hcl
+    exact sat_gate he hi hq h cl hmem
+  have hcl : Clause.eval a [pos (vxe (shapeOf P B) i q (eIdx P E)
+      (uIdx (shapeOf P B) (Expr.constVal E)))] = true := by
+    have := hg _ (List.Mem.head _)
+    simpa using this
+  rw [Clause.eval, List.any_cons, List.any_nil, Bool.or_false, pos_eval] at hcl
+  have h2' := hcl
+  have h3 : (xeOh (shapeOf P B) i q (eIdx P E)).decode a =
+      some (uIdx (shapeOf P B) (Expr.constVal E)) :=
+    Oh.decode_of_true (sat_xeOh hi hq (eIdx_lt he) h)
+      (List.mem_range.mpr (uIdx_lt' (shapeOf P B) _)) h2'
+  unfold decXe decVal
+  rw [h3]
+  refine valAt_uIdx_adm ?_
+  exact hU.2.2 E he
+
+/-- **Evaluation correspondence (specification 8A).**  For every expression of the protocol,
+the value decoded from its Tseitin group is exactly the value of the expression in the
+decoded store.  This is the lemma that makes the SAT encoding of message construction and
+destruction trustworthy. -/
+theorem decXe_eq (hU : univClosed (shapeOf P B) P) (h : Sat a (encode P B))
+    (hi : i ≤ B.steps) (hq : q < shS (shapeOf P B)) :
+    ∀ e : Expr, e ∈ allExprs P ->
+      decXe (shapeOf P B) P a i q e = Expr.eval e (decodeStore (shapeOf P B) a i q) := by
+  intro e
+  induction e with
+  | agent A =>
+      intro he
+      rw [xe_konst he rfl rfl
+        (by intro x; simp [Expr.var]) hU h hi hq]
+      simp [Expr.eval, Expr.constVal]
+  | nonce N =>
+      intro he
+      rw [xe_konst he rfl rfl
+        (by intro x; simp [Expr.var]) hU h hi hq]
+      simp [Expr.eval, Expr.constVal]
+  | shrk a b =>
+      intro he
+      rw [xe_konst he rfl rfl
+        (by intro x; simp [Expr.var]) hU h hi hq]
+      simp [Expr.eval, Expr.constVal]
+  | pubk a =>
+      intro he
+      rw [xe_konst he rfl rfl
+        (by intro x; simp [Expr.var]) hU h hi hq]
+      simp [Expr.eval, Expr.constVal]
+  | privk a =>
+      intro he
+      rw [xe_konst he rfl rfl
+        (by intro x; simp [Expr.var]) hU h hi hq]
+      simp [Expr.eval, Expr.constVal]
+  | var x =>
+      intro he
+      rw [xe_var he (var_lt_shV he (by simp [Expr.vars])) h hi hq]
+      exact (readVar_decodeStore (var_lt_shV he (by simp [Expr.vars]))).symm
+  | pair a b iha ihb =>
+      intro he
+      obtain ⟨hca, hcb⟩ := mem_allExprs_child2 he rfl
+      rw [Expr.eval_child2 rfl,
+        xe_binary he hca hcb rfl hU h hi hq, iha hca, ihb hcb]
+  | encS a b iha ihb =>
+      intro he
+      obtain ⟨hca, hcb⟩ := mem_allExprs_child2 he rfl
+      rw [Expr.eval_child2 rfl,
+        xe_binary he hca hcb rfl hU h hi hq, iha hca, ihb hcb]
+  | decS a b iha ihb =>
+      intro he
+      obtain ⟨hca, hcb⟩ := mem_allExprs_child2 he rfl
+      rw [Expr.eval_child2 rfl,
+        xe_binary he hca hcb rfl hU h hi hq, iha hca, ihb hcb]
+  | encA a _ iha =>
+      intro he
+      have hca : a ∈ allExprs P := mem_allExprs_child1 he rfl
+      rw [Expr.eval_child1 rfl,
+        xe_unary he hca rfl hU h hi hq, iha hca]
+  | hash a iha =>
+      intro he
+      have hca : a ∈ allExprs P := mem_allExprs_child1 he rfl
+      rw [Expr.eval_child1 rfl,
+        xe_unary he hca rfl hU h hi hq, iha hca]
+  | fst a iha =>
+      intro he
+      have hca : a ∈ allExprs P := mem_allExprs_child1 he rfl
+      rw [Expr.eval_child1 rfl,
+        xe_unary he hca rfl hU h hi hq, iha hca]
+  | snd a iha =>
+      intro he
+      have hca : a ∈ allExprs P := mem_allExprs_child1 he rfl
+      rw [Expr.eval_child1 rfl,
+        xe_unary he hca rfl hU h hi hq, iha hca]
+  | decA a _ iha =>
+      intro he
+      have hca : a ∈ allExprs P := mem_allExprs_child1 he rfl
+      rw [Expr.eval_child1 rfl,
+        xe_unary he hca rfl hU h hi hq, iha hca]

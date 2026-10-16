@@ -328,31 +328,33 @@ def f2 (sh : Shape) (e : Expr) : Nat -> Nat -> Nat :=
 
 /-- The definitional clauses of a leaf of the expression table: reading a variable is the
 identity on the store slot, and a constant is pinned to its message. -/
-def evalLeafClauses (sh : Shape) (i q e : Nat) (E : Expr) : List (List Lit) :=
+def evalLeafGate (sh : Shape) (P : Protocol) (i q e : Nat) (E : Expr) : List (List Lit) :=
   match E with
   | Expr.var x => (fwdClausesOn [] (stOh sh i q x) (fun u => pos (vxe sh i q e u))).clauses
   | _ => [[pos (vxe sh i q e (uIdx sh (Expr.constVal E)))]]
 
-/-- The definitional clauses of one entry of the expression table at one step and session:
-the value of a compound expression is one evaluation step applied to the values of its
-children.  Because the output group is one-hot, one definitional clause per input value
-suffices (ProtSat.OneHot.fwdClausesOn), so the encoding is linear in the universe for unary
+/-- The definitional clauses of one expression of the protocol: the value of a compound
+expression is one evaluation step applied to the values of its children.  Because the
+output group is one-hot, one definitional clause per input value suffices
+(ProtSat.OneHot.fwdClausesOn), so the encoding is linear in the universe for unary
 operations and quadratic for binary ones - a genuine compositional (Tseitin) translation
 rather than an enumeration of stores. -/
-def evalClausesEntry (sh : Shape) (P : Protocol) (i q e : Nat) : List (List Lit) :=
-  let E := eAt P e
-  match Expr.child1 E, Expr.child2 E with
-  | some c, _ =>
+def evalGate (sh : Shape) (P : Protocol) (i q : Nat) (E : Expr) : List (List Lit) :=
+  match Expr.child1 E with
+  | some c =>
       (fwdClausesOn [] (xeOh sh i q (eIdx P c))
-        (fun u => pos (vxe sh i q e (f1 sh E u)))).clauses
-  | none, some (ca, cb) =>
-      (fwd2ClausesOn [] (xeOh sh i q (eIdx P ca)) (xeOh sh i q (eIdx P cb))
-        (fun u v => pos (vxe sh i q e (f2 sh E u v)))).clauses
-  | none, none => evalLeafClauses sh i q e E
+        (fun u => pos (vxe sh i q (eIdx P E) (f1 sh E u)))).clauses
+  | none =>
+    match Expr.child2 E with
+    | some (ca, cb) =>
+        (fwd2ClausesOn [] (xeOh sh i q (eIdx P ca)) (xeOh sh i q (eIdx P cb))
+          (fun u v => pos (vxe sh i q (eIdx P E) (f2 sh E u v)))).clauses
+    | none => evalLeafGate sh P i q (eIdx P E) E
 
-/-- The evaluation clauses of one step and session. -/
+/-- The evaluation clauses of one step and session: one gate per entry of the expression
+table. -/
 def evalClausesAt (sh : Shape) (P : Protocol) (i q : Nat) : List (List Lit) :=
-  eachExpr sh fun e => evalClausesEntry sh P i q e
+  (allExprs P).flatMap fun E => evalGate sh P i q E
 
 /-- The evaluation clauses of every step and session. -/
 def evalClauses (sh : Shape) (P : Protocol) : CNF :=

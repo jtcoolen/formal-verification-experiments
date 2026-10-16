@@ -89,3 +89,33 @@ protosat/ package; STATE.md covers the older quantum/Merkle/Dijkstra work.
     cd /Users/julian/Downloads/formally_verified/protosat
     lake build ProtSat          # 694 jobs, seconds
     lake env lean ProtSat/DPLL.lean
+
+## Round 3 progress (appended)
+
+* Protocol.lean: Expr.child1/child2, stepEval1/stepEval2, constVal, eval_child1/2,
+  eval_constVal, subexpressions_trans, Action.exprs; actionAt/roleAt now use the session's
+  role index (sessions may share roles).
+* CNF.lean: cnfOf, sat_cnfOf, clause_eval_holds, clause_eval_cons_false/of, clause_eval_append_of_false, Lit.flip, andNDef (+mem/sat), Clause.eval_append, sat_append_left/right.
+* OneHot.lean: graph2Clauses (+correct/back), fwdClausesOn / fwd2ClausesOn with
+  fwd_correct / fwd_complete (guarded forward clauses - the key to a linear/quadratic
+  Tseitin encoding).
+* Encode.lean: DedInst + dedInstsOf/dedInsts/nInst/instAt (deduction instances as event
+  alternatives), tIx, ixOf (renamed from pos: CNF.pos shadowed it), ixOf_le, rget_lt,
+  rget_mem, rget_some_mem, uIdx_lt', slotPair, decodeStore via slotPair.
+* Clauses.lean (NEW): admissible/univClosed (the universe hypothesis), decVal/decSt/decXe/
+  decDeliver/decNonce/decEv/decLearn/decKnSeq/decCfg, the 11 clause groups (oneHot, init,
+  frame, eval, step, ded, pubAux, knSupport, fresh, leakAux, violation), encodeGroups,
+  encode, sat_encodeGroup + the 10 sat_* extractors.
+* Encoding.lean (NEW): list/shape plumbing (nodup_eraseDups, contains_mem, rget_nodup_inj,
+  valAt_inj, uIdx_valAt, admissible_valAt), group membership lemmas, decodePc_true /
+  decodePc_of_true / decodePc_lt, readVar_decodeStore (store correspondence),
+  mem_allExprs_*, event decomposition (decCode, ev_cases, decLearn_code, decEv_code,
+  decLearn_act, decLearn_ded, decCode_of_evAct/evDed, evAct_false_of_ne, evDed_false_of_code),
+  step_holds/step_body/frame_holds, pubAux_holds, init_kn_sound, **kn_sound** (knowledge
+  soundness), publisherLits_cases.
+
+## Remaining for 8A/8B
+1. decXe_eq (Tseitin evaluation correspondence, induction on the expression table).
+2. Rel step lemmas per rule + Runs + violation (Leak) -> encoding_sound (8A).
+3. The reverse construction (assignment from a run) -> encoding_complete (8B).
+4. Then DPLL 8D/8E, Certificate 8C, Analyzer 8F/8G/8H, examples, README.

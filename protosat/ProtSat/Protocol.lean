@@ -189,6 +189,13 @@ inductive Action where
 
 namespace Action
 
+/-- The variables an action writes into its session store. -/
+def written : Action -> List Var
+  | Action.fresh x _ => [x]
+  | Action.recv _ x => [x]
+  | Action.assign x _ => [x]
+  | _ => []
+
 /-- The expressions an action evaluates: the subexpressions of everything the action reads.
 These are the entries the SAT encoding's expression table must contain. -/
 def exprs : Action -> List Expr
@@ -306,14 +313,14 @@ def closedSecretTerms (P : Protocol) : List Term :=
     | Secret.closed e => Expr.eval e []
     | Secret.store _ _ => none
 
-/-- The variables each session uses: the domain of its store. -/
+/-- The variables each session uses: the domain of its store.  Both the variables it writes
+and the ones its expressions read are included, so that every store slot the encoding needs
+exists. -/
 def sessionVars (P : Protocol) (q : Nat) : List Var :=
-  (List.range (P.roleLen q)).flatMap fun pc =>
+  ((List.range (P.roleLen q)).flatMap fun pc =>
     match P.actionAt q pc with
-    | some (Action.fresh x _) => [x]
-    | some (Action.recv _ x) => [x]
-    | some (Action.assign x _) => [x]
-    | _ => []
+    | some a => a.written ++ (a.exprs.flatMap Expr.vars)
+    | none => []).eraseDups
 
 end Protocol
 
