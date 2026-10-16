@@ -396,26 +396,42 @@ theorem nodeCode_child (hw : Table.Progressing G M w) (hK : ∀ A, w A ≤ K)
 statement are mutually dependent: expanding a symbol produces a forest, and parsing a
 forest recurses into symbols.  The symbol part is obtained by strong induction on the
 rank bound, and the forest part by induction on the symbol list at the *same* bound
-(the tail does not decrease the bound, only its length). -/
+(the tail does not decrease the bound, only its length).
+
+Both statements carry a *reachability* hypothesis `G.Reachable (syms ++ toks rest)":
+the symbols being parsed, followed by the terminal remainder of the input, must be the
+active part of a sentential form of `G\'`.  This is what a real parser always enjoys, and
+it is what makes the table hypotheses of Phase 2 applicable: the table is only required
+to behave well on continuations the grammar can actually produce.  The hypothesis is
+preserved by every step of the recursion:
+
+* expanding `A\' -> rhs\'\' inside a reachable form gives a reachable form (one derivation
+  step, in context);
+* moving past the head of a forest replaces that head by the terminals it produced,
+  which only moves tokens from the stack into the consumed prefix.
+-/
 theorem complete_core (hM : M.Correct G) {w : N → Nat} (hw : Table.Progressing G M w)
     {K : Nat} (hK : ∀ A, w A ≤ K) : ∀ (μ : Nat),
       (∀ (s : Sym T N) (t : Tree T N) (ws rest : List T),
           MatchList G [s] [t] → Tree.yield t = ws → nodeCode K w t < μ →
-            ∃ fuel t', parseSym M fuel s (ltoks ws ++ ltoks rest ++ [LTok.eof]) =
-              PRes.ok t' (ltoks rest ++ [LTok.eof]) ∧ Tree.yield t' = ws) ∧
+            G.Reachable ([s] ++ toks rest) →
+              ∃ fuel t', parseSym M fuel s (ltoks ws ++ ltoks rest ++ [LTok.eof]) =
+                PRes.ok t' (ltoks rest ++ [LTok.eof]) ∧ Tree.yield t' = ws) ∧
         (∀ (syms : List (Sym T N)) (ts : List (Tree T N)) (ws rest : List T),
           MatchList G syms ts → Tree.yieldForest ts = ws → forestCode K w ts < μ →
-            ∃ fuel ts', parseForest M fuel syms (ltoks ws ++ ltoks rest ++ [LTok.eof]) =
-              PRes.ok ts' (ltoks rest ++ [LTok.eof]) ∧ Tree.yieldForest ts' = ws) := by
+            G.Reachable (syms ++ toks rest) →
+              ∃ fuel ts', parseForest M fuel syms (ltoks ws ++ ltoks rest ++ [LTok.eof]) =
+                PRes.ok ts' (ltoks rest ++ [LTok.eof]) ∧ Tree.yieldForest ts' = ws) := by
   intro μ
   induction μ using Nat.strongRecOn with
   | ind μ ih =>
       -- the symbol statement at bound μ
       have symStmt : ∀ (s : Sym T N) (t : Tree T N) (ws rest : List T),
           MatchList G [s] [t] → Tree.yield t = ws → nodeCode K w t < μ →
-            ∃ fuel t', parseSym M fuel s (ltoks ws ++ ltoks rest ++ [LTok.eof]) =
-              PRes.ok t' (ltoks rest ++ [LTok.eof]) ∧ Tree.yield t' = ws := by
-        intro s t ws rest hone hyt hcode
+            G.Reachable ([s] ++ toks rest) →
+              ∃ fuel t', parseSym M fuel s (ltoks ws ++ ltoks rest ++ [LTok.eof]) =
+                PRes.ok t' (ltoks rest ++ [LTok.eof]) ∧ Tree.yield t' = ws := by
+        intro s t ws rest hone hyt hcode hreach
         cases s with
         | tok a =>
             obtain ⟨ts', ht, hrest⟩ := MatchList.eq_leaf_cons hone
@@ -443,7 +459,8 @@ theorem complete_core (hM : M.Correct G) {w : N → Nat} (hw : Table.Progressing
               refine ⟨rhs, hp, ?_⟩
               rw [toks_append]
               exact derives_ctx hder [] (toks rest)
-            obtain ⟨rhs', hget, hder'⟩ := hM.2.2 A (toks rest) ws rest hpremise
+            obtain ⟨rhs', hget, hder'⟩ :=
+              hM.2.2 A (toks rest) ws rest hreach hpremise
             obtain ⟨ts'', hmatch'', hyield''⟩ :=
               substitute hder' (MatchList.match_toks (ws ++ rest))
             obtain ⟨t1, t2, het, hmatch1, hmatch2⟩ :=
@@ -462,9 +479,14 @@ theorem complete_core (hM : M.Correct G) {w : N → Nat} (hw : Table.Progressing
               refine forestCode_lt K w (by rw [hn]; omega) (fun t ht' => ?_)
               rw [hn]
               exact nodeCode_child hw hK hget hmatch1 hy1 rfl t ht'
+            -- the expansion the table chose is a production, so it keeps the form reachable
+            have hA : Derives G [Sym.var A] rhs' :=
+              derives_production A rhs' (hM.1 A (lookaheadOf (ws ++ rest)) rhs' hget)
+            have hreach2 : G.Reachable (rhs' ++ toks rest) :=
+              Grammar.reachable_of_derives hreach (derives_append hA (derives_refl (toks rest)))
             obtain ⟨fuel, ts''', hrun, hy3⟩ :=
               (ih (nodeCode K w (Tree.node A tsA))
-                (by simpa using hcode)).2 rhs' t1 ws rest hmatch1 hy1 hcode1
+                (by simpa using hcode)).2 rhs' t1 ws rest hmatch1 hy1 hcode1 hreach2
             refine ⟨fuel + 1, Tree.node A ts''', ?_, by simpa [Tree.yield_node] using hy3⟩
             rw [parseSym_var_lookahead (ltoks ws ++ ltoks rest ++ [LTok.eof])
               (lookaheadOf (ws ++ rest)) (headD_ltoks_append ws rest) hget
@@ -473,12 +495,13 @@ theorem complete_core (hM : M.Correct G) {w : N → Nat} (hw : Table.Progressing
       -- the forest statement at bound μ, by induction on the symbol list
       have forestStmt : ∀ (syms : List (Sym T N)) (ts : List (Tree T N)) (ws rest : List T),
           MatchList G syms ts → Tree.yieldForest ts = ws → forestCode K w ts < μ →
-            ∃ fuel ts', parseForest M fuel syms (ltoks ws ++ ltoks rest ++ [LTok.eof]) =
-              PRes.ok ts' (ltoks rest ++ [LTok.eof]) ∧ Tree.yieldForest ts' = ws := by
+            G.Reachable (syms ++ toks rest) →
+              ∃ fuel ts', parseForest M fuel syms (ltoks ws ++ ltoks rest ++ [LTok.eof]) =
+                PRes.ok ts' (ltoks rest ++ [LTok.eof]) ∧ Tree.yieldForest ts' = ws := by
         intro syms
         induction syms with
         | nil =>
-            intro ts ws rest hmatch hyield hcode
+            intro ts ws rest hmatch hyield hcode hreach
             have hnil : ts = [] := MatchList.eq_nil hmatch
             subst hnil
             have hws : ws = [] := by simpa using hyield
@@ -486,7 +509,7 @@ theorem complete_core (hM : M.Correct G) {w : N → Nat} (hw : Table.Progressing
             refine ⟨1, [], ?_, rfl⟩
             simp [parseForest_nil]
         | cons s ss ihlist =>
-            intro ts ws rest hmatch hyield hcode
+            intro ts ws rest hmatch hyield hcode hreach
             obtain ⟨t, trest, hts, hone, htail⟩ := MatchList.cons_inv hmatch
             subst hts
             have hy1 : Tree.yield t ++ Tree.yieldForest trest = ws := by
@@ -495,13 +518,27 @@ theorem complete_core (hM : M.Correct G) {w : N → Nat} (hw : Table.Progressing
             have hcodeHead : nodeCode K w t < μ := by
               rw [forestCode_cons] at hcode
               omega
+            -- the head symbol is parsed with the tail of the forest as continuation
+            have hreachHead : G.Reachable ([s] ++ toks (Tree.yieldForest trest ++ rest)) := by
+              have h1 : Derives G (ss ++ toks rest)
+                  (toks (Tree.yieldForest trest ++ rest)) := by
+                have h1' : Derives G (ss ++ toks rest)
+                    (toks (Tree.yieldForest trest) ++ toks rest) :=
+                  derives_append (matchList_derives htail) (derives_refl (toks rest))
+                rw [← toks_append] at h1'
+                exact h1'
+              exact Grammar.reachable_of_derives hreach (derives_cons h1 s)
             obtain ⟨fuelH, t', hrunH, hyH⟩ :=
               symStmt s t (Tree.yield t) (Tree.yieldForest trest ++ rest) hone rfl hcodeHead
+                hreachHead
             have hcodeTail : forestCode K w trest < μ := by
               rw [forestCode_cons] at hcode
               omega
+            -- the tail is parsed after the head's tokens have been consumed: the head
+            -- simply joins the prefix, which reachability absorbs by definition
+            have hreachTail : G.Reachable (ss ++ toks rest) := Grammar.reachable_tail hreach
             obtain ⟨fuelT, ts'', hrunT, hyT⟩ :=
-              ihlist trest (Tree.yieldForest trest) rest htail rfl hcodeTail
+              ihlist trest (Tree.yieldForest trest) rest htail rfl hcodeTail hreachTail
             have hrunH' : parseSym M fuelH s
                   (ltoks (Tree.yield t) ++ (ltoks (Tree.yieldForest trest) ++
                     (ltoks rest ++ [LTok.eof]))) =
@@ -526,20 +563,24 @@ theorem complete_core (hM : M.Correct G) {w : N → Nat} (hw : Table.Progressing
               exact hy1
       exact ⟨symStmt, forestStmt⟩
 
-/-- **Completeness.**  Every symbol list that has a matching forest — equivalently,
-every sentential form deriving the remaining input — is accepted by the parser for a
-suitable fuel. -/
+/-- **Completeness.**  Every symbol list that has a matching forest *and* is the active
+part of a sentential form is accepted by the parser for a suitable fuel. -/
 theorem complete_of_match (hM : M.Correct G) {w : N → Nat} (hw : Table.Progressing G M w)
     {K : Nat} (hK : ∀ A, w A ≤ K) :
     ∀ (syms : List (Sym T N)) (ts : List (Tree T N)) (ws : List T),
-      MatchList G syms ts → Tree.yieldForest ts = ws →
+      MatchList G syms ts → Tree.yieldForest ts = ws → G.Reachable syms →
         ∃ (fuel : Nat) (ts' : List (Tree T N)),
           Parser.parseForest M fuel syms (ltoks ws ++ [LTok.eof]) =
             PRes.ok ts' [LTok.eof] ∧ Tree.yieldForest ts' = ws := by
-  intro syms ts ws hmatch hyield
+  intro syms ts ws hmatch hyield hreach
+  have hreach' : G.Reachable (syms ++ toks ([] : List T)) := by
+    obtain ⟨pre, hpre⟩ := hreach
+    refine ⟨pre, ?_⟩
+    rw [show (toks ([] : List T)) = ([] : List (Sym T N)) from rfl, List.append_nil]
+    exact hpre
   obtain ⟨fuel, ts', hrun, hy⟩ :=
     (complete_core hM hw hK (forestCode K w ts + 1)).2 syms ts ws [] hmatch hyield
-      (Nat.lt_succ_self _)
+      (Nat.lt_succ_self _) hreach'
   have hrun' : Parser.parseForest M fuel syms (ltoks ws ++ [LTok.eof]) =
       PRes.ok ts' [LTok.eof] := by
     simpa [ltoks_nil] using hrun
@@ -566,7 +607,7 @@ theorem language_imp_accepts (hM : M.Correct G) {w : N → Nat}
   obtain ⟨fuel, ts', hrun, hyield⟩ :=
     complete_of_match hM hw hK [Sym.var G.start] [Tree.node G.start ts] ws
       (MatchList.var hp hm MatchList.nil)
-      (by simp [Tree.yieldForest_cons, hy])
+      (by simp [Tree.yieldForest_cons, hy]) ⟨[], derives_refl _⟩
   -- Soundness pins down the *shape* of the forest the parser returned: a one-symbol
   -- list is matched only by a one-tree forest.
   obtain ⟨hmatch', _⟩ :=

@@ -125,6 +125,33 @@ nonterminal and a lookahead with the right-hand side to expand to. -/
 structure Table (T : Type u) (N : Type v) where
   entries : List (N × (LTok T × List (Sym T N)))
 
+/-- `G.Reachable xs`: `xs` is a *suffix* of a sentential form of `G`, i.e. some symbol
+list `pre` — the part of the form to its left, which a top-down parser has already
+committed to — extends it to a form derivable from the start symbol.
+
+This is the classical hypothesis of the LL(1) correctness proof (`S ⇒* α A β\', read as
+`var A :: β is reachable\'), and it is exactly the invariant a predictive parser
+maintains: its stack is always the unproduced suffix of a sentential form.  It cannot
+be dropped: a table would then have to behave correctly on continuations the grammar
+can never produce, which no table can do (`Examples/Continuation.lean\'). -/
+def Grammar.Reachable (G : Grammar T N) (xs : List (Sym T N)) : Prop :=
+  ∃ pre : List (Sym T N), Derives G [Sym.var G.start] (pre ++ xs)
+
+namespace Grammar
+
+/-- Reachability is inherited by derivable rewrites. -/
+theorem reachable_of_derives {G : Grammar T N} {xs ys : List (Sym T N)}
+    (h : G.Reachable xs) (h' : Derives G xs ys) : G.Reachable ys := by
+  obtain ⟨pre, hpre⟩ := h
+  exact ⟨pre, derives_trans hpre (derives_prefix h' pre)⟩
+
+/-- Every suffix of a reachable form is reachable: the dropped symbol joins the prefix. -/
+theorem reachable_tail {G : Grammar T N} {s : Sym T N} {xs : List (Sym T N)}
+    (h : G.Reachable (s :: xs)) : G.Reachable xs := by
+  obtain ⟨pre, hpre⟩ := h
+  exact ⟨pre ++ [s], by rw [List.append_assoc]; exact hpre⟩
+
+end Grammar
 namespace Table
 
 variable {T : Type u} {N : Type v}
@@ -139,20 +166,37 @@ grammar. -/
 def Sound (G : Grammar T N) [BEq N] [BEq T] (M : Table T N) : Prop :=
   ∀ A x rhs, M.get A x = some rhs → (A, rhs) ∈ G.productions
 
+
 /-- A table is **adequate**: an entry never destroys derivability.  If the table
-proposes `rhs` for `A` under lookahead `x`, then whenever the remaining input
-`u ++ v` (whose first token is `x`) can be derived from `var A` followed by the
-continuation `cont`, it can also be derived from `rhs ++ cont`. -/
+proposes `rhs` for `A` under lookahead `x`, then whenever `var A :: cont` is the
+active part of a sentential form and the remaining input `u ++ v` (whose first token
+is `x`) can be derived from it, then `u ++ v` can also be derived from `rhs ++ cont`.
+-/
 def Adequate (G : Grammar T N) [BEq N] [BEq T] (M : Table T N) : Prop :=
   ∀ (A : N) (x : LTok T) (rhs : List (Sym T N)), M.get A x = some rhs →
     ∀ (cont : List (Sym T N)) (u v : List T),
-      lookaheadOf (u ++ v) = x →
-        Derives G (Sym.var A :: cont) (toks (u ++ v)) →
-          Derives G (rhs ++ cont) (toks (u ++ v))
+      G.Reachable (Sym.var A :: cont) →
+        lookaheadOf (u ++ v) = x →
+          Derives G (Sym.var A :: cont) (toks (u ++ v)) →
+            Derives G (rhs ++ cont) (toks (u ++ v))
 
 /-- A table is **complete for the language**: whenever some production of `A` lets
-the remaining input be derived, the table offers an entry that lets it be derived. -/
+the remaining input be derived, and `var A :: cont` is the active part of a
+sentential form, the table offers an entry that lets it be derived. -/
 def Complete (G : Grammar T N) [BEq N] [BEq T] (M : Table T N) : Prop :=
+  ∀ (A : N) (cont : List (Sym T N)) (u v : List T),
+    G.Reachable (Sym.var A :: cont) →
+      (∃ rhs, (A, rhs) ∈ G.productions ∧
+          Derives G (rhs ++ cont) (toks (u ++ v))) →
+        ∃ rhs, M.get A (lookaheadOf (u ++ v)) = some rhs ∧
+          Derives G (rhs ++ cont) (toks (u ++ v))
+
+/-- The *unrestricted* variant of `Complete`, kept only to record why the reachability
+hypothesis is needed: it demands the guarantee for **every** continuation, including
+continuations no parse of the grammar can ever produce.  `Examples/Continuation.lean`
+proves that `CompleteStrong` is unsatisfiable — even for a grammar that is LL(1) — so
+no generator could ever produce a table meeting it. -/
+def CompleteStrong (G : Grammar T N) [BEq N] [BEq T] (M : Table T N) : Prop :=
   ∀ (A : N) (cont : List (Sym T N)) (u v : List T),
     (∃ rhs, (A, rhs) ∈ G.productions ∧
         Derives G (rhs ++ cont) (toks (u ++ v))) →

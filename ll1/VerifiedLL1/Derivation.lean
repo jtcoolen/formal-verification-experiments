@@ -101,6 +101,11 @@ theorem derives_ctx (h : Derives G xs ys) (l r : List (Sym T N)) :
   | refl => exact derives_refl _
   | tail h' hstep ih => exact Derives.tail ih (derives1_ctx hstep l r)
 
+/-- Derivations are stable under prefixing a fixed context. -/
+theorem derives_prefix (h : Derives G xs ys) (l : List (Sym T N)) :
+    Derives G (l ++ xs) (l ++ ys) := by
+  simpa [List.append_nil] using derives_ctx h l []
+
 theorem derives_cons (h : Derives G xs ys) (x : Sym T N) : Derives G (x :: xs) (x :: ys) := by
   have := derives_ctx h [x] []
   simpa using this

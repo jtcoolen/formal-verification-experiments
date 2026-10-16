@@ -100,7 +100,7 @@ theorem M_sound : M.Sound L := Table.sound_of_check L M (by decide)
 
 /-- Adequacy is the identity here: the entry repeats the symbol it expands. -/
 theorem M_adequate : M.Adequate L := by
-  intro A x rhs hget cont u v hlook hder
+  intro A x rhs hget cont u v hsent hlook hder
   cases A with
   | p =>
       have hsome : some rhs = some ([var p] : List (Sym Tok Var)) := by
@@ -121,7 +121,7 @@ theorem productions_p : ∀ rhs, (p, rhs) ∈ L.productions →
   · exact absurd hf (by simp)
 
 theorem M_complete : M.Complete L := by
-  intro A cont u v hpremise
+  intro A cont u v hsent hpremise
   obtain ⟨rhs, hp, hder⟩ := hpremise
   cases A with
   | p =>

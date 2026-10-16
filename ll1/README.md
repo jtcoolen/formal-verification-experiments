@@ -40,6 +40,7 @@ ll1/
 │   └── Examples/
 │       ├── Toy.lean            # ε-productions, acceptance *and* rejection proofs
 │       ├── Circuits.lean       # quantum circuit DSL grammar (Phase 6 language)
+│       ├── Continuation.lean   # why table correctness needs a reachability hypothesis
 │       └── Loop.lean           # a Correct table that loops: progress is necessary
 ├── Main.lean                   # lake exe verifiedLL1Demo
 ├── Axioms.lean                 # axiom audit
@@ -225,6 +226,22 @@ The correspondence theorem and its ingredients depend only on `propext` and
 | **`parse_sound`** | `parse G M fuel input = ok t [eof] → Valid G t ∧ yield t = tokensOf input` |
 | `sound_of_check` | `soundCheck G M = true → M.Sound G` (decidable certification of a table) |
 
+### Spec revision: continuations must be reachable
+
+The first version of `Adequate`/`Complete` quantified over *every* stack continuation
+`cont`.  That is unsatisfiable: for the LL(1) grammar `s → A B; A → ε ∣ a; B → b`, the
+entry `(A, a)` would have to serve both the continuation `[tok a]` (where `A ⇒ ε` makes
+`[a]` derivable, forcing an `ε` entry) and the continuation `[]` (where `A ⇒ a` forces
+the entry `[a]`).  `Examples/Continuation.lean` proves this as
+`not_complete_strong`: no table that is `Sound` can satisfy the old
+`CompleteStrong`.
+
+The definitions therefore carry `G.Reachable (var A :: cont)` — "the continuation is a
+suffix of a sentential form of `G`", the classical `S ⇒* α A β` hypothesis, and exactly
+the invariant a predictive parser maintains.  Nothing else about the specification
+changed, and every theorem stated before the revision is still proved (the Loop
+example's `Correct` proof only had to absorb the extra hypothesis).
+
 `parse_sound` is proved from `Table.Sound` only — deliberately: the validity of the
 result must not depend on the adequacy properties that are needed for *completeness*.
 The fuelled interpreter is total and executable; no unconditional completeness claim
@@ -295,6 +312,15 @@ Two things are needed beyond `Table.Correct`.
 `Nat.strongRecOn` on the rank bound; inside a fixed bound the forest part is an
 ordinary induction on the symbol list (the tail does not decrease the bound, only its
 length).
+
+### Reachability in the completeness proof
+
+`complete_core` carries `G.Reachable (syms ++ toks rest)` through the mutual induction
+and discharges it with two one-line facts: `Grammar.reachable_of_derives` (rewriting a
+reachable form keeps it reachable) and `Grammar.reachable_tail` (a suffix of a reachable
+form is reachable — the dropped symbol joins the prefix).  Moving past the head of a
+forest is the second case; expanding a nonterminal through the table is the first, and
+this is where `Table.Sound` is needed to know the entry really is a production.
 
 ### Epsilon, end-of-input and malformed input
 

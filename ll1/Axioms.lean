@@ -55,6 +55,7 @@ axiom appearing below is a bug.
 #print axioms VerifiedLL1.Examples.Loop.not_cycleFree
 #print axioms VerifiedLL1.Examples.Loop.never_accepts_a
 #print axioms VerifiedLL1.Examples.Loop.never_accepts_nil
+#print axioms VerifiedLL1.Examples.Continuation.not_complete_strong
 
 -- Phase 3
 #print axioms VerifiedLL1.monotone
