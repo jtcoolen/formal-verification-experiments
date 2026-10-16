@@ -1436,3 +1436,192 @@ theorem decXe_eq (hU : univClosed (shapeOf P B) P) (h : Sat a (encode P B))
       have hca : a ∈ allExprs P := mem_allExprs_child1 he rfl
       rw [Expr.eval_child1 rfl,
         xe_unary he hca rfl hU h hi hq, iha hca]
+
+/-! ### Deduction instances are genuine rule applications -/
+
+/-- Two reads of the same universe position agree. -/
+theorem valAt_eq {sh : Shape} {p : Nat} {u v : Term} (hu : valAt sh p = some u)
+    (hv : valAt sh p = some v) : u = v := Option.some.inj (by rw [← hu, ← hv])
+
+/-- The premises of an instance are known: some message of K sits at each premise index. -/
+def instPremises (sh : Shape) (ins : DedInst) (K : List Term) : Prop :=
+  ∀ p ∈ ins.prem, ∃ s ∈ K, valAt sh p = some s
+/-- **Every universe instance is a genuine one-step deduction.**  This is the lemma that
+makes a deduction event in the encoding count as a real ProtSat.Attacker.OneStep step, and
+hence as a real transition of ProtSat.Rel (specification 8A).  The proof inspects the
+construction of ProtSat.Encode.dedInstsOf: each of its shapes is one of the eleven rules of
+specification section 2, and the premise indices were chosen exactly so that the required
+messages lie in the universe. -/
+theorem dedInst_oneStep {sh : Shape} {u : Nat} {ins : DedInst} (h : ins ∈ dedInstsOf sh u)
+    {K : List Term} (hK : instPremises sh ins K) {t : Term}
+    (hcon : valAt sh ins.concl = some t) : OneStep K t := by
+  unfold dedInstsOf at h
+  cases h2 : rget sh.U u with
+  | none => rw [h2] at h; simp at h
+  | some t' =>
+      rw [h2] at h
+      have hut : valAt sh u = some t' := h2
+      unfold instPremises at hK
+      simp only [List.mem_cons, List.mem_append, List.mem_filterMap] at h
+      rcases h with h | ⟨a, ha, ham⟩
+      · rcases h with h | h
+        · -- OneStep.known: the conclusion is itself a premise
+          rw [h] at hK hcon
+          have ht : t = t' := Option.some.inj (by rw [← hut, hcon])
+          subst ht
+          obtain ⟨s, hs, hre⟩ := hK u (List.Mem.head _)
+          have : s = t := Option.some.inj (by rw [← hre, hut])
+          subst this
+          exact OneStep.known hs
+        · -- the introduction rules, by the shape of the conclusion
+          cases t' with
+          | agent A =>
+              simp at h
+              rw [h] at hcon
+              have ht : t = Term.agent A := Option.some.inj (by rw [← hut, hcon])
+              subst ht
+              exact OneStep.agent
+          | key k =>
+              cases k with
+              | pub A =>
+                  simp at h
+                  rw [h] at hcon
+                  have ht : t = Term.key (Key.pub A) :=
+                    Option.some.inj (by rw [← hut, hcon])
+                  subst ht
+                  exact OneStep.pub
+              | _ => simp at h
+          | pair x y =>
+              rcases h5 : tIx sh x with ⟨b₁⟩|⟨b₁⟩
+              · simp [h5] at h
+              · rcases h6 : tIx sh y with ⟨b₂⟩|⟨b₂⟩
+                · simp [h6] at h
+                · simp [h5, h6] at h
+                  rw [h] at hK hcon
+                  have ht : t = Term.pair x y := Option.some.inj (by rw [← hut, hcon])
+                  subst ht
+                  have hx : valAt sh b₁ = some x := tIx_valAt h5
+                  have hy : valAt sh b₂ = some y := tIx_valAt h6
+                  obtain ⟨s₁, hs₁, r₁⟩ := hK b₁ (List.Mem.head _)
+                  obtain ⟨s₂, hs₂, r₂⟩ := hK b₂ (List.Mem.tail _ (List.Mem.head _))
+                  rw [valAt_eq r₁ hx] at hs₁
+                  rw [valAt_eq r₂ hy] at hs₂
+                  exact OneStep.pairI hs₁ hs₂
+          | encS m k =>
+              rcases h5 : tIx sh m with ⟨b₁⟩|⟨b₁⟩
+              · simp [h5] at h
+              · rcases h6 : tIx sh (Term.key k) with ⟨b₂⟩|⟨b₂⟩
+                · simp [h6] at h
+                · simp [h5, h6] at h
+                  rw [h] at hK hcon
+                  have ht : t = Term.encS m k := Option.some.inj (by rw [← hut, hcon])
+                  subst ht
+                  have hx : valAt sh b₁ = some m := tIx_valAt h5
+                  have hy : valAt sh b₂ = some (Term.key k) := tIx_valAt h6
+                  obtain ⟨s₁, hs₁, r₁⟩ := hK b₁ (List.Mem.head _)
+                  obtain ⟨s₂, hs₂, r₂⟩ := hK b₂ (List.Mem.tail _ (List.Mem.head _))
+                  rw [valAt_eq r₁ hx] at hs₁
+                  rw [valAt_eq r₂ hy] at hs₂
+                  exact OneStep.encSI hs₁ hs₂
+          | encA m ag =>
+              rcases h5 : tIx sh m with ⟨b₁⟩|⟨b₁⟩
+              · simp [h5] at h
+              · simp [h5] at h
+                rw [h] at hK hcon
+                have ht : t = Term.encA m ag := Option.some.inj (by rw [← hut, hcon])
+                subst ht
+                have hx : valAt sh b₁ = some m := tIx_valAt h5
+                obtain ⟨s₁, hs₁, r₁⟩ := hK b₁ (List.Mem.head _)
+                rw [valAt_eq r₁ hx] at hs₁
+                exact OneStep.encAI hs₁
+          | hash m =>
+              rcases h5 : tIx sh m with ⟨b₁⟩|⟨b₁⟩
+              · simp [h5] at h
+              · simp [h5] at h
+                rw [h] at hK hcon
+                have ht : t = Term.hash m := Option.some.inj (by rw [← hut, hcon])
+                subst ht
+                have hx : valAt sh b₁ = some m := tIx_valAt h5
+                obtain ⟨s₁, hs₁, r₁⟩ := hK b₁ (List.Mem.head _)
+                rw [valAt_eq r₁ hx] at hs₁
+                exact OneStep.hashI hs₁
+          | _ => simp at h
+      · -- the elimination rules, by the shape of a premise message
+        cases a with
+        | pair x y =>
+            by_cases hxy : x = t'
+            · simp at ham
+              rw [if_pos hxy] at ham
+              simp at ham
+              rw [← ham] at hK hcon
+              have ht : t = t' := Option.some.inj (by rw [← hut, hcon])
+              subst ht
+              have hhp : valAt sh (ixOf (Term.pair x y) sh.U) = some (Term.pair x y) :=
+                rget_ixOf sh.U (Term.pair x y) ha
+              obtain ⟨s₁, hs₁, r₁⟩ := hK (ixOf (Term.pair x y) sh.U) (List.Mem.head _)
+              rw [valAt_eq r₁ hhp] at hs₁
+              rw [← hxy]
+              exact OneStep.fstE hs₁
+            · by_cases hxy2 : y = t'
+              · simp at ham
+                rw [if_neg hxy, if_pos hxy2] at ham
+                simp at ham
+                rw [← ham] at hK hcon
+                have ht : t = t' := Option.some.inj (by rw [← hut, hcon])
+                subst ht
+                have hhp : valAt sh (ixOf (Term.pair x y) sh.U) = some (Term.pair x y) :=
+                  rget_ixOf sh.U (Term.pair x y) ha
+                obtain ⟨s₁, hs₁, r₁⟩ := hK (ixOf (Term.pair x y) sh.U) (List.Mem.head _)
+                rw [valAt_eq r₁ hhp] at hs₁
+                rw [← hxy2]
+                exact OneStep.sndE hs₁
+              · simp at ham
+                rw [if_neg hxy, if_neg hxy2] at ham
+                simp at ham
+        | encS m k =>
+            by_cases hm : m = t'
+            · simp at ham
+              rcases ham with ⟨h1, ham⟩
+              rcases h5 : tIx sh (Term.key k) with ⟨b₂⟩|⟨b₂⟩
+              · rw [h5] at ham
+                simp at ham
+              · simp [h5] at ham
+                rw [← ham] at hK hcon
+                have ht : t = t' := Option.some.inj (by rw [← hut, hcon])
+                subst ht
+                have hy : valAt sh b₂ = some (Term.key k) := tIx_valAt h5
+                have hhp : valAt sh (ixOf (Term.encS m k) sh.U) = some (Term.encS m k) :=
+                  rget_ixOf sh.U (Term.encS m k) ha
+                obtain ⟨s₁, hs₁, r₁⟩ := hK (ixOf (Term.encS m k) sh.U) (List.Mem.head _)
+                obtain ⟨s₂, hs₂, r₂⟩ := hK b₂ (List.Mem.tail _ (List.Mem.head _))
+                rw [valAt_eq r₁ hhp] at hs₁
+                rw [valAt_eq r₂ hy] at hs₂
+                rw [← hm]
+                exact OneStep.encSD hs₁ hs₂
+            · simp at ham
+              rcases ham with ⟨h1, _⟩
+              exact absurd h1 hm
+        | encA m ag =>
+            by_cases hm : m = t'
+            · simp at ham
+              rcases ham with ⟨h1, ham⟩
+              rcases h5 : tIx sh (Term.key (Key.priv ag)) with ⟨b₂⟩|⟨b₂⟩
+              · rw [h5] at ham
+                simp at ham
+              · simp [h5] at ham
+                rw [← ham] at hK hcon
+                have ht : t = t' := Option.some.inj (by rw [← hut, hcon])
+                subst ht
+                have hy : valAt sh b₂ = some (Term.key (Key.priv ag)) := tIx_valAt h5
+                have hhp : valAt sh (ixOf (Term.encA m ag) sh.U) = some (Term.encA m ag) :=
+                  rget_ixOf sh.U (Term.encA m ag) ha
+                obtain ⟨s₁, hs₁, r₁⟩ := hK (ixOf (Term.encA m ag) sh.U) (List.Mem.head _)
+                obtain ⟨s₂, hs₂, r₂⟩ := hK b₂ (List.Mem.tail _ (List.Mem.head _))
+                rw [valAt_eq r₁ hhp] at hs₁
+                rw [valAt_eq r₂ hy] at hs₂
+                rw [← hm]
+                exact OneStep.encAD hs₁ hs₂
+            · simp at ham
+              rcases ham with ⟨h1, _⟩
+              exact absurd h1 hm
+        | _ => simp at ham
