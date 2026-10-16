@@ -466,7 +466,7 @@ theorem mem_acts_of_actionAt {q c : Nat} {a : Action} (h : P.actionAt q c = some
       by_contra e
       have : P.roleAt q = none := by
         cases h3 : P.roleAt q with
-        | some r => exact absurd ⟨r, h3⟩ e
+        | some r => exact absurd (Exists.intro r h3) e
         | none => rfl
       rw [this] at h0; simp at h0
     obtain ⟨r, hr⟩ := h1
@@ -1911,3 +1911,105 @@ theorem decLearn_none_of_not_send (hi : i < B.steps) (h : Sat a (encode P B)) {q
   cases act with
   | send a' e => exact absurd rfl (hns a' e)
   | _ => rfl
+
+/-! ### Consequences of the step clauses -/
+
+/-- An acting session has an action at its program counter: the step clauses of a position
+with no action forbid the event. -/
+theorem some_actionAt_of_evAct (hi : i < B.steps) (hq : q < shS (shapeOf P B))
+    (h : Sat a (encode P B)) (ha : a (evAct (shapeOf P B) i q) = true) :
+    P.actionAt q (decodePc (shapeOf P B) a i q) ≠ none := by
+  set c := decodePc (shapeOf P B) a i q with hc
+  intro hact
+  have hpc : a (vpc (shapeOf P B) i q c) = true := decodePc_true (Nat.le_of_lt hi) hq h
+  have hcl : actGuard (shapeOf P B) i q c ∈ stepClausesAt (shapeOf P B) P i q c := by
+    rw [stepClausesAt, hact]
+    exact List.Mem.head _
+  have h1 := step_body hi hq (decodePc_lt (Nat.le_of_lt hi) hq h) h ha hpc hcl
+  rw [clause_eval_nil] at h1
+  exact absurd h1 (by simp)
+
+/-- A program counter with an action there is inside the role. -/
+theorem lt_roleLen_of_actionAt {q c : Nat} (h : P.actionAt q c ≠ none) : c < P.roleLen q := by
+  have h1 : ((P.roleAt q).map (fun r => (r.acts.drop c).head?)).getD none ≠ none := h
+  have h2 : ∃ r, P.roleAt q = some r := by
+    by_contra e
+    push Not at e
+    have : P.roleAt q = none := by
+      cases h3 : P.roleAt q with
+      | none => rfl
+      | some r => exact absurd h3 (e r)
+    rw [this] at h1
+    simp at h1
+  obtain ⟨r, hr⟩ := h2
+  have h4 : (r.acts.drop c).head? ≠ none := by
+    have h3 : ((P.roleAt q).map (fun r' => (r'.acts.drop c).head?)).getD none =
+        (r.acts.drop c).head? := by rw [hr]; rfl
+    rw [← h3]
+    exact h1
+  have h5 : r.acts.drop c ≠ [] := by
+    intro h6
+    rw [h6] at h4
+    exact h4 (by simp)
+  have h7 : P.roleLen q = r.acts.length := by
+    unfold Protocol.roleLen
+    rw [hr]
+  rw [h7]
+  cases h6 : r.acts.drop c with
+  | nil => exact absurd h6 h5
+  | cons x xs =>
+      have h8 : (r.acts.drop c).length = xs.length + 1 := by rw [h6]; simp
+      have h9 : (r.acts.drop c).length = r.acts.length - c := by rw [List.length_drop]
+      omega
+
+/-- The role length of an instantiated session is within the shape's program-counter bound.
+-/
+theorem roleLen_le_nPc1 {q : Nat} (hq : q < (shapeOf P B).nS1) :
+    P.roleLen q ≤ (shapeOf P B).nPc1 := by
+  have h1 : P.roleLen q ∈ ((List.range (shapeOf P B).nS1).map fun q' => P.roleLen q') :=
+    List.mem_map.mpr ⟨q, List.mem_range.mpr hq, rfl⟩
+  show P.roleLen q ≤ maxNat ((List.range (shapeOf P B).nS1).map fun q' => P.roleLen q') 0
+  exact le_maxNat_of_mem _ _ h1
+
+/-- A real program counter, advanced by one, is still inside the program-counter stride. -/
+theorem lt_shPc_succ {q c : Nat} (h1 : c < P.roleLen q)
+    (h2 : P.roleLen q ≤ (shapeOf P B).nPc1) : c + 1 < shPc (shapeOf P B) := by
+  show c + 1 < (shapeOf P B).nPc1 + 1
+  omega
+
+/-- An acting session advances its program counter by exactly one. -/
+theorem step_pc_succ (hi : i < B.steps) (hq : q < shS (shapeOf P B))
+    (h : Sat a (encode P B)) (ha : a (evAct (shapeOf P B) i q) = true) :
+    decodePc (shapeOf P B) a (i + 1) q = decodePc (shapeOf P B) a i q + 1 := by
+  set c := decodePc (shapeOf P B) a i q with hc
+  have hpc : a (vpc (shapeOf P B) i q c) = true := decodePc_true (Nat.le_of_lt hi) hq h
+  have hq1 : q < (shapeOf P B).nS1 := lt_nS1_of_evAct hi h hq ha
+  have hne : P.actionAt q c ≠ none := some_actionAt_of_evAct hi hq h ha
+  have hcl : advClause (shapeOf P B) i q c ∈ stepClausesAt (shapeOf P B) P i q c :=
+    advClause_mem_stepClausesAt (shapeOf P B) P i q c hne
+  have h1 := step_body hi hq (decodePc_lt (Nat.le_of_lt hi) hq h) h ha hpc hcl
+  simp only [Clause.eval_cons, clause_eval_nil, Bool.or_false, neg_eval, pos_eval,
+    ha, hpc, Bool.not_true, Bool.false_or] at h1
+  exact decodePc_of_true (Nat.succ_le_of_lt hi) hq
+    (lt_shPc_succ (lt_roleLen_of_actionAt hne) (roleLen_le_nPc1 hq1)) h h1
+
+/-- An acting session keeps every store slot whose variable its action does not write. -/
+theorem step_st_keep (hi : i < B.steps) (hq : q < shS (shapeOf P B))
+    (hy : y < shV (shapeOf P B)) (h : Sat a (encode P B))
+    (ha : a (evAct (shapeOf P B) i q) = true)
+    {act : Action} (hact : P.actionAt q (decodePc (shapeOf P B) a i q) = some act)
+    (hny : writtenVar act ≠ some y) :
+    decSt (shapeOf P B) a (i + 1) q y = decSt (shapeOf P B) a i q y := by
+  set c := decodePc (shapeOf P B) a i q with hc
+  have hpc : a (vpc (shapeOf P B) i q c) = true := decodePc_true (Nat.le_of_lt hi) hq h
+  obtain ⟨v, hv, hvlt, hvv⟩ := decodeSt_val (Nat.le_of_lt hi) hq hy h
+  have hcl : keepClause (shapeOf P B) i q c y v ∈ stepClausesAt (shapeOf P B) P i q c :=
+    keepClause_mem_stepClausesAt (shapeOf P B) P i q c y v hact hny hy hvlt
+  have h1 := step_body hi hq (decodePc_lt (Nat.le_of_lt hi) hq h) h ha hpc hcl
+  simp only [Clause.eval_cons, clause_eval_nil, Bool.or_false, Bool.false_or, neg_eval,
+    pos_eval, hvv] at h1
+  have hoh := sat_stOh (Nat.succ_le_of_lt hi) hq hy h
+  have h2 : (stOh (shapeOf P B) (i + 1) q y).decode a = some v :=
+    Oh.decode_of_true hoh (List.mem_range.mpr hvlt) h1
+  unfold decSt decVal
+  rw [h2, hv]

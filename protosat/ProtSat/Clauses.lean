@@ -365,18 +365,30 @@ def evalClauses (sh : Shape) (P : Protocol) : CNF :=
 
 /-! ### Group 5: step conditions -/
 
+/-- The successor program counter clause of an acting session: if q acts at step i with
+program counter c, then at step i+1 its counter is c+1. -/
+def advClause (sh : Shape) (i q c : Nat) : List Lit :=
+  actGuard sh i q c ++ [pos (vpc sh (i + 1) q (c + 1))]
+
+/-- The frame clause of an acting session for a slot it does not write. -/
+def keepClause (sh : Shape) (i q c y u : Nat) : List Lit :=
+  actGuard sh i q c ++ [neg (vst sh i q y u), pos (vst sh (i + 1) q y u)]
+
 /-- The clauses keeping one variable of an acting session unchanged. -/
 def keepVarClauses (sh : Shape) (i q c y : Nat) : List (List Lit) :=
-  mapVal sh fun u =>
-    actGuard sh i q c ++ [neg (vst sh i q y u), pos (vst sh (i + 1) q y u)]
+  mapVal sh fun u => keepClause sh i q c y u
 
-/-- The clauses keeping every variable of an acting session unchanged. -/
-def keepAllClauses (sh : Shape) (i q c : Nat) : List (List Lit) :=
-  eachVar sh fun y => keepVarClauses sh i q c y
+/-- The variable an action writes, if any. -/
+def writtenVar : Action -> Option Nat
+  | Action.fresh x _ => some x
+  | Action.recv _ x => some x
+  | Action.assign x _ => some x
+  | _ => none
 
-/-- The clauses keeping every variable except x unchanged. -/
-def keepExceptClauses (sh : Shape) (i q c x : Nat) : List (List Lit) :=
-  eachVar sh fun y => if y == x then [] else keepVarClauses sh i q c y
+/-- The clauses keeping every slot of an acting session that the action does not write. -/
+def stepKeepClauses (sh : Shape) (i q c : Nat) (act : Action) : List (List Lit) :=
+  (List.range (shV sh)).flatMap fun y =>
+    if writtenVar act = some y then [] else keepVarClauses sh i q c y
 
 /-- The fresh clauses of one nonce alternative: a value outside the nonce domain is not
 fresh, so the alternative is excluded; otherwise the store slot is set to that nonce. -/
@@ -386,50 +398,110 @@ def freshStepClauses (sh : Shape) (i q c x d : Nat) : List (List Lit) :=
   | none => [g ++ [neg (vfr sh i q d)]]
   | some N => [g ++ [neg (vfr sh i q d), pos (vst sh (i + 1) q x (uIdx sh (some (Term.nonce N))))]]
 
-/-- The clauses for one (step, session, program counter) triple: if session q acts while
-its program counter is c, the successor configuration is the one ProtSat.Rel prescribes for
-the action at (q, c).  One family per introduction rule of Rel.  When there is no action at
-(q, c) the family says that session q simply cannot act. -/
-def stepClausesAt (sh : Shape) (P : Protocol) (i q c : Nat) : List (List Lit) :=
-  let g := actGuard sh i q c
-  let adv := [g ++ [pos (vpc sh (i + 1) q (c + 1))]]
-  match P.actionAt q c with
-  | none => [g]
-  | some (Action.fresh x _) =>
-      adv ++ keepExceptClauses sh i q c x
-        ++ ((List.range (shD sh)).flatMap fun d => freshStepClauses sh i q c x d)
-        ++ [g ++ [neg (vfr sh i q (shD sh - 1))]]
-  | some (Action.send _ e) =>
+/-- A receive: the slot takes the delivered value. -/
+def recvStoreClause (sh : Shape) (i q c u x : Nat) : List Lit :=
+  actGuard sh i q c ++ [neg (vdl sh i q u), pos (vst sh (i + 1) q x u)]
+
+/-- A receive: the delivered message must be known to the attacker. -/
+def recvKnowClause (sh : Shape) (i q c u x : Nat) : List Lit :=
+  actGuard sh i q c ++ [neg (vdl sh i q u), pos (vkn sh i u)]
+
+/-- A receive cannot take the unset value. -/
+def recvRealClause (sh : Shape) (i q c u : Nat) : List Lit :=
+  actGuard sh i q c ++ [neg (vdl sh i q u)]
+
+/-- An assignment writes the evaluated value. -/
+def assignClause (sh : Shape) (i q c E u x : Nat) : List Lit :=
+  actGuard sh i q c ++ [neg (vxe sh i q E u), pos (vst sh (i + 1) q x u)]
+
+/-- An assignment cannot evaluate to the unset value. -/
+def assignRealClause (sh : Shape) (i q c E u : Nat) : List Lit :=
+  actGuard sh i q c ++ [neg (vxe sh i q E u)]
+
+/-- A send cannot evaluate to the unset value. -/
+def sendRealClause (sh : Shape) (i q c E : Nat) : List Lit :=
+  actGuard sh i q c ++ [neg (vxe sh i q E (sh.U.length))]
+
+/-- A send publishes its value. -/
+def sendPublishClause (sh : Shape) (i q c E u : Nat) : List Lit :=
+  actGuard sh i q c ++ [neg (vxe sh i q E u), pos (vkn sh (i + 1) u)]
+
+/-- A check requires both sides to denote real messages. -/
+def checkRealClause (sh : Shape) (i q c E : Nat) : List Lit :=
+  actGuard sh i q c ++ [neg (vxe sh i q E (sh.U.length))]
+
+/-- A check requires the two sides to denote the same message. -/
+def checkEqClause (sh : Shape) (i q c E₁ E₂ u v : Nat) : List Lit :=
+  actGuard sh i q c ++ [neg (vxe sh i q E₁ u), neg (vxe sh i q E₂ v)]
+
+/-- The action-specific clauses of an acting position: what the successor store slot, the
+delivered message, the fresh nonce, the sent value and the equality test must satisfy.  One
+family per introduction rule of ProtSat.Rel. -/
+def actionClauses (sh : Shape) (P : Protocol) (i q c : Nat) : Action -> List (List Lit)
+  | Action.fresh x _ =>
+      ((List.range (shD sh)).flatMap fun d => freshStepClauses sh i q c x d)
+        ++ [actGuard sh i q c ++ [neg (vfr sh i q (shD sh - 1))]]
+  | Action.send _ e =>
       let E := eIdx P e
-      adv ++ keepAllClauses sh i q c
-        ++ [g ++ [neg (vxe sh i q E (sh.U.length))]]
-        ++ mapMsg sh fun u => g ++ [neg (vxe sh i q E u), pos (vkn sh (i + 1) u)]
-  | some (Action.recv _ x) =>
-      adv ++ keepExceptClauses sh i q c x
-        ++ (eachVal sh fun u =>
-              if u < sh.U.length then
-                [g ++ [neg (vdl sh i q u), pos (vst sh (i + 1) q x u)],
-                 g ++ [neg (vdl sh i q u), pos (vkn sh i u)]]
-              else [g ++ [neg (vdl sh i q u)]])
-  | some (Action.assign x e) =>
+      [sendRealClause sh i q c E] ++ mapMsg sh fun u => sendPublishClause sh i q c E u
+  | Action.recv _ x =>
+      (eachVal sh fun u =>
+        if u < sh.U.length then
+          [recvStoreClause sh i q c u x, recvKnowClause sh i q c u x]
+        else [recvRealClause sh i q c u])
+  | Action.assign x e =>
       let E := eIdx P e
-      adv ++ keepExceptClauses sh i q c x
-        ++ (eachVal sh fun u =>
-              if u < sh.U.length then
-                [g ++ [neg (vxe sh i q E u), pos (vst sh (i + 1) q x u)]]
-              else [g ++ [neg (vxe sh i q E u)]])
-  | some (Action.check e1 e2) =>
-      let E1 := eIdx P e1
-      let E2 := eIdx P e2
-      adv ++ keepAllClauses sh i q c
-        ++ [g ++ [neg (vxe sh i q E1 (sh.U.length))],
-            g ++ [neg (vxe sh i q E2 (sh.U.length))]]
+      (eachVal sh fun u =>
+        if u < sh.U.length then [assignClause sh i q c E u x] else [assignRealClause sh i q c E u])
+  | Action.check e₁ e₂ =>
+      let E₁ := eIdx P e₁
+      let E₂ := eIdx P e₂
+      [checkRealClause sh i q c E₁, checkRealClause sh i q c E₂]
         ++ (eachVal sh fun u => (List.range (shVal sh)).filterMap fun v =>
               if u == v then none
-              else some (g ++ [neg (vxe sh i q E1 u), neg (vxe sh i q E2 v)]))
-  | some (Action.secret _) => adv ++ keepAllClauses sh i q c
-  | some (Action.claim _ _ _) => adv ++ keepAllClauses sh i q c
-  | some (Action.commit _ _ _) => adv ++ keepAllClauses sh i q c
+              else some (checkEqClause sh i q c E₁ E₂ u v))
+  | _ => []
+
+/-- The clauses for one (step, session, program counter) triple: if session q acts while
+its program counter is c, the successor configuration is the one ProtSat.Rel prescribes for
+the action at (q, c).  When there is no action at (q, c) the single clause says that session
+q simply cannot act. -/
+def stepClausesAt (sh : Shape) (P : Protocol) (i q c : Nat) : List (List Lit) :=
+  match P.actionAt q c with
+  | none => [actGuard sh i q c]
+  | some act =>
+      [advClause sh i q c]
+        ++ stepKeepClauses sh i q c act
+        ++ actionClauses sh P i q c act
+
+/-- The advance clause of an acting position is present whenever there is an action there. -/
+theorem advClause_mem_stepClausesAt (sh : Shape) (P : Protocol) (i q c : Nat)
+    (h : P.actionAt q c ≠ none) :
+    advClause sh i q c ∈ stepClausesAt sh P i q c := by
+  rw [stepClausesAt]
+  cases h2 : P.actionAt q c with
+  | none => exact absurd h2 h
+  | some act => exact List.Mem.head _
+
+/-- A slot that the action does not write keeps its value. -/
+theorem keepClause_mem_stepClausesAt (sh : Shape) (P : Protocol) (i q c y v : Nat)
+    {act : Action} (hact : P.actionAt q c = some act) (hy : writtenVar act ≠ some y)
+    (hyV : y < shV sh) (hv : v < shVal sh) :
+    keepClause sh i q c y v ∈ stepClausesAt sh P i q c := by
+  rw [stepClausesAt, hact]
+  have h2 : keepClause sh i q c y v ∈ stepKeepClauses sh i q c act := by
+    show keepClause sh i q c y v ∈
+      (List.range (shV sh)).flatMap fun y =>
+        if writtenVar act = some y then [] else keepVarClauses sh i q c y
+    refine List.mem_flatMap.mpr ⟨y, List.mem_range.mpr hyV, ?_⟩
+    show keepClause sh i q c y v ∈
+      (if writtenVar act = some y then [] else keepVarClauses sh i q c y)
+    split_ifs with h
+    · exact absurd h hy
+    · rw [keepVarClauses, mapVal]
+      exact List.mem_map.mpr ⟨v, List.mem_range.mpr hv, rfl⟩
+  refine List.mem_append_left _ ?_
+  exact List.mem_append_right _ h2
 
 /-- The step clauses of the whole encoding. -/
 def stepClauses (sh : Shape) (P : Protocol) : CNF :=

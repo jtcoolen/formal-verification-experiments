@@ -266,6 +266,18 @@ theorem readVar_succSend (C : Cfg) (q x : Nat) (t : Term) :
   | none => simp [h2]
   | some st => simp [h2, bump]
 
+/-- An advance step changes no store. -/
+theorem storeOf_succAdvance (C : Cfg) (q r : Nat) :
+    storeOf (succAdvance C q) r = storeOf C r := by
+  unfold storeOf
+  by_cases h : r = q
+  · subst h
+    rw [sessAt_succAdvance_same]
+    cases h2 : sessAt C r with
+    | none => simp [h2]
+    | some st => simp [h2, bump]
+  · rw [sessAt_succAdvance_other C q r h]
+
 /-- A deduction step changes no session's local state. -/
 theorem sessAt_succDed (C : Cfg) (t : Term) (q : Nat) : sessAt (succDed C t) q = sessAt C q := rfl
 
