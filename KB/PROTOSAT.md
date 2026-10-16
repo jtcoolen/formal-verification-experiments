@@ -119,3 +119,63 @@ protosat/ package; STATE.md covers the older quantum/Merkle/Dijkstra work.
 2. Rel step lemmas per rule + Runs + violation (Leak) -> encoding_sound (8A).
 3. The reverse construction (assignment from a run) -> encoding_complete (8B).
 4. Then DPLL 8D/8E, Certificate 8C, Analyzer 8F/8G/8H, examples, README.
+
+## Round 4 progress (appended)
+
+Verified state: `lake build` green (700 jobs), `lake env lean Axioms.lean` reports
+"theorems audited in ProtSat.*: 818+ / OK - every theorem depends only on propext,
+Classical.choice, Quot.sound", no sorry anywhere.
+
+New since round 3:
+* Encode.lean: `ixOf` (renamed from pos), `ixOf_le`, `rget_lt`, `rget_mem`, `rget_some_mem`,
+  `slotPair` + decodeStore via it, `uIdx_lt'`, `tIx` + lemmas, `DedInst`/`dedInstsOf`/
+  `dedInsts`/`nInst`/`instAt` (deduction instances), `shEv = 1 + shS + nInst`,
+  `shapeOf.nV1` now covers every variable any role writes OR reads (with Action.written).
+* Clauses.lean (new module): the 11 clause groups + `encode` + `encodeGroups` +
+  `sat_encodeGroup`; `admissible`/`univClosed` (the universe hypothesis); decoders
+  decVal/decSt/decXe/decDeliver/decNonce/decEv/decLearn/decKnSeq/decCfg; publisher aux
+  (`vpb`, `pubAuxEntry`, `pubAuxClauses`) so the support clause can use conjunctions;
+  leak aux (`vau`, `leakAuxClauses`); `violationClauses` (one big clause);
+  `storeSecret` restricted to instantiated sessions.
+  **Bug found and fixed:** frame clauses must use a POSITIVE evAct literal
+  ([evAct, ¬pc_i, pc_{i+1}]); with a negated guard they are vacuous exactly when they
+  matter.
+* Encoding.lean (new module): shape facts (U_nodup, valAt_inj, uIdx_valAt, admissible_valAt,
+  contains_mem, rget_map, lt_shS/lt_shV/lt_shVal, nS1_eq/steps_eq/D_eq), group extractors
+  (sat_oneHot ... sat_violation, mem_oneHot_*), decodePc_true/of_true/lt, readVar_decodeStore
+  (store correspondence via lookup_filterMap), expression-table closure
+  (Action.closed_exprs, mem_allExprs_sub, mem_allExprs_child1/child2, eIdx_lt, eAt_eIdx),
+  event decomposition (decCode, ev_cases, decLearn_code/decEv_code/decLearn_act/decLearn_ded,
+  decCode_of_evAct/evDed, evAct_false_of_ne, evDed_false_of_code), clause application helpers
+  (step_holds, step_body, frame_holds, sat_gate, publisherLits_cases), the four
+  correspondences:
+  - decXe_eq (Tseitin evaluation, by structural induction on Expr, using xe_unary/xe_binary/
+    xe_var/xe_konst and evalGate_unary/binary/var/konst),
+  - kn_sound (Boolean knowledge ⟹ real knowledge, by induction on the step),
+  - dedInst_oneStep (every instance is a genuine OneStep; case analysis over dedInstsOf),
+  - Agrees/decStep/decRun + agrees_zero + decodePc_frame + decSt_frame.
+
+## Still to do for 8A (next)
+1. Strengthen `Agrees` with a 4th component: values in a session store <-> decoded slot
+   values (needed for `nonceUsed` in Rel.rFresh).
+2. `rel_agrees`: case analysis on the decoded event (idle / ded / act-by-action) proving
+   `Rel P C (decEv i) (decStep C i) ∧ Agrees (decStep C i) (i+1)`.
+3. `encoding_sound` (8A): decRun is a Runs trace of length ≤ steps, inside the universe,
+   and the violation clause yields Leak.
+4. `encoding_complete` (8B): build the assignment from a bounded attack (use
+   Oh.decode_of_true / graph completeness / exactlyOne characterisation), then DPLL 8D/8E,
+   Certificate 8C, Analyzer 8F/8G/8H, the six examples, Theory.lean, Deduce.lean, README.
+
+## Traps learned this round (add to the list above)
+* `List.contains` is `List α → α → Bool` and relates to membership via `List.elem_eq_mem`;
+  there is no `List.nodup_eraseDups` (proved `nodup_eraseDups` by length induction).
+* `Nat.lt.step`/`Nat.le.step` dot notation is awkward; use omega with a `show`.
+* `unfold X at h` often fails on defs compiled from pattern matching; `rw [h2] at h` after
+  `cases h2 : e` works, and `rfl` proves constructor equations that simp cannot reduce.
+* rcases auto-splits nested matches; prefer explicit `cases h with | inl | inr` and
+  `rw [eq] at hyps` rather than `subst` on structure equations.
+* `set sh := shapeOf P B` makes later `show`/`rw` targets ambiguous; write `shapeOf P B`.
+* A def that mentions section variables cannot be a `local notation`; and defs whose type does
+  not determine the variables (e.g. `decCode`) must take them as explicit parameters.
+* `decide (p ≠ q)` inside a filter: use the Prop `≠` in writeVar so if_pos/if_neg take Prop
+  proofs.

@@ -1644,7 +1644,10 @@ def Agrees (P : Protocol) (B : Bounds) (a : Assignment) (C : Cfg) (i : Nat) : Pr
   (∀ q, q < (shapeOf P B).nS1 → pcOf C q = decodePc (shapeOf P B) a i q) ∧
   (∀ q x, q < (shapeOf P B).nS1 → x < (shapeOf P B).nV1 + 1 →
       readVar x (storeOf C q) = decSt (shapeOf P B) a i q x) ∧
-  C.kn = decKnSeq (shapeOf P B) P a i
+  C.kn = decKnSeq (shapeOf P B) P a i ∧
+  (∀ q, q < (shapeOf P B).nS1 → ∀ t,
+      t ∈ storeVals (storeOf C q) <->
+        ∃ x, x < (shapeOf P B).nV1 + 1 ∧ decSt (shapeOf P B) a i q x = some t)
 
 /-- The successor of C prescribed by the event the assignment selects at step i: the same
 function ProtSat.Rel computes, read off the decoded event.  The step clauses guarantee that
@@ -1696,11 +1699,35 @@ theorem lt_shVal {sh : Shape} {u : Nat} (h : u ≤ sh.U.length) : u < shVal sh :
   show u < sh.U.length + 1
   omega
 
+/-- At step 0 every store slot is unset: the initial clauses pin each slot to the "unset"
+value. -/
+theorem decSt_zero_none (h : Sat a (encode P B)) (hq : q < (shapeOf P B).nS1)
+    (hx : x < (shapeOf P B).nV1 + 1) :
+    decSt (shapeOf P B) a 0 q x = none := by
+  have h1 : a (vst (shapeOf P B) 0 q x ((shapeOf P B).U.length)) = true := by
+    have hcl : [pos (vst (shapeOf P B) 0 q x ((shapeOf P B).U.length))] ∈
+        (initClauses (shapeOf P B) P).clauses := by
+      unfold initClauses cnfOf
+      refine List.mem_append_left _ (List.mem_append_right _
+        (List.mem_flatMap.mpr ⟨q, List.mem_range.mpr (lt_shS hq),
+          List.mem_flatMap.mpr ⟨x, List.mem_range.mpr hx,
+            List.mem_map.mpr ⟨(shapeOf P B).U.length,
+              List.mem_range.mpr (lt_shVal (Nat.le_refl _)), by simp⟩⟩⟩))
+    have := sat_init h _ hcl
+    rw [Clause.eval, List.any_cons, List.any_nil, Bool.or_false, pos_eval] at this
+    exact this
+  have hoh := sat_stOh (Nat.zero_le _) (lt_shS hq) hx h
+  have h2 : (stOh (shapeOf P B) 0 q x).decode a = some ((shapeOf P B).U.length) :=
+    Oh.decode_of_true hoh (List.mem_range.mpr (lt_shVal (Nat.le_refl _))) h1
+  unfold decSt decVal
+  rw [h2]
+  exact valAt_uIdx_none (shapeOf P B)
+
 /-- The initial configuration agrees with the assignment at step 0: the initial clauses say
 exactly that every session is at program counter 0 with an empty store and the attacker
 holds the initial knowledge. -/
 theorem agrees_zero (h : Sat a (encode P B)) : Agrees P B a (initCfg P) 0 := by
-  refine ⟨?_, ?_, rfl⟩
+  refine ⟨?_, ?_, rfl, ?_⟩
   · intro q hq
     have h1 : a (vpc (shapeOf P B) 0 q 0) = true := by
       have hcl : [pos (vpc (shapeOf P B) 0 q 0)] ∈
@@ -1730,21 +1757,7 @@ theorem agrees_zero (h : Sat a (encode P B)) : Agrees P B a (initCfg P) 0 := by
       rfl
     rw [hpc, h2]
   · intro q x hq hx
-    have h1 : a (vst (shapeOf P B) 0 q x ((shapeOf P B).U.length)) = true := by
-      have hcl : [pos (vst (shapeOf P B) 0 q x ((shapeOf P B).U.length))] ∈
-          (initClauses (shapeOf P B) P).clauses := by
-        unfold initClauses cnfOf
-        refine List.mem_append_left _ (List.mem_append_right _
-          (List.mem_flatMap.mpr ⟨q, List.mem_range.mpr (lt_shS hq),
-            List.mem_flatMap.mpr ⟨x, List.mem_range.mpr hx,
-              List.mem_map.mpr ⟨(shapeOf P B).U.length,
-                List.mem_range.mpr (lt_shVal (Nat.le_refl _)), by simp⟩⟩⟩))
-      have := sat_init h _ hcl
-      rw [Clause.eval, List.any_cons, List.any_nil, Bool.or_false, pos_eval] at this
-      exact this
-    have hoh := sat_stOh (Nat.zero_le _) (lt_shS hq) hx h
-    have h2 : (stOh (shapeOf P B) 0 q x).decode a = some ((shapeOf P B).U.length) :=
-      Oh.decode_of_true hoh (List.mem_range.mpr (lt_shVal (Nat.le_refl _))) h1
+    have hdec : decSt (shapeOf P B) a 0 q x = none := decSt_zero_none h hq hx
     have h1'' : sessAt (initCfg P) q = some { pc := 0, store := [] } := by
       unfold ProtSat.initCfg ProtSat.sessAt
       rw [rget_map]
@@ -1759,12 +1772,28 @@ theorem agrees_zero (h : Sat a (encode P B)) : Agrees P B a (initCfg P) 0 := by
       show ((sessAt (initCfg P) q).map (fun s => s.store)).getD [] = []
       rw [h1'']
       rfl
-    have hdec : decSt (shapeOf P B) a 0 q x = none := by
-      unfold decSt decVal
-      rw [h2]
-      exact valAt_uIdx_none (shapeOf P B)
     rw [hst, hdec]
     rfl
+  · intro q hq t
+    have hst2 : storeOf (initCfg P) q = [] := by
+      have h1 : sessAt (initCfg P) q = some { pc := 0, store := [] } := by
+        unfold ProtSat.initCfg ProtSat.sessAt
+        rw [rget_map]
+        have hl : q < P.sessions.length := by rw [← nS1_eq]; exact hq
+        cases h3 : rget P.sessions q with
+        | none =>
+            obtain ⟨s, hs⟩ := rget_lt P.sessions q hl
+            rw [h3] at hs
+            exact absurd hs (by simp)
+        | some s => rfl
+      show ((sessAt (initCfg P) q).map (fun s => s.store)).getD [] = []
+      rw [h1]
+      rfl
+    rw [hst2]
+    refine ⟨fun h => absurd h (by simp [storeVals]), ?_⟩
+    intro ⟨x, hx, h2⟩
+    rw [decSt_zero_none h hq hx] at h2
+    exact absurd h2 (by simp)
 
 /-- The index a store group selects, with its variable true. -/
 theorem decodeSt_val (hi : i ≤ B.steps) (hq : q < shS (shapeOf P B))
@@ -1812,3 +1841,73 @@ theorem decSt_frame (hi : i < B.steps) (hq : q < shS (shapeOf P B))
       (List.mem_range.mpr hvlt) h1
   unfold decSt decVal
   rw [h2, hv]
+
+/-! ### One decoded step is a real transition -/
+
+/-- When no session acts and the step teaches the attacker nothing, the agreement carries
+over from step i to step i+1: this is precisely the content of the frame clauses. -/
+theorem agrees_of_noact (h : Sat a (encode P B)) {i : Nat} (hi : i < B.steps)
+    (hno : ∀ r, r < (shapeOf P B).nS1 → a (evAct (shapeOf P B) i r) = false)
+    {C : Cfg} (hag : Agrees P B a C i)
+    (hlearn : decLearn (shapeOf P B) P a i = none) :
+    Agrees P B a C (i + 1) := by
+  obtain ⟨hpc_ag, hst_ag, hkn_eq, hval_ag⟩ := hag
+  refine ⟨?_, ?_, ?_, ?_⟩
+  · intro q hq
+    rw [decodePc_frame hi (lt_shS hq) h (hno q hq), hpc_ag q hq]
+  · intro q x hq hx
+    rw [decSt_frame hi (lt_shS hq) hx h (hno q hq), hst_ag q x hq hx]
+  · rw [decKnSeq_succ, hlearn]
+    simp [hkn_eq]
+  · intro q hq t
+    have key : ∀ x, x < (shapeOf P B).nV1 + 1 ->
+        decSt (shapeOf P B) a (i + 1) q x = decSt (shapeOf P B) a i q x :=
+      fun x hx => decSt_frame hi (lt_shS hq) hx h (hno q hq)
+    constructor
+    · intro hx
+      obtain ⟨x, hx', he⟩ := hval_ag q hq t |>.mp hx
+      exact ⟨x, hx', by rw [key x hx']; exact he⟩
+    · rintro ⟨x, hx', he⟩
+      exact (hval_ag q hq t).mpr ⟨x, hx', by rw [← key x hx']; exact he⟩
+
+/-- A session that acts is one of the instantiated sessions: the step clauses of a slot
+with no action there forbid the event. -/
+theorem lt_nS1_of_evAct (hi : i < B.steps) (h : Sat a (encode P B)) {q : Nat}
+    (hq : q < shS (shapeOf P B)) (ha : a (evAct (shapeOf P B) i q) = true) :
+    q < (shapeOf P B).nS1 := by
+  by_contra e
+  set c := decodePc (shapeOf P B) a i q with hc
+  have hpc : a (vpc (shapeOf P B) i q c) = true :=
+    decodePc_true (Nat.le_of_lt hi) hq h
+  have hact : P.actionAt q c = none := by
+    unfold Protocol.actionAt Protocol.roleAt
+    have hn : (shapeOf P B).nS1 = P.sessions.length := nS1_eq
+    have h2 : P.sessions.drop q = [] := List.drop_eq_nil_of_le (by omega)
+    rw [h2]
+    simp
+  have hcl : actGuard (shapeOf P B) i q c ∈ stepClausesAt (shapeOf P B) P i q c := by
+    rw [stepClausesAt, hact]
+    exact List.Mem.head _
+  have h1 := step_body hi hq (decodePc_lt (Nat.le_of_lt hi) hq h) h ha hpc hcl
+  rw [clause_eval_nil] at h1
+  exact absurd h1 (by simp)
+
+/-- The event of a step in which session q acts. -/
+theorem decEv_act_of_code (hi : i < B.steps) (h : Sat a (encode P B)) {q : Nat}
+    (hq : q < shS (shapeOf P B)) (hk : decCode P B a i = 1 + q) :
+    decEv (shapeOf P B) P a i =
+      Ev.act q (decDeliver (shapeOf P B) a i q) (decNonce (shapeOf P B) a i q) := by
+  rw [decEv_code hi h, hk]
+  rw [if_neg (by omega : 1 + q ≠ 0), dif_pos (by omega : 1 + q < 1 + shS (shapeOf P B))]
+  simp
+
+/-- The step teaches nothing unless a session sends or the attacker deduces. -/
+theorem decLearn_none_of_not_send (hi : i < B.steps) (h : Sat a (encode P B)) {q : Nat}
+    (hq : q < shS (shapeOf P B)) (hk : decCode P B a i = 1 + q) {act : Action}
+    (hact : P.actionAt q (decodePc (shapeOf P B) a i q) = act)
+    (hns : ∀ (a' : Agent) (e : Expr), act ≠ Action.send a' e) :
+    decLearn (shapeOf P B) P a i = none := by
+  rw [decLearn_act hi h hq hk, hact]
+  cases act with
+  | send a' e => exact absurd rfl (hns a' e)
+  | _ => rfl
