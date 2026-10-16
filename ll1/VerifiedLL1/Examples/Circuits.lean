@@ -3,7 +3,7 @@ Copyright (c) 2026 Formally Verified Examples.
 Licensed under the MIT License. See the file LICENSE in the project root for
 license information.
 -/
-import VerifiedLL1.Derivation
+import VerifiedLL1.Leftmost
 
 /-!
 # Phase 1.5 — the grammar of a small quantum circuit language
@@ -169,6 +169,18 @@ theorem derives_empty : Derives C [var prog] (toks []) := by
   rw [← prog_empty_yield]; exact valid_derives prog_empty_valid
 
 theorem language_prog_hcx : C.language [h, q0, semi, cx, q0, q1, semi] := derives_prog_hcx
+
+/-- The same program derived **leftmost**: this is the shape of derivation that a
+predictive parser produces, and it is obtained from the parse tree, not assumed. -/
+theorem leftDerives_prog_hcx :
+    LeftDerives C [var prog] (toks [h, q0, semi, cx, q0, q1, semi]) :=
+  tree_iff_leftDerives.mp ⟨_, prog_hcx_valid, prog_hcx_yield⟩
+
+/-- And the general derivation we already had is equivalent. -/
+theorem left_of_derives_prog_hcx :
+    LeftDerives C [var prog] (toks [h, q0, semi, cx, q0, q1, semi]) :=
+  (derives_iff_leftDerives (A := prog) (ws := [h, q0, semi, cx, q0, q1, semi])).mp
+    derives_prog_hcx
 
 theorem language_empty : C.language [] := derives_empty
 

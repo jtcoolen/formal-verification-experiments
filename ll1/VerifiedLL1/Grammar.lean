@@ -99,6 +99,10 @@ end Sym
 terminals. -/
 def toks {T : Type u} {N : Type v} (ws : List T) : List (Sym T N) := ws.map Sym.tok
 
+/-- `toks` preserves concatenation. -/
+@[simp] theorem toks_append {T : Type u} {N : Type v} (ws vs : List T) :
+    @toks T N (ws ++ vs) = @toks T N ws ++ @toks T N vs := List.map_append
+
 /-- Terminal words are faithfully embedded into sentential forms. -/
 theorem toks_inj {T : Type u} {N : Type v} :
     ∀ {ws vs : List T}, @toks T N ws = @toks T N vs → ws = vs := by

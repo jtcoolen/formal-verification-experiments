@@ -33,6 +33,7 @@ ll1/
 │   ├── Grammar.lean            # Sym, Grammar, wellFormed, FiniteEnum
 │   ├── ParseTree.lean          # Tree, yield, MatchList, Valid
 │   ├── Derivation.lean         # Derives1, Derives, correspondence theorems
+│   ├── Leftmost.lean           # leftmost derivations, the leftmost-derivation lemma
 │   └── Examples/
 │       ├── Toy.lean            # ε-productions, acceptance *and* rejection proofs
 │       └── Circuits.lean       # quantum circuit DSL grammar (Phase 6 language)
@@ -81,6 +82,11 @@ ll1/
 5. **No junk** `derives_toks_inj`: `Derives G (toks ws) (toks vs) → ws = vs`.  A
    derivation can never change a terminal word, so the derivation relation does not
    invent input.
+6. **Leftmost transport** (`Leftmost.lean`): the same two transport lemmas hold with
+   `LeftDerives` in place of `Derives`, giving `tree_iff_leftDerives` and hence the
+   classical **leftmost-derivation lemma** `derives_iff_leftDerives`.  A predictive
+   parser only ever produces leftmost derivations, so this is the form Phase 2 and
+   Phase 3 need — and it is proved here, not assumed about a parser.
 
 ### The main theorem
 
@@ -148,13 +154,35 @@ The correspondence theorem and its ingredients depend only on `propext` and
   `FIRST`/`FOLLOW` computation and no LL(1) condition.
 * `Grammar.wellFormed` is stated but not yet *used* by any theorem; when Phase 5
   states the generator's correctness it will appear as an explicit hypothesis.
-* `Derives` is the general (any-order) derivation relation.  The leftmost variant
-  and the theorem "the parser's output is a *leftmost* derivation" are still to
-  come; that is what makes the Phase 3 completeness proof match what an LL(1)
-  parser actually does.
+* `Leftmost.lean` proves that parse trees, general derivations and leftmost
+  derivations coincide for terminal yields, but the parser of Phase 2 will still have
+  to be *connected* to `LeftDerives` (its trace is a leftmost derivation by
+  construction, and that connection is a theorem about the parser, not about
+  grammars).
 * `Tree` has no `DecidableEq` (Lean core does not derive it for nested inductives);
   `BEq` is derived.  If a later phase needs decidability of tree equality it will be
   written by hand rather than assumed.
+
+### Theorem inventory (Phase 1)
+
+| Theorem | Statement (schematic) |
+|---|---|
+| `MatchList.length_eq` | `MatchList G rhs ts → rhs.length = ts.length` |
+| `MatchList.append` / `MatchList.split` | matching commutes with concatenation, both ways |
+| `MatchList.valid_of_mem`, `Valid.subtree_valid` | subtrees of a valid tree are valid |
+| `derives_ctx`, `derives_append` | derivations are stable under context and concatenation |
+| `derives1_decompose` | a one-step derivation rewrites exactly one nonterminal occurrence |
+| `derives_toks_inj` | `Derives G (toks ws) (toks vs) → ws = vs` (no junk) |
+| `matchList_derives` | downwards transport: `MatchList G rhs ts → Derives G rhs (toks (yieldForest ts))` |
+| `valid_derives` | **soundness**: `Valid G (node A ts) → Derives G [var A] (toks (yield …))` |
+| `substitute` | upwards transport along a derivation, yield preserved |
+| `derives_valid` | **completeness**: `Derives G [var A] (toks ws) → ∃ ts, Valid … ∧ yield … = ws` |
+| `tree_iff_derives` | the correspondence (both directions) |
+| `Grammar.language_iff_tree` | the same at the start symbol |
+| `matchList_leftDerives`, `valid_leftDerives`, `substitute_left`, `leftDerives_valid` | the four transport lemmas for leftmost derivations |
+| `tree_iff_leftDerives` | parse trees ↔ leftmost derivations |
+| `derives_iff_leftDerives` | **leftmost-derivation lemma**: derivable ↔ leftmost-derivable |
+| `leftDerives_imp_derives` | leftmost derivations are derivations |
 
 ## Next step (Phase 2)
 

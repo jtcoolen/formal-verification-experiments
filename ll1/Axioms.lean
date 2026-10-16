@@ -29,6 +29,12 @@ axiom appearing below is a bug.
 #print axioms VerifiedLL1.derives_valid
 #print axioms VerifiedLL1.tree_iff_derives
 #print axioms VerifiedLL1.Grammar.language_iff_tree
+#print axioms VerifiedLL1.valid_leftDerives
+#print axioms VerifiedLL1.substitute_left
+#print axioms VerifiedLL1.leftDerives_valid
+#print axioms VerifiedLL1.tree_iff_leftDerives
+#print axioms VerifiedLL1.derives_iff_leftDerives
+#print axioms VerifiedLL1.leftDerives_imp_derives
 #print axioms VerifiedLL1.Examples.Toy.wellFormed
 #print axioms VerifiedLL1.Examples.Toy.tree_ab_valid
 #print axioms VerifiedLL1.Examples.Toy.not_valid_pb
