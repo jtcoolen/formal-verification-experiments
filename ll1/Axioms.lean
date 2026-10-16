@@ -35,6 +35,17 @@ axiom appearing below is a bug.
 #print axioms VerifiedLL1.tree_iff_leftDerives
 #print axioms VerifiedLL1.derives_iff_leftDerives
 #print axioms VerifiedLL1.leftDerives_imp_derives
+#print axioms VerifiedLL1.Table.sound_of_check
+#print axioms VerifiedLL1.parseSym_tok
+#print axioms VerifiedLL1.sound_aux
+#print axioms VerifiedLL1.parseForest_sound
+#print axioms VerifiedLL1.parseSym_sound
+#print axioms VerifiedLL1.parse_ok
+#print axioms VerifiedLL1.parse_sound
+#print axioms VerifiedLL1.Examples.Circuits.M_sound
+#print axioms VerifiedLL1.Examples.Circuits.parse_hcx_ok
+#print axioms VerifiedLL1.Examples.Circuits.parse_hcx_sound
+#print axioms VerifiedLL1.Examples.Circuits.parse_bad_err
 #print axioms VerifiedLL1.Examples.Toy.wellFormed
 #print axioms VerifiedLL1.Examples.Toy.tree_ab_valid
 #print axioms VerifiedLL1.Examples.Toy.not_valid_pb

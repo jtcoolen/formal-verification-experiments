@@ -7,6 +7,8 @@ import VerifiedLL1.Grammar
 import VerifiedLL1.ParseTree
 import VerifiedLL1.Derivation
 import VerifiedLL1.Leftmost
+import VerifiedLL1.Table
+import VerifiedLL1.Parser
 import VerifiedLL1.Examples.Toy
 import VerifiedLL1.Examples.Circuits
 
@@ -19,6 +21,8 @@ import VerifiedLL1.Examples.Circuits
 * `VerifiedLL1.ParseTree`  - parse trees, yield, `MatchList`, `Valid`
 * `VerifiedLL1.Derivation` - the derivation relation and the correspondence theorem
 * `VerifiedLL1.Leftmost`  - leftmost derivations, the leftmost-derivation lemma
+* `VerifiedLL1.Table`     - lookaheads, predictive tables, table correctness
+* `VerifiedLL1.Parser`    - the fuelled table-driven parser and its soundness
 * `VerifiedLL1.Examples.Toy` - a worked example grammar with acceptance *and*
   rejection proofs
 

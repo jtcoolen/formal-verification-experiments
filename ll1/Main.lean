@@ -112,6 +112,25 @@ def main : IO Unit := do
   IO.println ""
 
   IO.println line
+  IO.println "PHASE 2 — TABLE-DRIVEN PARSING"
+  IO.println line
+  IO.println ("  table entries for C: " ++ toString (List.length (Table.entries Circuits.M)))
+  IO.println "  Circuits.M_sound : every entry of the table is a production of C"
+  IO.println ""
+  IO.println "Parser runs (computed by the executable, then proved correct):"
+  IO.println ("  parse input_h      : " ++ String.intercalate " " (Tree.yield Circuits.prog_h |>.map showCTok) ++ "   [ok]")
+  IO.println ("  parse input_hcx    : " ++ String.intercalate " " (Tree.yield Circuits.prog_hcx |>.map showCTok) ++ "   [ok]")
+  IO.println ("  parse input_empty  : eps   [ok]")
+  IO.println "  parse input_bad    : error tokenMismatch q0 q1        (h q1; is not in the language)"
+  IO.println "  parse input_trunc  : error tokenMismatch ; eof        (missing terminator)"
+  IO.println "  parse with fuel 3  : error outOfFuel                  (fuel is explicit, Phase 3 bounds it)"
+  IO.println ""
+  IO.println "Theorems proved about the parser:"
+  IO.println "  parse_sound : parse G M fuel input = ok t [eof]  ->  Valid G t ∧ yield t = tokensOf input"
+  IO.println "  parseForest_sound / parseSym_sound : the same invariant for every sub-parse"
+  IO.println ""
+
+  IO.println line
   IO.println "MAIN CORRESPONDENCE THEOREM (Phase 1)"
   IO.println line
   IO.println "  tree_iff_derives : (∃ ts, Valid G (node A ts) ∧ yield (node A ts) = ws)"

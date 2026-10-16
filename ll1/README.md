@@ -17,7 +17,7 @@ lake env lean Axioms.lean # prints the axiom dependencies of every main theorem
 | Phase | Content | State |
 |---|---|---|
 | 1 | Context-free grammars, parse trees, yield, derivation relation, correspondence theorem | **done** |
-| 2 | Predictive table type, table-driven parser, independent table-correctness predicate, soundness | not started |
+| 2 | Predictive table type, table-driven parser, independent table-correctness predicate, soundness | **done** |
 | 3 | Completeness, termination, rejection of non-members | not started |
 | 4 | `NULLABLE` / `FIRST` / `FOLLOW` specifications + fixed-point computations, soundness/completeness/termination | not started |
 | 5 | `SELECT` sets, LL(1) conflict check, table generation, end-to-end theorem | not started |
@@ -34,6 +34,8 @@ ll1/
 │   ├── ParseTree.lean          # Tree, yield, MatchList, Valid
 │   ├── Derivation.lean         # Derives1, Derives, correspondence theorems
 │   ├── Leftmost.lean           # leftmost derivations, the leftmost-derivation lemma
+│   ├── Table.lean              # LTok (with eof), Table, Sound/Adequate/Complete, soundCheck
+│   ├── Parser.lean             # fuelled table-driven parser + soundness
 │   └── Examples/
 │       ├── Toy.lean            # ε-productions, acceptance *and* rejection proofs
 │       └── Circuits.lean       # quantum circuit DSL grammar (Phase 6 language)
@@ -184,10 +186,73 @@ The correspondence theorem and its ingredients depend only on `propext` and
 | `derives_iff_leftDerives` | **leftmost-derivation lemma**: derivable ↔ leftmost-derivable |
 | `leftDerives_imp_derives` | leftmost derivations are derivations |
 
-## Next step (Phase 2)
+## Phase 2 — table-driven parsing and soundness
 
-Represent a predictive table as a function from a nonterminal and one lookahead
-token (with an explicit end-of-input marker), define a *table-correctness*
-predicate purely in terms of the Phase 1 semantics, implement a fuelled
-table-driven parser that builds a `Tree`, and prove: whenever the parser returns
-`ok t`, `t` is valid and its yield is the whole input.
+### Definitions
+
+* `LTok T` — tokens plus an **explicit end-of-input marker** `eof`; `lookaheadOf`,
+  `tokensOf`, `WellFormedInput` (a stream is a token word followed by exactly one
+  `eof`).
+* `Table T N` — a finite list of entries `(A, (x, rhs))` with a computable lookup
+  `get : Table → N → LTok T → Option (List (Sym T N))`.
+* Table correctness, stated **only** with the Phase 1 derivation relation:
+  * `Sound` — every entry names a production of `G`;
+  * `Adequate` — if the table proposes `rhs` for `A` under lookahead `x`, then for
+    every stack continuation `cont` and every split `u ++ v` of the remaining input
+    with `lookaheadOf (u ++ v) = x`:
+    `Derives G (var A :: cont) (toks (u ++ v)) → Derives G (rhs ++ cont) (toks (u ++ v))`;
+  * `Complete` — whenever *some* production of `A` admits the remaining input, the
+    table has an entry that admits it;
+  * `Correct := Sound ∧ Adequate ∧ Complete`.
+* `soundCheck` — a **decidable** sufficient test for `Sound` (`sound_of_check`), used
+  to certify the example table by `decide` and to be used by the Phase 5 generator.
+* `ParseError` — structured errors: `noEntry A x`, `tokenMismatch t x`, `outOfFuel`,
+  `malformed`, `trailing x`.
+* `parseSym` / `parseForest` / `parse` — the fuelled table-driven parser (mutual,
+  structural in the fuel, no `partial`), returning a `Tree` plus the unconsumed
+  input, or a structured error.
+
+### Theorems
+
+| Theorem | Statement (schematic) |
+|---|---|
+| `sound_aux` | the fuel-indexed conjunction of the two sub-parse invariants |
+| `parseForest_sound` | `parseForest M fuel syms input = ok ts rest → MatchList G syms ts ∧ tokensOf input = yieldForest ts ++ tokensOf rest` |
+| `parseSym_sound` | the same for one symbol |
+| **`parse_sound`** | `parse G M fuel input = ok t [eof] → Valid G t ∧ yield t = tokensOf input` |
+| `sound_of_check` | `soundCheck G M = true → M.Sound G` (decidable certification of a table) |
+
+`parse_sound` is proved from `Table.Sound` only — deliberately: the validity of the
+result must not depend on the adequacy properties that are needed for *completeness*.
+The fuelled interpreter is total and executable; no unconditional completeness claim
+is made for an arbitrary fuel value (out-of-fuel is reported as `outOfFuel`, and
+`Circuits.parse_hcx_out_of_fuel` exhibits it).
+
+### Executed examples (`Examples/Circuits.lean`)
+
+A hand-written 18-entry predictive table `M` for the circuit grammar, certified by
+`M_sound : M.Sound C` (proved by `decide` through `soundCheck`).  Then
+
+* `parse_h_ok`, `parse_hcx_ok`, `parse_empty_ok` — the parser *computes* exactly the
+  Phase 1 parse trees (each is `rfl`);
+* `parse_h_sound`, `parse_hcx_sound` — instances of `parse_sound`: the returned tree
+  is valid and its yield is the whole input;
+* `parse_bad_err` — `h q1;` fails with `tokenMismatch q0 q1`;
+* `parse_truncated_err` — a missing terminator fails with `tokenMismatch ; eof`;
+* `parse_hcx_out_of_fuel` — fuel 3 reports `outOfFuel` instead of looping.
+
+## Next step (Phase 3)
+
+Completeness and termination:
+
+* prove that with `Table.Correct` (in particular `Complete`) the parser accepts every
+  word of the language — formally: `Derives G [var A] (toks ws)` and enough fuel
+  imply `parse …` succeeds — by lifting the parse along a **leftmost** derivation
+  (`Leftmost.lean` is exactly the preparation for this);
+* handle the non-consuming expansion cycle: exhibit a grammar and table for which
+  the parser would loop, and state the hypothesis (no `A ⇒⁺ A` cycle, or a
+  well-foundedness condition on `Adequate`) under which a fuel bound exists;
+* construct a computable fuel bound from `G` and the input, giving a **total**
+  parser, and prove the two-sided characterisation
+  `parse G M (bound input) input = ok t [eof] ↔ G.language (tokensOf input)`
+  plus rejection of every word outside the language.

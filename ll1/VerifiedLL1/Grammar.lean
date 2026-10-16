@@ -38,7 +38,7 @@ namespace VerifiedLL1
 inductive Sym (T : Type u) (N : Type v) where
   | tok : T → Sym T N
   | var : N → Sym T N
-  deriving DecidableEq, Repr, BEq
+  deriving DecidableEq, Repr
 
 /-- A context-free grammar: a finite list of productions together with a
 designated start symbol.  A production `(A, [])` is an epsilon production. -/

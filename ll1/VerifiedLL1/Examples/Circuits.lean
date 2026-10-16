@@ -3,7 +3,7 @@ Copyright (c) 2026 Formally Verified Examples.
 Licensed under the MIT License. See the file LICENSE in the project root for
 license information.
 -/
-import VerifiedLL1.Leftmost
+import VerifiedLL1.Parser
 
 /-!
 # Phase 1.5 — the grammar of a small quantum circuit language
@@ -32,11 +32,11 @@ namespace VerifiedLL1.Examples.Circuits
 /-- Instruction keywords, qubit identifiers and the statement terminator. -/
 inductive Tok where
   | h | cx | s | m | q0 | q1 | semi
-  deriving DecidableEq, Repr, BEq
+  deriving DecidableEq, Repr
 
 inductive Var where
   | prog | instrs | instr | hi | cxi | si | mi
-  deriving DecidableEq, Repr, BEq
+  deriving DecidableEq, Repr
 
 open Tok Var Sym Tree
 
@@ -237,4 +237,101 @@ section Computations
 
 end Computations
 
-end VerifiedLL1.Examples.Circuits
+
+
+/-!
+## Phase 2 slice — a hand-written predictive table for `C`
+
+The table below is what Phase 5 will *compute*; writing it by hand here gives an
+executable check that the parser really parses this language, and an instance of
+the soundness theorem at a concrete input.
+-/
+
+open LTok
+
+/-- A predictive table for the circuit grammar. -/
+def M : Table Tok Var := ⟨
+  [ (prog,   (LTok.tok h,  [var instrs]))
+  , (prog,   (LTok.tok cx, [var instrs]))
+  , (prog,   (LTok.tok s,  [var instrs]))
+  , (prog,   (LTok.tok m,  [var instrs]))
+  , (prog,   (LTok.eof,    [var instrs]))
+  , (instrs, (LTok.tok h,  [var instr, var instrs]))
+  , (instrs, (LTok.tok cx, [var instr, var instrs]))
+  , (instrs, (LTok.tok s,  [var instr, var instrs]))
+  , (instrs, (LTok.tok m,  [var instr, var instrs]))
+  , (instrs, (LTok.eof,    []))
+  , (instr,  (LTok.tok h,  [var hi]))
+  , (instr,  (LTok.tok cx, [var cxi]))
+  , (instr,  (LTok.tok s,  [var si]))
+  , (instr,  (LTok.tok m,  [var mi]))
+  , (hi,     (LTok.tok h,  [tok h,  tok q0, tok semi]))
+  , (cxi,    (LTok.tok cx, [tok cx, tok q0, tok q1, tok semi]))
+  , (si,     (LTok.tok s,  [tok s,  tok q1, tok semi]))
+  , (mi,     (LTok.tok m,  [tok m,  tok q0, tok semi])) ] ⟩
+
+/-- Every entry of `M` is a production of `C`: the table is `Sound` in the sense of
+Phase 2.  Checked by exhaustion over the finite alphabets. -/
+theorem M_sound : M.Sound C :=
+  Table.sound_of_check C M (by decide)
+
+/-- The token stream of `h q0;`. -/
+def input_h : List (LTok Tok) :=
+  [LTok.tok h, LTok.tok q0, LTok.tok semi, LTok.eof]
+
+/-- The token stream of `h q0; cx q0 q1;`. -/
+def input_hcx : List (LTok Tok) :=
+  [LTok.tok h, LTok.tok q0, LTok.tok semi, LTok.tok cx, LTok.tok q0, LTok.tok q1,
+   LTok.tok semi, LTok.eof]
+
+/-- The token stream of the empty program. -/
+def input_empty : List (LTok Tok) := [LTok.eof]
+
+theorem wf_input_h : WellFormedInput input_h := ⟨[h, q0, semi], rfl⟩
+theorem wf_input_hcx : WellFormedInput input_hcx := ⟨[h, q0, semi, cx, q0, q1, semi], rfl⟩
+theorem wf_input_empty : WellFormedInput input_empty := ⟨[], rfl⟩
+
+/-- **The parser runs.**  With 40 units of fuel the parser reconstructs exactly the
+parse tree we built by hand in Phase 1. -/
+theorem parse_hcx_ok : Parser.parse C M 40 input_hcx = PRes.ok prog_hcx [LTok.eof] := rfl
+
+theorem parse_h_ok : Parser.parse C M 20 input_h = PRes.ok prog_h [LTok.eof] := rfl
+
+theorem parse_empty_ok : Parser.parse C M 5 input_empty = PRes.ok prog_empty [LTok.eof] := rfl
+
+/-- **Soundness instantiated.**  The tree the parser produced is valid, and its
+yield is the whole input — an instance of the proved theorem, not a test. -/
+theorem parse_hcx_sound :
+    Valid C prog_hcx ∧ Tree.yield prog_hcx = tokensOf input_hcx :=
+  parse_sound M_sound wf_input_hcx parse_hcx_ok
+
+theorem parse_h_sound :
+    Valid C prog_h ∧ Tree.yield prog_h = tokensOf input_h :=
+  parse_sound M_sound wf_input_h parse_h_ok
+
+/-- **A malformed program is rejected with a structured error**: `h q1;` asks for
+the terminal `q0` and finds `q1`. -/
+def input_bad : List (LTok Tok) :=
+  [LTok.tok h, LTok.tok q1, LTok.tok semi, LTok.eof]
+
+theorem parse_bad_err :
+    Parser.parse C M 40 input_bad =
+      PRes.error (ParseError.tokenMismatch q0 (LTok.tok q1)) := rfl
+
+/-- A program that ends in the middle of an instruction is rejected: the table has
+no entry for the pending terminal at end of input. -/
+def input_truncated : List (LTok Tok) :=
+  [LTok.tok h, LTok.tok q0, LTok.eof]
+
+theorem parse_truncated_err :
+    Parser.parse C M 40 input_truncated =
+      PRes.error (ParseError.tokenMismatch semi LTok.eof) := rfl
+
+/-- Insufficient fuel is reported as such rather than looping: this is the
+behaviour Phase 3 replaces with a computable bound. -/
+theorem parse_hcx_out_of_fuel :
+    Parser.parse C M 3 input_hcx = PRes.error ParseError.outOfFuel := rfl
+
+#eval Parser.parse C M 40 input_hcx
+#eval Parser.parse C M 40 input_bad
+#eval tokensOf input_hcx

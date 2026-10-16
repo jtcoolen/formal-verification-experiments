@@ -24,11 +24,11 @@ namespace VerifiedLL1.Examples.Toy
 
 inductive Tok where
   | a | b | c
-  deriving DecidableEq, Repr, BEq
+  deriving DecidableEq, Repr
 
 inductive Var where
   | s | p | q | u
-  deriving DecidableEq, Repr, BEq
+  deriving DecidableEq, Repr
 
 open Tok Var Sym Tree
 
