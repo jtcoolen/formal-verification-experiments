@@ -303,12 +303,15 @@ def actGuard (sh : Shape) (i q c : Nat) : List Lit :=
 def frameKnClauses (sh : Shape) (i : Nat) : List (List Lit) :=
   mapMsg sh fun u => [neg (vkn sh i u), pos (vkn sh (i + 1) u)]
 
-/-- A session that does not act keeps its program counter and its whole store. -/
+/-- A session that does not act keeps its program counter and its whole store.  Note the
+*polarity* of the first literal: the frame condition is the implication "if q acts then the
+state is preserved", i.e. the clause (evAct or not pc_i or pc_{i+1}); with a negated guard
+the clause would be satisfied by the very sessions it is meant to constrain. -/
 def frameSessClauses (sh : Shape) (i q : Nat) : List (List Lit) :=
   ((List.range (shPc sh)).map fun c =>
-      [neg (evAct sh i q), neg (vpc sh i q c), pos (vpc sh (i + 1) q c)])
+      [pos (evAct sh i q), neg (vpc sh i q c), pos (vpc sh (i + 1) q c)])
     ++ (eachVar sh fun x => mapVal sh fun u =>
-          [neg (evAct sh i q), neg (vst sh i q x u), pos (vst sh (i + 1) q x u)])
+          [pos (evAct sh i q), neg (vst sh i q x u), pos (vst sh (i + 1) q x u)])
 
 /-- The frame conditions of the encoding; they mirror the frame lemmas of
 ProtSat.Operational. -/
@@ -550,9 +553,10 @@ def vau (sh : Shape) (i q x u : Nat) : BVar :=
 /-- The total number of variables of the encoding. -/
 def nVarsAll (sh : Shape) : Nat := bsAu sh + szAu sh
 
-/-- Is the value of variable x of session q declared secret? -/
+/-- Is the value of variable x of session q declared secret?  A session that the bounds do
+not instantiate cannot leak anything. -/
 def storeSecret (sh : Shape) (P : Protocol) (q x : Nat) : Bool :=
-  (Secret.store q x) ∈ P.secrets
+  q < sh.nS1 && (Secret.store q x) ∈ P.secrets
 
 /-- The Tseitin definitions of the store-leak conjunctions of one slot. -/
 def leakAuxEntry (sh : Shape) (P : Protocol) (i q x : Nat) : List (List Lit) :=

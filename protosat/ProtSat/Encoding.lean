@@ -86,6 +86,15 @@ theorem contains_mem [BEq α] [LawfulBEq α] (l : List α) (a : α) :
 /-- The universe of an analysis is duplicate-free. -/
 theorem U_nodup : (shapeOf P B).U.Nodup := nodup_eraseDups _
 
+/-- The session count of the shape is the number of sessions. -/
+theorem nS1_eq : (shapeOf P B).nS1 = P.sessions.length := rfl
+
+/-- The step bound of the shape is the step bound of the bounds. -/
+theorem steps_eq : (shapeOf P B).steps = B.steps := rfl
+
+/-- The nonce domain of the shape is the nonce domain of the protocol. -/
+theorem D_eq : (shapeOf P B).D = P.nonceDomain := rfl
+
 /-- In a duplicate-free list, two positions holding the same element are equal. -/
 theorem rget_nodup_inj {α : Type} : ∀ (l : List α), l.Nodup ->
     ∀ (u v : Nat) (x : α), rget l u = some x -> rget l v = some x -> u = v := by
@@ -1625,3 +1634,181 @@ theorem dedInst_oneStep {sh : Shape} {u : Nat} {ins : DedInst} (h : ins ∈ dedI
               rcases ham with ⟨h1, _⟩
               exact absurd h1 hm
         | _ => simp at ham
+
+/-! ### The decoded run -/
+
+/-- The configuration C agrees with the assignment a at step i: the program counters, the
+variable readings and the attacker's knowledge are exactly the ones the assignment encodes.
+This is the bridge between the Boolean world and ProtSat.Operational. -/
+def Agrees (P : Protocol) (B : Bounds) (a : Assignment) (C : Cfg) (i : Nat) : Prop :=
+  (∀ q, q < (shapeOf P B).nS1 → pcOf C q = decodePc (shapeOf P B) a i q) ∧
+  (∀ q x, q < (shapeOf P B).nS1 → x < (shapeOf P B).nV1 + 1 →
+      readVar x (storeOf C q) = decSt (shapeOf P B) a i q x) ∧
+  C.kn = decKnSeq (shapeOf P B) P a i
+
+/-- The successor of C prescribed by the event the assignment selects at step i: the same
+function ProtSat.Rel computes, read off the decoded event.  The step clauses guarantee that
+the step is enabled (ProtSat.Encoding.rel_agrees). -/
+def decStep (P : Protocol) (B : Bounds) (a : Assignment) (C : Cfg) (i : Nat) : Cfg :=
+  match decEv (shapeOf P B) P a i with
+  | Ev.idle => C
+  | Ev.ded t => succDed C t
+  | Ev.act q m d =>
+      match P.actionAt q (pcOf C q) with
+      | some (Action.fresh x _) => succStore C q x (Term.nonce d)
+      | some (Action.send _ e) =>
+          match Expr.eval e (storeOf C q) with
+          | some t => succSend C q t
+          | none => C
+      | some (Action.recv _ x) => succStore C q x m
+      | some (Action.assign x e) =>
+          match Expr.eval e (storeOf C q) with
+          | some t => succStore C q x t
+          | none => C
+      | _ => succAdvance C q
+
+/-- The run decoded from the assignment: the initial configuration, then one application of
+decStep per step. -/
+def decRun (P : Protocol) (B : Bounds) (a : Assignment) : Nat → Cfg
+  | 0 => initCfg P
+  | i + 1 => decStep P B a (decRun P B a i) i
+
+/-- Reading a mapped list at an index. -/
+theorem rget_map {α β : Type} (f : α → β) : ∀ (l : List α) (i : Nat),
+    rget (l.map f) i = (rget l i).map f := by
+  intro l
+  induction l with
+  | nil => intro i; rfl
+  | cons x xs ih => intro i; cases i <;> simp [rget, ih]
+
+/-- The stride of sessions exceeds the session count. -/
+theorem lt_shS {sh : Shape} {q : Nat} (h : q < sh.nS1) : q < shS sh := by
+  show q < sh.nS1 + 1
+  omega
+
+/-- The stride of store slots exceeds the slot count. -/
+theorem lt_shV {sh : Shape} {x : Nat} (h : x < sh.nV1) : x < shV sh := by
+  show x < sh.nV1 + 1
+  omega
+
+/-- Every universe position, and the unset position, is inside the value stride. -/
+theorem lt_shVal {sh : Shape} {u : Nat} (h : u ≤ sh.U.length) : u < shVal sh := by
+  show u < sh.U.length + 1
+  omega
+
+/-- The initial configuration agrees with the assignment at step 0: the initial clauses say
+exactly that every session is at program counter 0 with an empty store and the attacker
+holds the initial knowledge. -/
+theorem agrees_zero (h : Sat a (encode P B)) : Agrees P B a (initCfg P) 0 := by
+  refine ⟨?_, ?_, rfl⟩
+  · intro q hq
+    have h1 : a (vpc (shapeOf P B) 0 q 0) = true := by
+      have hcl : [pos (vpc (shapeOf P B) 0 q 0)] ∈
+          (initClauses (shapeOf P B) P).clauses := by
+        unfold initClauses cnfOf
+        refine List.mem_append_left _ (List.mem_append_left _
+          (List.mem_flatMap.mpr ⟨q, List.mem_range.mpr (lt_shS hq),
+            List.mem_map.mpr ⟨0, List.mem_range.mpr (shPc_pos _), rfl⟩⟩))
+      have := sat_init h _ hcl
+      rw [Clause.eval, List.any_cons, List.any_nil, Bool.or_false, pos_eval] at this
+      exact this
+    have h2 : decodePc (shapeOf P B) a 0 q = 0 :=
+      decodePc_of_true (Nat.zero_le _) (lt_shS hq) (shPc_pos _) h h1
+    have h1' : sessAt (initCfg P) q = some { pc := 0, store := [] } := by
+      unfold ProtSat.initCfg ProtSat.sessAt
+      rw [rget_map]
+      have hl : q < P.sessions.length := by rw [← nS1_eq]; exact hq
+      cases h3 : rget P.sessions q with
+      | none =>
+          obtain ⟨s, hs⟩ := rget_lt P.sessions q hl
+          rw [h3] at hs
+          exact absurd hs (by simp)
+      | some s => rfl
+    have hpc : pcOf (initCfg P) q = 0 := by
+      show ((sessAt (initCfg P) q).map (fun s => s.pc)).getD 0 = 0
+      rw [h1']
+      rfl
+    rw [hpc, h2]
+  · intro q x hq hx
+    have h1 : a (vst (shapeOf P B) 0 q x ((shapeOf P B).U.length)) = true := by
+      have hcl : [pos (vst (shapeOf P B) 0 q x ((shapeOf P B).U.length))] ∈
+          (initClauses (shapeOf P B) P).clauses := by
+        unfold initClauses cnfOf
+        refine List.mem_append_left _ (List.mem_append_right _
+          (List.mem_flatMap.mpr ⟨q, List.mem_range.mpr (lt_shS hq),
+            List.mem_flatMap.mpr ⟨x, List.mem_range.mpr hx,
+              List.mem_map.mpr ⟨(shapeOf P B).U.length,
+                List.mem_range.mpr (lt_shVal (Nat.le_refl _)), by simp⟩⟩⟩))
+      have := sat_init h _ hcl
+      rw [Clause.eval, List.any_cons, List.any_nil, Bool.or_false, pos_eval] at this
+      exact this
+    have hoh := sat_stOh (Nat.zero_le _) (lt_shS hq) hx h
+    have h2 : (stOh (shapeOf P B) 0 q x).decode a = some ((shapeOf P B).U.length) :=
+      Oh.decode_of_true hoh (List.mem_range.mpr (lt_shVal (Nat.le_refl _))) h1
+    have h1'' : sessAt (initCfg P) q = some { pc := 0, store := [] } := by
+      unfold ProtSat.initCfg ProtSat.sessAt
+      rw [rget_map]
+      have hl : q < P.sessions.length := by rw [← nS1_eq]; exact hq
+      cases h3 : rget P.sessions q with
+      | none =>
+          obtain ⟨s, hs⟩ := rget_lt P.sessions q hl
+          rw [h3] at hs
+          exact absurd hs (by simp)
+      | some s => rfl
+    have hst : storeOf (initCfg P) q = [] := by
+      show ((sessAt (initCfg P) q).map (fun s => s.store)).getD [] = []
+      rw [h1'']
+      rfl
+    have hdec : decSt (shapeOf P B) a 0 q x = none := by
+      unfold decSt decVal
+      rw [h2]
+      exact valAt_uIdx_none (shapeOf P B)
+    rw [hst, hdec]
+    rfl
+
+/-- The index a store group selects, with its variable true. -/
+theorem decodeSt_val (hi : i ≤ B.steps) (hq : q < shS (shapeOf P B))
+    (hx : x < shV (shapeOf P B)) (h : Sat a (encode P B)) :
+    ∃ v, (stOh (shapeOf P B) i q x).decode a = some v ∧ v < shVal (shapeOf P B) ∧
+      a (vst (shapeOf P B) i q x v) = true := by
+  have hoh := sat_stOh hi hq hx h
+  obtain ⟨v, hv⟩ := Oh.decode_some hoh
+  exact ⟨v, hv, List.mem_range.mp ((decodeGo_some _ _ _ _ hv).1),
+    (decodeGo_some _ _ _ _ hv).2⟩
+
+/-- A session that does not act keeps its program counter. -/
+theorem decodePc_frame (hi : i < B.steps) (hq : q < shS (shapeOf P B))
+    (h : Sat a (encode P B)) (ha : a (evAct (shapeOf P B) i q) = false) :
+    decodePc (shapeOf P B) a (i + 1) q = decodePc (shapeOf P B) a i q := by
+  set c := decodePc (shapeOf P B) a i q with hc
+  have hpc : a (vpc (shapeOf P B) i q c) = true :=
+    decodePc_true (Nat.le_of_lt hi) hq h
+  have hcl : [pos (evAct (shapeOf P B) i q), neg (vpc (shapeOf P B) i q c),
+      pos (vpc (shapeOf P B) (i + 1) q c)] ∈ frameSessClauses (shapeOf P B) i q := by
+    unfold frameSessClauses
+    refine List.mem_append_left _ (List.mem_map.mpr ⟨c,
+      List.mem_range.mpr (decodePc_lt (Nat.le_of_lt hi) hq h), rfl⟩)
+  have h1 := frame_holds hi hq h ha _ hcl
+  simp only [Clause.eval_cons, clause_eval_nil, Bool.or_false, pos_eval, neg_eval] at h1
+  rw [ha, Bool.false_or, hpc, Bool.not_true, Bool.false_or] at h1
+  exact decodePc_of_true (Nat.succ_le_of_lt hi) hq (decodePc_lt (Nat.le_of_lt hi) hq h) h h1
+
+/-- A session that does not act keeps every store slot. -/
+theorem decSt_frame (hi : i < B.steps) (hq : q < shS (shapeOf P B))
+    (hx : x < shV (shapeOf P B)) (h : Sat a (encode P B))
+    (ha : a (evAct (shapeOf P B) i q) = false) :
+    decSt (shapeOf P B) a (i + 1) q x = decSt (shapeOf P B) a i q x := by
+  obtain ⟨v, hv, hvlt, hvv⟩ := decodeSt_val (Nat.le_of_lt hi) hq hx h
+  have hcl : [pos (evAct (shapeOf P B) i q), neg (vst (shapeOf P B) i q x v),
+      pos (vst (shapeOf P B) (i + 1) q x v)] ∈ frameSessClauses (shapeOf P B) i q := by
+    unfold frameSessClauses
+    refine List.mem_append_right _ (List.mem_flatMap.mpr ⟨x, List.mem_range.mpr hx,
+      List.mem_map.mpr ⟨v, List.mem_range.mpr (lt_shVal (Nat.le_of_lt_succ hvlt)), rfl⟩⟩)
+  have h1 := frame_holds hi hq h ha _ hcl
+  simp only [Clause.eval_cons, clause_eval_nil, Bool.or_false, pos_eval, neg_eval] at h1
+  rw [ha, Bool.false_or, hvv, Bool.not_true, Bool.false_or] at h1
+  have h2 : (stOh (shapeOf P B) (i + 1) q x).decode a = some v :=
+    Oh.decode_of_true (sat_stOh (Nat.succ_le_of_lt hi) hq hx h)
+      (List.mem_range.mpr hvlt) h1
+  unfold decSt decVal
+  rw [h2, hv]

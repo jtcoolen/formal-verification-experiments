@@ -211,6 +211,61 @@ theorem readVar_succStore (C : Cfg) (q x : Nat) (t : Term) (st : SessState)
   rw [sessAt_succStore_same, h]
   simp [bumpStore, readVar, writeVar, Expr.lookup]
 
+/-- Reading a variable other than the one written is unaffected by a store update. -/
+theorem readVar_writeVar_other {a b : Nat} {t : Term} (h : a ≠ b) :
+    ∀ (s : List (Nat × Term)), readVar b (writeVar a t s) = readVar b s := by
+  intro s
+  induction s with
+  | nil => simp [writeVar, readVar, Expr.lookup, h]
+  | cons p rest ih =>
+      simp only [writeVar, readVar, List.filter_cons, Expr.lookup]
+      by_cases hp : p.1 = a <;>
+      by_cases hab : p.1 = b <;>
+      simp_all [writeVar, readVar, Expr.lookup]
+
+/-- A store update leaves the other slots of the acting session alone. -/
+theorem readVar_succStore_other (C : Cfg) (q x y : Nat) (t : Term) (h : x ≠ y) :
+    readVar y (storeOf (succStore C q x t) q) = readVar y (storeOf C q) := by
+  have h1 : sessAt (succStore C q x t) q = (sessAt C q).map (bumpStore x t) :=
+    sessAt_succStore_same C q x t
+  unfold storeOf
+  rw [h1]
+  cases h2 : sessAt C q with
+  | none => simp [h2]
+  | some st => simp [h2, bumpStore, readVar_writeVar_other h]
+
+/-- A send advances the acting session's program counter and leaves its store alone. -/
+theorem sessAt_succSend_same (C : Cfg) (q : Nat) (t : Term) :
+    sessAt (succSend C q t) q = (sessAt C q).map bump := by
+  cases C with
+  | mk sess kn => simp only [succSend, sessAt]; exact rget_rput_same bump sess q
+
+theorem pcOf_succSend (C : Cfg) (q : Nat) (t : Term) (st : SessState)
+    (h : sessAt C q = some st) : pcOf (succSend C q t) q = st.pc + 1 := by
+  simp only [pcOf]
+  rw [sessAt_succSend_same, h]
+  simp [bump]
+
+theorem pcOf_succStore (C : Cfg) (q x : Nat) (t : Term) (st : SessState)
+    (h : sessAt C q = some st) : pcOf (succStore C q x t) q = st.pc + 1 := by
+  simp only [pcOf]
+  rw [sessAt_succStore_same, h]
+  simp [bumpStore]
+
+theorem pcOf_succDed (C : Cfg) (q : Nat) (t : Term) : pcOf (succDed C t) q = pcOf C q := rfl
+
+theorem readVar_succDed (C : Cfg) (q x : Nat) (t : Term) :
+    readVar x (storeOf (succDed C t) q) = readVar x (storeOf C q) := rfl
+
+theorem readVar_succSend (C : Cfg) (q x : Nat) (t : Term) :
+    readVar x (storeOf (succSend C q t) q) = readVar x (storeOf C q) := by
+  have h1 : sessAt (succSend C q t) q = (sessAt C q).map bump := sessAt_succSend_same C q t
+  unfold storeOf
+  rw [h1]
+  cases h2 : sessAt C q with
+  | none => simp [h2]
+  | some st => simp [h2, bump]
+
 /-- A deduction step changes no session's local state. -/
 theorem sessAt_succDed (C : Cfg) (t : Term) (q : Nat) : sessAt (succDed C t) q = sessAt C q := rfl
 
