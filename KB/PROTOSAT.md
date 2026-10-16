@@ -268,3 +268,52 @@ violation_leak -> encoding_sound.
 6. Authentication violations in the encoding: AuthBreak is defined in Operational but the
    violation clause only encodes Leak.  Either add a claim/commit clause group or present the
    Lowe attack as a secrecy breach (B's nonce leaks) and say so explicitly in the README.
+
+### Round 5 addendum: the chosen 8B construction (execute this next round)
+Define, for a run given as  run : Nat -> Cfg  (configurations at steps 0..B.steps) and
+ev : Nat -> Ev  (the event taken at step i, Ev.idle past the end):
+  assignOf P B run ev : Assignment
+as 'v is the code of a fact that holds in the run', i.e. a disjunction of bounded
+List.any searches over the index ranges, one disjunct per variable family:
+  pc : (range (steps+1)).any (fun i => (range (shS sh)).any (fun q => v = vpc sh i q (pcOf (run i) q)))
+  st : ... v = vst sh i q x (uIdx sh (readVal (run i) q x)) where readVal returns the unset
+       index when readVar x (storeOf (run i) q) = none  (use uIdx sh (readVar x (storeOf (run i) q)))
+  kn : ... v = vkn sh i (uIdx sh (some t)) for t in (run i).kn  (bounded by range U.length: use
+       (range U.length).any (fun u => v = vkn sh i u && valAt sh u ∈ (run i).kn))
+  ev : ... v = vev sh i (eventCode (ev i)) with eventCode idle = 0, act q _ _ = 1+q,
+       ded t = 1 + shS + nInst-index of the instance concluding t (needs the event to be a
+       *legal* event: the boundedness hypothesis supplies the instance index)
+  dl : ... v = vdl sh i q (uIdx sh (delivered (ev i) q))   (delivered = the event's m for act)
+  fr : ... v = vfr sh i q (ixOf d sh.D)                    (the nonce the event picks)
+  xe : ... v = vxe sh i (eIdx P e) (uIdx sh (Expr.eval e (storeOf (run i) q))) for e in allExprs
+  vpb: ... v = vpb sh i q c u && session q acts at (i,c) && its send evaluates to valAt u
+  vau: ... v = vau sh i q x u && storeSecret && readVar = valAt u && valAt u ∈ kn
+Then prove, once per family, the two-way characterisation
+  assignOf (vpc sh i q c) = true <-> i <= steps && q < shS && pcOf (run i) q = c
+which needs (i) the block-interval lemmas  vpc sh i q c < bsSt sh,  bsSt sh <= vst ... < bsKn sh,
+... (7 blocks, each an upper/lower bound: call them blk_vpc_lt, blk_vst_ge, blk_vst_lt, ...),
+proved from the positional codes by Nat.mul_div / omega, and (ii) that the index of a fact is
+unique (vpc_inj etc., already in Encode.lean).
+Then each of the 11 clause groups is discharged clause by clause:
+  oneHot: exactlyOne via the uniqueness of pcOf/readVar/eval values + the range facts;
+  init: pc 0 = 0, stores empty (readVar = none -> the unset index), kn = initKn;
+  frame: monotonicity of the run (Rel gives store/kn growth) - use the successor lemmas;
+  eval: the Tseitin gates follow from decXe-style computation of Expr.eval on the decoded
+       values (f1/f2 are exactly uIdx of stepEval1/2);
+  step: the action clauses follow from the Rel hypothesis of each step;
+  ded/knSupport: the instance that fired is a premise-satisfying one;
+  fresh: the nonce is in D and unused (boundedness);
+  leakAux/violation: the Leak witness supplies the true literal.
+Statement to aim for:
+  theorem encoding_complete (hU : univClosed (shapeOf P B) P) {tr : List Ev} {Cs : List Cfg}
+    (hrun : Runs P (initCfg P) tr Cs) (hlen : tr.length <= B.steps)
+    (hleak : runsLeaks P Cs) (hbnd : WithinBounds P B Cs tr) :
+    Satisfiable (encode P B)
+with WithinBounds defined in this file (every kn message and every stored value is in U,
+every delivered message in U, every generated nonce in D, every event either idle, an act
+of an instantiated session, or a ded whose message is in U).
+
+### Subagent status at end of round 5
+* DPLL agent 35e59f37-... : re-tasked (it had stopped without editing DPLL.lean).
+* Certificate agent 16ce7ce0-... : running (ProtSat/Certificate.lean, spec 7/8C).
+* Deduce agent e28034d6-... : DONE, Deduce.lean integrated and building.
