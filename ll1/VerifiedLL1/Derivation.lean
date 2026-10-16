@@ -106,6 +106,46 @@ theorem derives_prefix (h : Derives G xs ys) (l : List (Sym T N)) :
     Derives G (l ++ xs) (l ++ ys) := by
   simpa [List.append_nil] using derives_ctx h l []
 
+/-- **Head inversion.**  A non-trivial derivation can be split at its *first* step.
+This is the mirror image of the inductive definition (which peels the last step) and is
+what makes "look at the production used first" arguments available. -/
+theorem derives_head_inv {xs ys : List (Sym T N)} (h : Derives G xs ys) (hne : xs ≠ ys) :
+    ∃ zs, Derives1 G xs zs ∧ Derives G zs ys := by
+  induction h with
+  | refl => exact absurd rfl hne
+  | @tail mid fin hrec hstep ih =>
+      by_cases hmid : xs = mid
+      · subst hmid
+        exact ⟨fin, hstep, derives_refl fin⟩
+      · obtain ⟨zs, h1, h2⟩ := ih hmid
+        exact ⟨zs, h1, Derives.tail h2 hstep⟩
+
+/-- The first step of a derivation from a single nonterminal uses one of its
+productions. -/
+theorem derives_head_var {A : N} {ys : List (Sym T N)} (h : Derives G [Sym.var A] ys)
+    (hne : ys ≠ [Sym.var A]) :
+    ∃ rhs, (A, rhs) ∈ G.productions ∧ Derives G rhs ys := by
+  obtain ⟨zs, h1, h2⟩ := derives_head_inv h (fun heq => absurd heq.symm hne)
+  obtain ⟨B, rhs, pre, post, hp, e1, e2⟩ := derives1_decompose h1
+  -- `[var A] = pre ++ var B :: post\' forces `pre = []\', `post = []\' and `B = A\'
+  have hpre : pre = [] := by
+    cases pre with
+    | nil => rfl
+    | cons a as =>
+        rw [List.cons_append] at e1
+        obtain ⟨_, hrest⟩ := List.cons.inj e1
+        exact absurd hrest (by simp)
+  subst hpre
+  rw [List.nil_append] at e1
+  obtain ⟨hAB, hpost⟩ := List.cons.inj e1
+  subst hpost
+  have hBA : B = A := by
+    cases hAB
+    rfl
+  subst hBA
+  rw [List.nil_append, List.append_nil] at e2
+  exact ⟨rhs, hp, e2 ▸ h2⟩
+
 theorem derives_cons (h : Derives G xs ys) (x : Sym T N) : Derives G (x :: xs) (x :: ys) := by
   have := derives_ctx h [x] []
   simpa using this
