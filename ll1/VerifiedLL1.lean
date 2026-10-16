@@ -12,6 +12,7 @@ import VerifiedLL1.Parser
 import VerifiedLL1.Completeness
 import VerifiedLL1.Fixpoint
 import VerifiedLL1.Nullable
+import VerifiedLL1.First
 import VerifiedLL1.Examples.Toy
 import VerifiedLL1.Examples.Circuits
 import VerifiedLL1.Examples.Loop
@@ -30,6 +31,7 @@ import VerifiedLL1.Examples.Continuation
 * `VerifiedLL1.Parser`    - the fuelled table-driven parser and its soundness
 * `VerifiedLL1.Fixpoint`    - generic finite monotone fixed-point iteration
 * `VerifiedLL1.Nullable`     - NULLABLE: specification, computation, soundness, completeness
+* `VerifiedLL1.First`        - FIRST: specification, computation, soundness, completeness
 * `VerifiedLL1.Examples.Loop` - a correct table that loops: why progress is needed
 * `VerifiedLL1.Examples.Continuation` - why table correctness needs reachability
 * `VerifiedLL1.Examples.Toy` - a worked example grammar with acceptance *and*

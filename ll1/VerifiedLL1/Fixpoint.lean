@@ -49,6 +49,10 @@ theorem and_eq_true_iff {a b : Bool} :
     ((a && b) = true) ↔ (a = true ∧ b = true) := by
   cases a <;> cases b <;> simp
 
+theorem or_eq_true_iff {a b : Bool} :
+    ((a || b) = true) ↔ (a = true ∨ b = true) := by
+  cases a <;> cases b <;> simp
+
 /-- `PMono P`: `P` is monotone in the pointwise order on predicates. -/
 def PMono (P : (α → Bool) → α → Bool) : Prop :=
   ∀ (f g : α → Bool), (∀ x, f x = true → g x = true) → ∀ x, P f x = true → P g x = true

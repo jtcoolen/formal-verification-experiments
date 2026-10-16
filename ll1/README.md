@@ -19,7 +19,7 @@ lake env lean Axioms.lean # prints the axiom dependencies of every main theorem
 | 1 | Context-free grammars, parse trees, yield, derivation relation, correspondence theorem | **done** |
 | 2 | Predictive table type, table-driven parser, independent table-correctness predicate, soundness | **done** |
 | 3 | Completeness, termination, rejection of non-members | **done** |
-| 4 | `NULLABLE` / `FIRST` / `FOLLOW` specifications + fixed-point computations, soundness/completeness/termination | `NULLABLE` **done**; `FIRST`/`FOLLOW` in progress |
+| 4 | `NULLABLE` / `FIRST` / `FOLLOW` specifications + fixed-point computations, soundness/completeness/termination | `NULLABLE` and `FIRST` **done**; `FOLLOW` in progress |
 | 5 | `SELECT` sets, LL(1) conflict check, table generation, end-to-end theorem | not started |
 | 6 | Quantum circuit DSL as a worked instance | grammar + trees + derivations done (Phase 1 slice) |
 
@@ -39,6 +39,7 @@ ll1/
 │   ├── Completeness.lean       # monotonicity, rank, completeness, rejection
 │   ├── Fixpoint.lean           # generic finite monotone fixed-point iteration
 │   ├── Nullable.lean           # NULLABLE spec + computation + soundness/completeness
+│   ├── First.lean              # FIRST spec + computation + soundness/completeness
 │   └── Examples/
 │       ├── Toy.lean            # ε-productions, acceptance *and* rejection proofs
 │       ├── Circuits.lean       # quantum circuit DSL grammar (Phase 6 language)
@@ -396,15 +397,38 @@ Rather than repeat the termination proof, `VerifiedLL1.Fixpoint` provides it onc
   `not_nullable_u` shows the computation rejecting the one nonterminal that has no
   production at all.
 
-## Next step (Phase 4, continued)
+### `First.lean` — FIRST
 
-`FIRST` and `FOLLOW` in the same style:
+* **Specification** (algorithm-free): `G.FirstList xs x` — for a token `tok t` it means
+  `∃ ys, Derives G xs (Sym.tok t :: ys)` (the classical `FIRST_1`: the rest of the form
+  is an arbitrary *sentential* form, which is what makes the rules sound without
+  assuming trailing symbols generate anything); for `eof` it means `Derives G xs []`.
+  Encoding "`eof`" as "derives nothing" is what gives the correct ε-behaviour for free.
+* **Computation**: `firstListTest` (list rule: skip nullable heads, otherwise the head
+  decides — and `eof` is reachable only by skipping everything) and `firstTest` (symbol
+  rules: a terminal has itself; a nonterminal inherits the FIRST of any production's
+  right-hand side), iterated by `Fixpoint.iterP` over the finite enumeration of
+  `Sym T N × LTok T`, with the Phase 4.1 NULLABLE set as a fixed input.
+* **Theorems**: `firstP_mono`, `firstListTest_sound` + `first_sound` (soundness, by
+  induction on the iteration stage), `firstListTest.prepend` / `of_allNull` /
+  `append_imp` / `firstListTest_eof` (the list theory: a lookahead of a concatenation
+  comes from the prefix, or the prefix is all nullable and it comes from the tail),
+  `first_step_back` (FIRST is preserved backwards through *one* derivation step — the
+  tokens of a form come from the same places before and after a step), `first_backwards`
+  (hence along a whole derivation), `first_complete`, and the characterisations
+  `first_iff` and `first_eof_iff_nullable` (`eof ∈ FIRST(s)` exactly when `s ⇒* ε`).
+* **Example** (`Examples/Toy.lean`): `first_s_b` proves `b ∈ FIRST(s)` — the token comes
+  from `q` because `p` is nullable — `first_p_eof` proves `eof ∈ FIRST(p)` via `p ⇒ ε`,
+  and `first_u_not_eof` shows the computation rejecting `eof` for the one nonterminal
+  that cannot vanish.  `#eval firstPairs` prints the whole computed relation.
 
-* `G.FirstList xs x` := (∃ ys, Derives G xs (tok t :: ys)) for a token `x = tok t`, and
-  `Derives G xs []` for `x = eof` — the standard `FIRST_1`, stated with derivations;
-* `G.FollowSym A x` := ∃ pre post, Derives G [var start] (toks pre ++ [var A] ++ post)
-  ∧ G.FirstList post x — the classical `S ⇒* α A β` with `x ∈ FIRST(β)`, which puts
-  `eof ∈ FOLLOW(A)` exactly when `A` can be followed by nothing;
-* both computed by `Fixpoint.iterP` over the finite enumerations of `Sym T N` and
-  `N × LTok T`, with NULLABLE as a fixed input, each with soundness, completeness and
-  the characterisation theorem.
+## Next step
+
+* `Follow.lean`: `G.FollowSym A x := ∃ pre post, Derives G [var start]
+  (toks pre ++ [var A] ++ post) ∧ G.FirstList post x` — the classical `S ⇒* α A β` with
+  `x ∈ FIRST(β)`; it puts `eof ∈ FOLLOW(A)` exactly when `A` can be followed by nothing,
+  computed by the same `Fixpoint.iterP` machinery over `N × LTok T`.
+* Phase 5: `SELECT` sets from `FIRST`/`FOLLOW`, the LL(1) conflict check, table
+  construction with explicit rejection of conflicts, and the proof that the generated
+  table is `Correct` and `Progressing` — at which point `language_iff_accepts` gives the
+  end-to-end "accepts exactly the language" theorem.

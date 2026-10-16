@@ -68,6 +68,13 @@ axiom appearing below is a bug.
 #print axioms VerifiedLL1.nullable_eps_tree
 #print axioms VerifiedLL1.Examples.Toy.nullableSet_eq
 #print axioms VerifiedLL1.Examples.Toy.not_nullable_u
+#print axioms VerifiedLL1.firstP_mono
+#print axioms VerifiedLL1.firstListTest_sound
+#print axioms VerifiedLL1.first_sound
+#print axioms VerifiedLL1.first_backwards
+#print axioms VerifiedLL1.first_complete
+#print axioms VerifiedLL1.first_iff
+#print axioms VerifiedLL1.first_eof_iff_nullable
 
 -- Phase 3
 #print axioms VerifiedLL1.monotone

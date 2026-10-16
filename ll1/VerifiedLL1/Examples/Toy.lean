@@ -3,7 +3,7 @@ Copyright (c) 2026 Formally Verified Examples.
 Licensed under the MIT License. See the file LICENSE in the project root for
 license information.
 -/
-import VerifiedLL1.Nullable
+import VerifiedLL1.First
 
 /-!
 # Phase 1.4 — A worked example grammar
@@ -300,14 +300,14 @@ theorem forms_u : ∀ ys, Derives G [Sym.var u] ys → ys = [Sym.var u] := by
       -- but `u\' has no production at all
       exact absurd hp (by simp [G, List.mem_cons])
 
-/-- `u\' is *not* nullable, and the computation knows it. -/
+/-- `u' is *not* nullable, and the computation knows it. -/
 theorem not_nullable_u : ¬ (G.nullable u = true) := by
   intro h
   have hspec : G.Nullable u := (nullable_iff G u).mp h
   have h1 : ([] : List (Sym Tok Var)) = [Sym.var u] := forms_u [] hspec
   exact absurd h1 (by simp)
 
-/-- The computed NULLABLE set of the example grammar: exactly `s, p, q\'. -/
+/-- The computed NULLABLE set of the example grammar: exactly `s, p, q'. -/
 theorem nullableSet_eq : G.nullableSet = [s, p, q] := by
   unfold Grammar.nullableSet
   decide
@@ -315,4 +315,42 @@ theorem nullableSet_eq : G.nullableSet = [s, p, q] := by
 #eval G.nullableSet
 
 end Nullable
+section First
+
+/-- `p ⇒ a': `a' is in the FIRST of `p'. -/
+theorem first_p_a : G.first (Sym.var p) (LTok.tok a) = true :=
+  (first_iff G _ _).mpr ⟨[], derives_production p [tok a] mem_pa⟩
+
+/-- `q ⇒ b q': `b' is in the FIRST of `q'. -/
+theorem first_q_b : G.first (Sym.var q) (LTok.tok b) = true :=
+  (first_iff G _ _).mpr ⟨[Sym.var q], derives_production q [tok b, var q] mem_qbq⟩
+
+/-- `s ⇒ p q ⇒ q ⇒ b q ⇒ b': the token comes from `q' because `p' is nullable. -/
+theorem first_s_b : G.first (Sym.var s) (LTok.tok b) = true := by
+  refine (first_iff G _ _).mpr ⟨[Sym.var q], ?_⟩
+  have h1 : Derives G [Sym.var s] [Sym.var p, Sym.var q] :=
+    derives_production s [var p, var q] mem_sq
+  have h2 : Derives G [Sym.var p, Sym.var q] [Sym.tok b, Sym.var q] :=
+    derives_append (derives_production p [] mem_pe)
+      (derives_production q [tok b, var q] mem_qbq)
+  exact derives_trans h1 h2
+
+/-- `eof' is in the FIRST of `p' because `p ⇒ ε'. -/
+theorem first_p_eof : G.first (Sym.var p) LTok.eof = true :=
+  (first_eof_iff_nullable G _).mpr (derives_production p [] mem_pe)
+
+/-- `u ⇒ c' is the only production of `u': `eof' is *not* in its FIRST. -/
+theorem first_u_not_eof : ¬ (G.first (Sym.var u) LTok.eof = true) := by
+  intro h
+  have hspec : Derives G [Sym.var u] [] := (first_eof_iff_nullable G _).mp h
+  have h1 : ([] : List (Sym Tok Var)) = [Sym.var u] := forms_u [] hspec
+  exact absurd h1 (by simp)
+/-- The computed FIRST relation of the example grammar, as a finite list of pairs. -/
+def firstPairs : List (Sym Tok Var × LTok Tok) :=
+  (FiniteEnum.elems (α := Sym Tok Var × LTok Tok)).filter
+    (fun p => G.first p.1 p.2)
+
+#eval firstPairs
+
+end First
 end VerifiedLL1.Examples.Toy
