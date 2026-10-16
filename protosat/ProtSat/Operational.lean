@@ -466,4 +466,126 @@ that either leaks a secret or breaks agreement. -/
 def Attack (P : Protocol) (tr : List Ev) : Prop :=
   ∃ Cs, Runs P (initCfg P) tr Cs ∧ (runsLeaks P Cs ∨ AuthBreak P Cs tr)
 
+/-! ### More frame lemmas (used by the encoding correspondence) -/
+
+/-- Replacing an element of a list never changes its length. -/
+theorem rput_length {α : Type} (f : α -> α) : ∀ (l : List α) (q : Nat),
+    (rput f l q).length = l.length := by
+  intro l
+  induction l with
+  | nil => intro q; rfl
+  | cons x xs ih =>
+      intro q
+      cases q with
+      | zero => rfl
+      | succ q => simp [rput, ih]
+
+/-- An in-range read of a list succeeds. -/
+theorem rget_lt_aux {α : Type} : ∀ (l : List α) (q : Nat), q < l.length -> ∃ x, rget l q = some x := by
+  intro l
+  induction l with
+  | nil => intro q h; exact absurd h (by simp)
+  | cons x xs ih =>
+      intro q h
+      cases q with
+      | zero => exact ⟨x, rfl⟩
+      | succ q =>
+          have h2 : q < xs.length := by
+            rw [List.length_cons] at h
+            omega
+          exact ih q h2
+
+/-- A session index below the length of the session list has a local state. -/
+theorem sessAt_lt {C : Cfg} {q : Nat} (h : q < C.sess.length) :
+    ∃ st : SessState, sessAt C q = some st := by
+  unfold sessAt
+  exact rget_lt_aux C.sess q h
+
+/-- A step by session q leaves every other session's program counter alone. -/
+theorem pcOf_succAdvance_other (C : Cfg) (q r : Nat) (h : r ≠ q) :
+    pcOf (succAdvance C q) r = pcOf C r := by
+  unfold pcOf
+  rw [sessAt_succAdvance_other C q r h]
+
+theorem pcOf_succStore_other (C : Cfg) (q r : Nat) (x : Var) (t : Term) (h : r ≠ q) :
+    pcOf (succStore C q x t) r = pcOf C r := by
+  unfold pcOf
+  rw [sessAt_succStore_other C q r x t h]
+
+theorem pcOf_succSend_other (C : Cfg) (q r : Nat) (t : Term) (h : r ≠ q) :
+    pcOf (succSend C q t) r = pcOf C r := by
+  unfold pcOf
+  rw [sessAt_succSend_other C q r t h]
+
+/-- A step by session q leaves every other session's store alone. -/
+theorem storeOf_succAdvance_other (C : Cfg) (q r : Nat) (h : r ≠ q) :
+    storeOf (succAdvance C q) r = storeOf C r := by
+  unfold storeOf
+  rw [sessAt_succAdvance_other C q r h]
+
+theorem storeOf_succStore_other (C : Cfg) (q r : Nat) (x : Var) (t : Term) (h : r ≠ q) :
+    storeOf (succStore C q x t) r = storeOf C r := by
+  unfold storeOf
+  rw [sessAt_succStore_other C q r x t h]
+
+theorem storeOf_succSend_other (C : Cfg) (q r : Nat) (t : Term) (h : r ≠ q) :
+    storeOf (succSend C q t) r = storeOf C r := by
+  unfold storeOf
+  rw [sessAt_succSend_other C q r t h]
+
+/-- The acting session's own store after a store step: the variable is written, the rest of
+the store is untouched.  The session has to exist, which is the hypothesis the operational
+semantics always has available (Rel only lets an instantiated session act). -/
+theorem storeOf_succStore_same (C : Cfg) (q : Nat) (x : Var) (t : Term)
+    (st : SessState) (h : sessAt C q = some st) :
+    storeOf (succStore C q x t) q = writeVar x t (storeOf C q) := by
+  unfold storeOf
+  rw [sessAt_succStore_same, h]
+  simp [bumpStore]
+
+/-- A send does not change the acting session's store. -/
+theorem storeOf_succSend_same (C : Cfg) (q : Nat) (t : Term) :
+    storeOf (succSend C q t) q = storeOf C q := by
+  unfold storeOf
+  rw [sessAt_succSend_same]
+  cases h : sessAt C q with
+  | none => simp [h]
+  | some st => simp [h, bump]
+
+/-- The number of sessions is invariant: a step never adds or removes a session. -/
+theorem sessLength_succAdvance (C : Cfg) (q : Nat) :
+    (succAdvance C q).sess.length = C.sess.length := rput_length bump C.sess q
+theorem sessLength_succStore (C : Cfg) (q : Nat) (x : Var) (t : Term) :
+    (succStore C q x t).sess.length = C.sess.length := rput_length (bumpStore x t) C.sess q
+theorem sessLength_succSend (C : Cfg) (q : Nat) (t : Term) :
+    (succSend C q t).sess.length = C.sess.length := rput_length bump C.sess q
+theorem sessLength_succDed (C : Cfg) (t : Term) :
+    (succDed C t).sess.length = C.sess.length := rfl
+
+/-- The acting session's program counter advances, stated through the session count
+instead of an explicit local state. -/
+theorem pcOf_succAdvance' (C : Cfg) (q : Nat) (h : q < C.sess.length) :
+    pcOf (succAdvance C q) q = pcOf C q + 1 := by
+  obtain ⟨st, hst⟩ := sessAt_lt h
+  have hpc : pcOf C q = st.pc := by
+    show ((sessAt C q).map (fun s => s.pc)).getD 0 = st.pc
+    rw [hst]; rfl
+  rw [pcOf_succAdvance C q st hst, hpc]
+
+theorem pcOf_succStore' (C : Cfg) (q x : Nat) (t : Term) (h : q < C.sess.length) :
+    pcOf (succStore C q x t) q = pcOf C q + 1 := by
+  obtain ⟨st, hst⟩ := sessAt_lt h
+  have hpc : pcOf C q = st.pc := by
+    show ((sessAt C q).map (fun s => s.pc)).getD 0 = st.pc
+    rw [hst]; rfl
+  rw [pcOf_succStore C q x t st hst, hpc]
+
+theorem pcOf_succSend' (C : Cfg) (q : Nat) (t : Term) (h : q < C.sess.length) :
+    pcOf (succSend C q t) q = pcOf C q + 1 := by
+  obtain ⟨st, hst⟩ := sessAt_lt h
+  have hpc : pcOf C q = st.pc := by
+    show ((sessAt C q).map (fun s => s.pc)).getD 0 = st.pc
+    rw [hst]; rfl
+  rw [pcOf_succSend C q t st hst, hpc]
+
 end ProtSat

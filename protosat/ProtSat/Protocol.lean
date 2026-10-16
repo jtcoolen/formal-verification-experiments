@@ -608,4 +608,40 @@ theorem subexpressions_trans : ∀ (e f : Expr), f ∈ e.subexpressions ->
 
 end Expr
 
+/-! ### Evaluation respects the store through the variables it reads -/
+
+/-- **Evaluation is a function of the readings of its free variables.**  Two stores that
+answer the same question for every variable the expression reads evaluate the expression to
+the same value.  This is what lets the encoding represent a store by per-variable one-hot
+groups instead of by the list itself. -/
+theorem Expr.eval_congr {e : Expr} {s s' : List (Var × Term)}
+    (h : ∀ x, x ∈ e.vars -> Expr.lookup x s = Expr.lookup x s') :
+    Expr.eval e s = Expr.eval e s' := by
+  induction e generalizing s s' with
+  | agent A => rfl
+  | nonce N => rfl
+  | shrk a b => rfl
+  | pubk a => rfl
+  | privk a => rfl
+  | var x => exact h x (by simp [Expr.vars])
+  | pair e₁ e₂ ih₁ ih₂ =>
+      rw [Expr.eval, Expr.eval, ih₁ (by intro x hx; exact h x (by simp [Expr.vars] at *; tauto)),
+        ih₂ (by intro x hx; exact h x (by simp [Expr.vars] at *; tauto))]
+  | encS m k ih₁ ih₂ =>
+      rw [Expr.eval, Expr.eval, ih₁ (by intro x hx; exact h x (by simp [Expr.vars] at *; tauto)),
+        ih₂ (by intro x hx; exact h x (by simp [Expr.vars] at *; tauto))]
+  | encA m a ih =>
+      rw [Expr.eval, Expr.eval, ih (by intro x hx; exact h x (by simp [Expr.vars] at *; tauto))]
+  | hash e ih =>
+      rw [Expr.eval, Expr.eval, ih (by intro x hx; exact h x (by simp [Expr.vars] at *; tauto))]
+  | fst e ih =>
+      rw [Expr.eval, Expr.eval, ih (by intro x hx; exact h x (by simp [Expr.vars] at *; tauto))]
+  | snd e ih =>
+      rw [Expr.eval, Expr.eval, ih (by intro x hx; exact h x (by simp [Expr.vars] at *; tauto))]
+  | decS m k ih₁ ih₂ =>
+      rw [Expr.eval, Expr.eval, ih₁ (by intro x hx; exact h x (by simp [Expr.vars] at *; tauto)),
+        ih₂ (by intro x hx; exact h x (by simp [Expr.vars] at *; tauto))]
+  | decA m a ih =>
+      rw [Expr.eval, Expr.eval, ih (by intro x hx; exact h x (by simp [Expr.vars] at *; tauto))]
+
 end ProtSat

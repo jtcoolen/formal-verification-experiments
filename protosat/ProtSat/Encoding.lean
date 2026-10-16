@@ -1637,17 +1637,138 @@ theorem dedInst_oneStep {sh : Shape} {u : Nat} {ins : DedInst} (h : ins ∈ dedI
 
 /-! ### The decoded run -/
 
+/-- A session store is well formed: its variables are pairwise distinct - the semantics only
+ever replaces the value of a variable, it never adds a second binding for one - and each of
+its variables is within the bound the shape allocates for the protocol.  This is what makes a
+store readable through the decoded one-hot groups: a message is in the store exactly when
+some slot reads back as that message, which is what the freshness side condition of
+ProtSat.Rel.rFresh needs. -/
+def StoreWF (sh : Shape) (s : List (Var × Term)) : Prop :=
+  (s.map Prod.fst).Nodup ∧ ∀ p ∈ s, p.1 < shV sh
+
 /-- The configuration C agrees with the assignment a at step i: the program counters, the
-variable readings and the attacker's knowledge are exactly the ones the assignment encodes.
+variable readings and the attacker's knowledge are exactly the ones the assignment encodes,
+the stores are well formed, and there are exactly the sessions the shape instantiates.
 This is the bridge between the Boolean world and ProtSat.Operational. -/
 def Agrees (P : Protocol) (B : Bounds) (a : Assignment) (C : Cfg) (i : Nat) : Prop :=
   (∀ q, q < (shapeOf P B).nS1 → pcOf C q = decodePc (shapeOf P B) a i q) ∧
   (∀ q x, q < (shapeOf P B).nS1 → x < (shapeOf P B).nV1 + 1 →
       readVar x (storeOf C q) = decSt (shapeOf P B) a i q x) ∧
   C.kn = decKnSeq (shapeOf P B) P a i ∧
-  (∀ q, q < (shapeOf P B).nS1 → ∀ t,
-      t ∈ storeVals (storeOf C q) <->
-        ∃ x, x < (shapeOf P B).nV1 + 1 ∧ decSt (shapeOf P B) a i q x = some t)
+  (∀ q, q < (shapeOf P B).nS1 → StoreWF (shapeOf P B) (storeOf C q)) ∧
+  C.sess.length = (shapeOf P B).nS1
+
+/-- Whatever a store reads is one of its values. -/
+theorem readVar_mem_storeVals {x : Var} {s : List (Var × Term)} {t : Term}
+    (h : readVar x s = some t) : t ∈ storeVals s := by
+  have key : ∀ (l : List (Var × Term)), Expr.lookup x l = some t -> t ∈ storeVals l := by
+    intro l
+    induction l with
+    | nil => intro h2; simp [Expr.lookup] at h2
+    | cons p ps ih =>
+        cases p with
+        | mk y u =>
+            intro h2
+            rw [Expr.lookup] at h2
+            by_cases hy : y = x
+            · subst hy
+              rw [if_pos rfl] at h2
+              have h3 := Option.some.inj h2
+              subst h3
+              exact List.Mem.head _
+            · rw [if_neg hy] at h2
+              exact List.Mem.tail _ (ih h2)
+  exact key s h
+
+/-- Whatever a store reads back as some t was put in the store as a pair. -/
+theorem mem_of_readVar {x : Var} {s : List (Var × Term)} {t : Term}
+    (h : readVar x s = some t) : (x, t) ∈ s := by
+  have key : ∀ (l : List (Var × Term)), Expr.lookup x l = some t -> (x, t) ∈ l := by
+    intro l
+    induction l with
+    | nil => intro h2; simp [Expr.lookup] at h2
+    | cons p ps ih =>
+        cases p with
+        | mk y u =>
+            intro h2
+            rw [Expr.lookup] at h2
+            by_cases hy : y = x
+            · subst hy
+              rw [if_pos rfl] at h2
+              have h3 := Option.some.inj h2
+              subst h3
+              exact List.Mem.head _
+            · rw [if_neg hy] at h2
+              exact List.Mem.tail _ (ih h2)
+  exact key s h
+
+/-- In a store whose variables are distinct, reading the variable of a stored pair returns
+that pair's value. -/
+theorem readVar_of_mem {x : Var} {t : Term} {s : List (Var × Term)}
+    (h : (x, t) ∈ s) (hd : (s.map Prod.fst).Nodup) : readVar x s = some t := by
+  induction s with
+  | nil => cases h
+  | cons p ps ih =>
+      cases p with
+      | mk y u =>
+        rw [List.map_cons, List.nodup_cons] at hd
+        show Expr.lookup x ((y, u) :: ps) = some t
+        rw [Expr.lookup]
+        by_cases hy : y = x
+        · subst hy
+          rw [if_pos rfl]
+          rcases List.mem_cons.mp h with h1 | h1
+          · exact congrArg some ((congrArg Prod.snd h1).symm)
+          · exact absurd (List.mem_map.mpr ⟨(y, t), h1, rfl⟩) hd.1
+        · rw [if_neg hy]
+          rcases List.mem_cons.mp h with h1 | h2
+          · exact absurd h1 (by simp_all)
+          · exact ih h2 hd.2
+
+/-- Replacing a variable's value keeps a store well formed. -/
+theorem storeWF_writeVar (sh : Shape) {x : Var} {t : Term} (hx : x < shV sh)
+    {s : List (Var × Term)} (hw : StoreWF sh s) : StoreWF sh (writeVar x t s) := by
+  unfold StoreWF at hw ⊢
+  obtain ⟨hd, hb⟩ := hw
+  rw [writeVar]
+  refine ⟨?_, ?_⟩
+  · rw [List.map_cons, List.nodup_cons]
+    refine ⟨fun hx => ?_,
+      List.Nodup.sublist (List.Sublist.map Prod.fst
+        (List.filter_sublist (p := fun q : Var × Term => q.1 != x))) hd⟩
+    rw [List.mem_map] at hx
+    obtain ⟨p, hp, hpe⟩ := hx
+    rw [List.mem_filter] at hp
+    exact absurd hp.2 (by simpa using hpe)
+  · intro q hq
+    rw [List.mem_cons] at hq
+    rcases hq with hq | hq
+    · subst hq; exact hx
+    · rw [List.mem_filter] at hq
+      exact hb q hq.1
+
+/-- The decoded store of a well formed configuration reads back through the slots: a message
+is in the store exactly when some decoded slot holds it. -/
+theorem Agrees.storeVals_iff (hag : Agrees P B a C i) (hq : q < (shapeOf P B).nS1) (t : Term) :
+    t ∈ storeVals (storeOf C q) <->
+      ∃ x, x < (shapeOf P B).nV1 + 1 ∧ decSt (shapeOf P B) a i q x = some t := by
+  obtain ⟨hpc_ag, hst_ag, hkn_eq, hwf, hlen⟩ := hag
+  constructor
+  · intro htm
+    unfold storeVals at htm
+    rw [List.mem_map] at htm
+    obtain ⟨⟨x, u⟩, hp, hut⟩ := htm
+    have hx : x < (shapeOf P B).nV1 + 1 := (hwf q hq).2 _ hp
+    have hu : u = t := hut
+    subst hu
+    refine ⟨x, hx, ?_⟩
+    rw [← hst_ag q x hq hx]
+    exact readVar_of_mem hp (hwf q hq).1
+  · rintro ⟨x, hx, he⟩
+    unfold storeVals
+    rw [List.mem_map]
+    have h1 : readVar x (storeOf C q) = some t := (hst_ag q x hq hx).trans he
+    exact ⟨(x, t), mem_of_readVar h1, rfl⟩
 
 /-- The successor of C prescribed by the event the assignment selects at step i: the same
 function ProtSat.Rel computes, read off the decoded event.  The step clauses guarantee that
@@ -1727,7 +1848,7 @@ theorem decSt_zero_none (h : Sat a (encode P B)) (hq : q < (shapeOf P B).nS1)
 exactly that every session is at program counter 0 with an empty store and the attacker
 holds the initial knowledge. -/
 theorem agrees_zero (h : Sat a (encode P B)) : Agrees P B a (initCfg P) 0 := by
-  refine ⟨?_, ?_, rfl, ?_⟩
+  refine ⟨?_, ?_, rfl, ?_, ?_⟩
   · intro q hq
     have h1 : a (vpc (shapeOf P B) 0 q 0) = true := by
       have hcl : [pos (vpc (shapeOf P B) 0 q 0)] ∈
@@ -1774,7 +1895,7 @@ theorem agrees_zero (h : Sat a (encode P B)) : Agrees P B a (initCfg P) 0 := by
       rfl
     rw [hst, hdec]
     rfl
-  · intro q hq t
+  · intro q hq
     have hst2 : storeOf (initCfg P) q = [] := by
       have h1 : sessAt (initCfg P) q = some { pc := 0, store := [] } := by
         unfold ProtSat.initCfg ProtSat.sessAt
@@ -1790,10 +1911,9 @@ theorem agrees_zero (h : Sat a (encode P B)) : Agrees P B a (initCfg P) 0 := by
       rw [h1]
       rfl
     rw [hst2]
-    refine ⟨fun h => absurd h (by simp [storeVals]), ?_⟩
-    intro ⟨x, hx, h2⟩
-    rw [decSt_zero_none h hq hx] at h2
-    exact absurd h2 (by simp)
+    exact ⟨List.nodup_nil, by simp⟩
+  · have h1 : (initCfg P).sess = P.sessions.map fun s => { pc := 0, store := [] } := rfl
+    rw [h1, List.length_map, nS1_eq]
 
 /-- The index a store group selects, with its variable true. -/
 theorem decodeSt_val (hi : i ≤ B.steps) (hq : q < shS (shapeOf P B))
@@ -1851,24 +1971,14 @@ theorem agrees_of_noact (h : Sat a (encode P B)) {i : Nat} (hi : i < B.steps)
     {C : Cfg} (hag : Agrees P B a C i)
     (hlearn : decLearn (shapeOf P B) P a i = none) :
     Agrees P B a C (i + 1) := by
-  obtain ⟨hpc_ag, hst_ag, hkn_eq, hval_ag⟩ := hag
-  refine ⟨?_, ?_, ?_, ?_⟩
+  obtain ⟨hpc_ag, hst_ag, hkn_eq, hwf, hlen⟩ := hag
+  refine ⟨?_, ?_, ?_, hwf, hlen⟩
   · intro q hq
     rw [decodePc_frame hi (lt_shS hq) h (hno q hq), hpc_ag q hq]
   · intro q x hq hx
     rw [decSt_frame hi (lt_shS hq) hx h (hno q hq), hst_ag q x hq hx]
   · rw [decKnSeq_succ, hlearn]
     simp [hkn_eq]
-  · intro q hq t
-    have key : ∀ x, x < (shapeOf P B).nV1 + 1 ->
-        decSt (shapeOf P B) a (i + 1) q x = decSt (shapeOf P B) a i q x :=
-      fun x hx => decSt_frame hi (lt_shS hq) hx h (hno q hq)
-    constructor
-    · intro hx
-      obtain ⟨x, hx', he⟩ := hval_ag q hq t |>.mp hx
-      exact ⟨x, hx', by rw [key x hx']; exact he⟩
-    · rintro ⟨x, hx', he⟩
-      exact (hval_ag q hq t).mpr ⟨x, hx', by rw [← key x hx']; exact he⟩
 
 /-- A session that acts is one of the instantiated sessions: the step clauses of a slot
 with no action there forbid the event. -/
@@ -1988,7 +2098,7 @@ theorem step_pc_succ (hi : i < B.steps) (hq : q < shS (shapeOf P B))
   have hcl : advClause (shapeOf P B) i q c ∈ stepClausesAt (shapeOf P B) P i q c :=
     advClause_mem_stepClausesAt (shapeOf P B) P i q c hne
   have h1 := step_body hi hq (decodePc_lt (Nat.le_of_lt hi) hq h) h ha hpc hcl
-  simp only [Clause.eval_cons, clause_eval_nil, Bool.or_false, neg_eval, pos_eval,
+  simp only [Clause.eval_cons, clause_eval_nil, Bool.or_false, Bool.or_false, Bool.false_or, neg_eval, pos_eval,
     ha, hpc, Bool.not_true, Bool.false_or] at h1
   exact decodePc_of_true (Nat.succ_le_of_lt hi) hq
     (lt_shPc_succ (lt_roleLen_of_actionAt hne) (roleLen_le_nPc1 hq1)) h h1
@@ -2006,10 +2116,1219 @@ theorem step_st_keep (hi : i < B.steps) (hq : q < shS (shapeOf P B))
   have hcl : keepClause (shapeOf P B) i q c y v ∈ stepClausesAt (shapeOf P B) P i q c :=
     keepClause_mem_stepClausesAt (shapeOf P B) P i q c y v hact hny hy hvlt
   have h1 := step_body hi hq (decodePc_lt (Nat.le_of_lt hi) hq h) h ha hpc hcl
-  simp only [Clause.eval_cons, clause_eval_nil, Bool.or_false, Bool.false_or, neg_eval,
+  simp only [Clause.eval_cons, clause_eval_nil, Bool.or_false, Bool.or_false, Bool.false_or, neg_eval,
     pos_eval, hvv] at h1
   have hoh := sat_stOh (Nat.succ_le_of_lt hi) hq hy h
   have h2 : (stOh (shapeOf P B) (i + 1) q y).decode a = some v :=
     Oh.decode_of_true hoh (List.mem_range.mpr hvlt) h1
   unfold decSt decVal
   rw [h2, hv]
+
+/-! ### From decoded values back to variables
+
+The forward correspondences (decSt, decXe) read a one-hot group and return the value it
+selects.  The lemmas in this section go the other way: if a decoded value is a universe
+message then the variable that names that message is true.  They are what turn a Boolean
+fact extracted from a clause into a fact about the decoded configuration. -/
+
+/-- The value number selected by a store group: if the group decodes to a universe message
+then the variable naming that message is true. -/
+theorem decSt_some_vst {i q x : Nat} {t : Term} (hi : i ≤ B.steps) (hq : q < shS (shapeOf P B))
+    (hx : x < shV (shapeOf P B)) (h : Sat a (encode P B)) (hut : t ∈ (shapeOf P B).U)
+    (hst : decSt (shapeOf P B) a i q x = some t) :
+    a (vst (shapeOf P B) i q x (uIdx (shapeOf P B) (some t))) = true := by
+  obtain ⟨v, hv, hvlt, hvv⟩ := decodeSt_val hi hq hx h
+  have huv : v = uIdx (shapeOf P B) (some t) := by
+    have hv' : valAt (shapeOf P B) v = some t := by
+      unfold decSt decVal at hst
+      rw [hv] at hst
+      exact hst
+    have hlt : v < (shapeOf P B).U.length := by
+      by_contra e
+      have h2 : valAt (shapeOf P B) v = none := rget_oob_ge (shapeOf P B).U v (by omega)
+      rw [h2] at hv'; simp at hv'
+    exact valAt_inj hlt (uIdx_lt_of_mem hut)
+      (by rw [hv', valAt_uIdx_some (shapeOf P B) hut])
+  rw [← huv]
+  exact hvv
+
+/-- The value number selected by an evaluation group: the same fact for the Tseitin
+evaluation groups. -/
+theorem decXe_some_vxe {i q : Nat} {e : Expr} {t : Term} (he : e ∈ allExprs P)
+    (hi : i ≤ B.steps) (hq : q < shS (shapeOf P B)) (h : Sat a (encode P B))
+    (hut : t ∈ (shapeOf P B).U) (hxe : decXe (shapeOf P B) P a i q e = some t) :
+    a (vxe (shapeOf P B) i q (eIdx P e) (uIdx (shapeOf P B) (some t))) = true := by
+  obtain ⟨v, hv, hvlt, hvv⟩ := decodeXe_lt he hi hq h
+  have huv : v = uIdx (shapeOf P B) (some t) := by
+    have hv' : valAt (shapeOf P B) v = some t := by
+      unfold decXe decVal at hxe
+      rw [hv] at hxe
+      exact hxe
+    have hlt : v < (shapeOf P B).U.length := by
+      by_contra e2
+      have h2 : valAt (shapeOf P B) v = none := rget_oob_ge (shapeOf P B).U v (by omega)
+      rw [h2] at hv'; simp at hv'
+    exact valAt_inj hlt (uIdx_lt_of_mem hut)
+      (by rw [hv', valAt_uIdx_some (shapeOf P B) hut])
+  rw [← huv]
+  exact hvv
+
+/-! ### Knowledge completeness
+
+ProtSat.Encoding.kn_sound says a true kn variable is justified by a real event.  The
+converse is needed for the freshness side condition of ProtSat.Rel.rFresh, which is stated
+negatively ("the nonce is not in anyone's store and not known"): the clauses forbid a kn
+variable, and we must conclude that the message is absent from the decoded knowledge. -/
+
+/-- Every message of the initial knowledge has its kn variable true at step 0: the initial
+clauses give the attacker exactly ProtSat.Protocol.initKn, not less. -/
+theorem init_kn_complete {u : Nat} {t : Term} (hut : valAt (shapeOf P B) u = some t)
+    (h : Sat a (encode P B)) (ht : t ∈ P.initKn) :
+    a (vkn (shapeOf P B) 0 u) = true := by
+  have hu : u < (shapeOf P B).U.length := by
+    by_contra e
+    have : valAt (shapeOf P B) u = none := rget_oob_ge (shapeOf P B).U u (by omega)
+    rw [this] at hut; simp at hut
+  have hcl : [pos (vkn (shapeOf P B) 0 u)] ∈ (initClauses (shapeOf P B) P).clauses := by
+    unfold initClauses cnfOf
+    refine List.mem_append_right _ ?_
+    unfold initKnClauses
+    refine List.mem_map.mpr ⟨u, List.mem_range.mpr hu, ?_⟩
+    have hh : initKnHolds (shapeOf P B) P u = true := by
+      unfold initKnHolds; rw [hut]; exact decide_eq_true ht
+    rw [if_pos hh]
+  have := sat_init h _ hcl
+  simpa [Clause.eval, List.any_cons, List.any_nil, Bool.or_false, pos_eval] using this
+
+/-- The frame clauses make knowledge monotone on the Boolean side. -/
+theorem kn_frame {i u : Nat} (hi : i < B.steps) (h : Sat a (encode P B))
+    (hu : u < (shapeOf P B).U.length) :
+    a (vkn (shapeOf P B) i u) = true -> a (vkn (shapeOf P B) (i + 1) u) = true := by
+  intro ha
+  have hcl : [neg (vkn (shapeOf P B) i u), pos (vkn (shapeOf P B) (i + 1) u)] ∈
+      (frameClauses (shapeOf P B)).clauses := by
+    unfold frameClauses cnfOf
+    refine List.mem_flatMap.mpr ⟨i, List.mem_range.mpr hi,
+      List.mem_append_left _ (List.mem_map.mpr ⟨u, List.mem_range.mpr hu, rfl⟩)⟩
+  have := sat_frame h _ hcl
+  simp only [Clause.eval_cons, clause_eval_nil, Bool.or_false, Bool.or_false, Bool.false_or, neg_eval, ha, Bool.not_true,
+    pos_eval] at this
+  exact this
+
+/-! ### What a step publishes -/
+
+/-- When session q acts with program counter c, the send-publish clause of the action's
+expression forces the kn variable of the sent value at the next step: a send really
+publishes what it sends. -/
+theorem sendPublish_mem {i q c u : Nat} (hu : u < (shapeOf P B).U.length)
+    {a' : Agent} {e : Expr} (hact : P.actionAt q c = some (Action.send a' e)) :
+    sendPublishClause (shapeOf P B) i q c (eIdx P e) u ∈
+      stepClausesAt (shapeOf P B) P i q c := by
+  rw [stepClausesAt, hact]
+  refine List.mem_append_right _ ?_
+  have hred : actionClauses (shapeOf P B) P i q c (Action.send a' e) =
+      [sendRealClause (shapeOf P B) i q c (eIdx P e)]
+        ++ mapMsg (shapeOf P B)
+            (fun w => sendPublishClause (shapeOf P B) i q c (eIdx P e) w) := by
+    simp [actionClauses]
+  rw [hred, mapMsg]
+  exact List.mem_append_right _ (List.mem_map.mpr ⟨u, List.mem_range.mpr hu, rfl⟩)
+
+/-- The clause concluding a deduction instance is one of its ded clauses: if the instance
+fires then its conclusion is known at the next step. -/
+theorem dedConcl_mem {i n : Nat} (hn : n < nInst (shapeOf P B)) (ins : DedInst)
+    (hins : instAt (shapeOf P B) n = some ins) :
+    [neg (evDed (shapeOf P B) i n), pos (vkn (shapeOf P B) (i + 1) ins.concl)] ∈
+      dedClausesAt (shapeOf P B) i n := by
+  rw [dedClausesAt, hins]
+  exact List.mem_append_right _ (List.Mem.head _)
+
+/-- **A taught message is known.**  Whatever the step teaches the attacker - the conclusion
+of a firing deduction instance, or the value a session sends - has its kn variable true at
+the next step. -/
+theorem decLearn_kn (hi : i < B.steps) (h : Sat a (encode P B)) {u : Nat} {t : Term}
+    (hu : u < (shapeOf P B).U.length) (hut : valAt (shapeOf P B) u = some t)
+    (hl : decLearn (shapeOf P B) P a i = some t) :
+    a (vkn (shapeOf P B) (i + 1) u) = true := by
+  rcases ev_cases hi h with h0 | ⟨q, hq, hk⟩ | ⟨n, hn, hk⟩
+  · rw [decLearn_code hi h, h0] at hl
+    exact absurd hl (by simp)
+  · have hev : a (evAct (shapeOf P B) i q) = true := evAct_eq_of_code hi h hq hk
+    have hc : decodePc (shapeOf P B) a i q < shPc (shapeOf P B) :=
+      decodePc_lt (Nat.le_of_lt hi) hq h
+    rw [decLearn_act hi h hq hk] at hl
+    cases hact : P.actionAt q (decodePc (shapeOf P B) a i q) with
+    | none => exact absurd hl (by simp [hact])
+    | some act =>
+        cases act with
+        | send a' e =>
+            have hxe : decXe (shapeOf P B) P a i q e = some t := by simpa [hact] using hl
+            have hut' : t ∈ (shapeOf P B).U := rget_mem (shapeOf P B).U u t hu hut
+            have hui : uIdx (shapeOf P B) (some t) = u := by
+              rw [← hut]; exact uIdx_valAt hu
+            have hvxe : a (vxe (shapeOf P B) i q (eIdx P e) u) = true := by
+              rw [← hui]
+              exact decXe_some_vxe (mem_allExprs_send hact) (Nat.le_of_lt hi) hq h hut' hxe
+            have hcl : sendPublishClause (shapeOf P B) i q (decodePc (shapeOf P B) a i q)
+                (eIdx P e) u ∈ stepClausesAt (shapeOf P B) P i q
+                  (decodePc (shapeOf P B) a i q) := sendPublish_mem hu hact
+            have h1 := step_body hi hq hc h hev (decodePc_true (Nat.le_of_lt hi) hq h) hcl
+            simpa [sendPublishClause, Clause.eval_cons, clause_eval_nil, Bool.or_false,
+              neg_eval, hvxe, Bool.not_true, pos_eval] using h1
+        | _ => exact absurd hl (by simp [hact])
+  · obtain ⟨ins, hins⟩ := rget_lt (dedInsts (shapeOf P B)) n hn
+    rw [decLearn_ded hi h hn ins hins hk] at hl
+    have hlt : ins.concl < (shapeOf P B).U.length := by
+      by_contra e
+      have h2 : valAt (shapeOf P B) ins.concl = none :=
+        rget_oob_ge (shapeOf P B).U ins.concl (by omega)
+      rw [h2] at hl; simp at hl
+    have hcu : ins.concl = u := valAt_inj hlt hu (by rw [hl, ← hut])
+    have hcl : [neg (evDed (shapeOf P B) i n), pos (vkn (shapeOf P B) (i + 1) ins.concl)] ∈
+        dedClausesAt (shapeOf P B) i n := dedConcl_mem hn ins hins
+    have this := sat_ded h _ (mem_ded hi hn hcl)
+    rw [hcu] at this
+    have hev : a (evDed (shapeOf P B) i n) = true := by
+      have : a (vev (shapeOf P B) i (decCode P B a i)) = true := decCode_true hi h
+      rw [hk] at this
+      exact this
+    simpa [Clause.eval, List.any_cons, List.any_nil, Bool.or_false, Bool.or_false, Bool.false_or, neg_eval, hev,
+      Bool.not_true, pos_eval] using this
+
+/-- **Knowledge completeness** (the second half of the knowledge correspondence announced as
+decKn_corr in the module header).  A message of the decoded knowledge list has its kn
+variable true.  Together with kn_sound this makes the decoded knowledge *exactly* the set of
+messages whose kn variable is true, which is what the negative side conditions of the
+operational rules (freshness) need. -/
+theorem kn_complete (h : Sat a (encode P B)) {u : Nat} {t : Term}
+    (hu : u < (shapeOf P B).U.length) (hut : valAt (shapeOf P B) u = some t) :
+    ∀ (i : Nat), i ≤ B.steps ->
+      t ∈ decKnSeq (shapeOf P B) P a i -> a (vkn (shapeOf P B) i u) = true := by
+  intro i
+  induction i with
+  | zero => intro _ hi; exact init_kn_complete hut h hi
+  | succ i ih =>
+      intro hi hm
+      rw [decKnSeq_succ, List.mem_append] at hm
+      rcases hm with hm | hm
+      · exact kn_frame hi h hu (ih (by omega) hm)
+      · have hl : decLearn (shapeOf P B) P a i = some t := by
+          cases h2 : decLearn (shapeOf P B) P a i with
+          | none => exact absurd hm (by simp [h2])
+          | some s =>
+              rw [h2] at hm
+              have h3 : t = s := by simpa using hm
+              exact congrArg some h3.symm
+        exact decLearn_kn (by omega) h hu hut hl
+
+/-! ### The frame facts of an acting step
+
+The lemmas in this section are the propositional shadow of the successor definitions of
+ProtSat.Operational: they say that the decoded configuration of the successor reads back
+through the decoded groups of the next step.  They are the reusable part of specification
+8A; ProtSat.Encoding.rel_agrees assembles them case by case. -/
+
+/-- Every session other than the one that acts does not act. -/
+theorem evAct_false_of_other (h : Sat a (encode P B)) (hi : i < B.steps)
+    {q r : Nat} (hq : q < shS (shapeOf P B)) (hr : r < shS (shapeOf P B))
+    (hne : r ≠ q) (hk : decCode P B a i = 1 + q) :
+    a (evAct (shapeOf P B) i r) = false :=
+  evAct_false_of_ne hi h hr hq hne hk
+
+/-- The program counters after a step in which session q acts: q advances by one and every
+other session is frame-preserved. -/
+theorem pcOf_succ_act (h : Sat a (encode P B)) (hi : i < B.steps) {C C' : Cfg}
+    (hag : Agrees P B a C i) {q : Nat} (hq : q < shS (shapeOf P B))
+    (hk : decCode P B a i = 1 + q)
+    (hpcq : pcOf C' q = pcOf C q + 1)
+    (hpcr : ∀ r, r < (shapeOf P B).nS1 → r ≠ q → pcOf C' r = pcOf C r) :
+    ∀ r, r < (shapeOf P B).nS1 → pcOf C' r = decodePc (shapeOf P B) a (i + 1) r := by
+  intro r hr
+  have haq : a (evAct (shapeOf P B) i q) = true := evAct_eq_of_code hi h hq hk
+  by_cases hne : r = q
+  · subst hne
+    rw [hpcq, hag.1 r (lt_nS1_of_evAct hi h hq haq), ← step_pc_succ hi hq h haq]
+  · rw [hpcr r hr hne, hag.1 r hr,
+      decodePc_frame hi (lt_shS hr) h (evAct_false_of_other h hi hq (lt_shS hr) hne hk)]
+
+/-- The store after a step in which session q writes x₀ := t: the written slot reads t,
+every other slot of q keeps its value, and every other session is frame-preserved. -/
+theorem decSt_succ_write (h : Sat a (encode P B)) (hi : i < B.steps) {C : Cfg}
+    (hag : Agrees P B a C i) {q x₀ : Nat} (hq : q < shS (shapeOf P B))
+    (hk : decCode P B a i = 1 + q) {act : Action}
+    (hact : P.actionAt q (decodePc (shapeOf P B) a i q) = some act)
+    (hw : writtenVar act = some x₀) {t : Term}
+    (hwt : decSt (shapeOf P B) a (i + 1) q x₀ = some t) :
+    ∀ r x, r < (shapeOf P B).nS1 → x < (shapeOf P B).nV1 + 1 →
+      readVar x (storeOf (succStore C q x₀ t) r) = decSt (shapeOf P B) a (i + 1) r x := by
+  intro r x hr hx
+  have haq : a (evAct (shapeOf P B) i q) = true := evAct_eq_of_code hi h hq hk
+  by_cases hne : r = q
+  · subst hne
+    by_cases hxy : x = x₀
+    · subst hxy
+      obtain ⟨st, hst⟩ := sessAt_lt (by rw [hag.2.2.2.2]; exact hr)
+      rw [readVar_succStore C r x t st hst]
+      exact hwt.symm
+    · rw [readVar_succStore_other C r x₀ x t (by intro e; subst e; exact hxy rfl)]
+      rw [hag.2.1 r x hr hx]
+      symm
+      exact step_st_keep hi hq hx h haq hact
+        (by intro e; rw [hw] at e; cases e; exact hxy rfl)
+  · rw [storeOf_succStore_other C q r x₀ t hne, hag.2.1 r x hr hx,
+      ← decSt_frame hi (lt_shS hr) hx h (evAct_false_of_other h hi hq (lt_shS hr) hne hk)]
+
+/-- The store after a step that writes no variable (advance, send): every slot keeps its
+value, in the acting session by the keep clauses and elsewhere by the frame clauses. -/
+theorem decSt_succ_keep (h : Sat a (encode P B)) (hi : i < B.steps) {C : Cfg}
+    (hag : Agrees P B a C i) {q : Nat} (hq : q < shS (shapeOf P B))
+    (hk : decCode P B a i = 1 + q) {act : Action}
+    (hact : P.actionAt q (decodePc (shapeOf P B) a i q) = some act)
+    (hw : writtenVar act = none) (C' : Cfg)
+    (hst : ∀ r x, readVar x (storeOf C' r) = readVar x (storeOf C r)) :
+    ∀ r x, r < (shapeOf P B).nS1 → x < (shapeOf P B).nV1 + 1 →
+      readVar x (storeOf C' r) = decSt (shapeOf P B) a (i + 1) r x := by
+  intro r x hr hx
+  have haq : a (evAct (shapeOf P B) i q) = true := evAct_eq_of_code hi h hq hk
+  rw [hst r x, hag.2.1 r x hr hx]
+  by_cases hne : r = q
+  · subst hne
+    symm
+    exact step_st_keep hi hq hx h haq hact (by intro e; rw [hw] at e; cases e)
+  · symm
+    exact decSt_frame hi (lt_shS hr) hx h (evAct_false_of_other h hi hq (lt_shS hr) hne hk)
+
+/-- Well formedness of the stores is preserved by a step that does not write. -/
+theorem storeWF_succ_keep (hag : Agrees P B a C i) (C' : Cfg)
+    (hst : ∀ r, storeOf C' r = storeOf C r) :
+    ∀ r, r < (shapeOf P B).nS1 → StoreWF (shapeOf P B) (storeOf C' r) := by
+  intro r hr
+  rw [hst r]
+  exact hag.2.2.2.1 r hr
+
+/-- Well formedness of the stores is preserved by a store-writing step: the acting session
+replaces one variable, and writeVar keeps the store well formed. -/
+theorem storeWF_succ_write (h : Sat a (encode P B)) (hi : i < B.steps)
+    (hag : Agrees P B a C i) {q x₀ : Nat} (hq : q < shS (shapeOf P B))
+    (hx₀ : x₀ < shV (shapeOf P B)) (hk : decCode P B a i = 1 + q) {t : Term} :
+    ∀ r, r < (shapeOf P B).nS1 → StoreWF (shapeOf P B) (storeOf (succStore C q x₀ t) r) := by
+  intro r hr
+  have haq : a (evAct (shapeOf P B) i q) = true := evAct_eq_of_code hi h hq hk
+  by_cases hne : r = q
+  · subst hne
+    obtain ⟨st, hst⟩ := sessAt_lt (by rw [hag.2.2.2.2]; exact hr)
+    rw [storeOf_succStore_same C r x₀ t st hst]
+    exact storeWF_writeVar (shapeOf P B) hx₀
+      (hag.2.2.2.1 r (lt_nS1_of_evAct hi h hq haq))
+  · rw [storeOf_succStore_other C q r x₀ t hne]
+    exact hag.2.2.2.1 r hr
+
+/-- The knowledge after a step that teaches nothing. -/
+theorem decKn_succ_none (h : Sat a (encode P B)) (hag : Agrees P B a C i)
+    (hlearn : decLearn (shapeOf P B) P a i = none) :
+    C.kn = decKnSeq (shapeOf P B) P a (i + 1) := by
+  rw [decKnSeq_succ, hag.2.2.1]
+  simp [hlearn]
+
+/-! ### More decoding helpers -/
+
+/-- The nonce index a fresh group selects, with its variable true. -/
+theorem decodeFr_val (hi : i < B.steps) (hq : q < shS (shapeOf P B))
+    (h : Sat a (encode P B)) :
+    ∃ d, (frOh (shapeOf P B) i q).decode a = some d ∧ d < shD (shapeOf P B) ∧
+      a (vfr (shapeOf P B) i q d) = true := by
+  have hoh := sat_frOh hi hq h
+  obtain ⟨d, hd⟩ := Oh.decode_some hoh
+  exact ⟨d, hd, List.mem_range.mp ((decodeGo_some _ _ _ _ hd).1),
+    (decodeGo_some _ _ _ _ hd).2⟩
+
+/-- The value index a delivery group selects, with its variable true. -/
+theorem decodeDl_val (hi : i < B.steps) (hq : q < shS (shapeOf P B))
+    (h : Sat a (encode P B)) :
+    ∃ u, (dlOh (shapeOf P B) i q).decode a = some u ∧ u < shVal (shapeOf P B) ∧
+      a (vdl (shapeOf P B) i q u) = true := by
+  have hoh := sat_dlOh hi hq h
+  obtain ⟨u, hu⟩ := Oh.decode_some hoh
+  exact ⟨u, hu, List.mem_range.mp ((decodeGo_some _ _ _ _ hu).1),
+    (decodeGo_some _ _ _ _ hu).2⟩
+
+/-- A firing deduction instance is one of the instances of some universe message. -/
+theorem mem_dedInsts {sh : Shape} {n : Nat} {ins : DedInst} (h : instAt sh n = some ins) :
+    ∃ u, u < sh.U.length ∧ ins ∈ dedInstsOf sh u := by
+  unfold instAt at h
+  have hmem : ins ∈ dedInsts sh := rget_some_mem (dedInsts sh) n ins h
+  unfold dedInsts at hmem
+  rw [List.mem_flatMap] at hmem
+  obtain ⟨u, hu, hu2⟩ := hmem
+  exact ⟨u, List.mem_range.mp hu, hu2⟩
+
+/-- Agrees carries over to a configuration whose program counters and stores are those of C -
+an "idle-like" successor - provided the knowledge is the decoded one at the next step. -/
+theorem agrees_of_frame (h : Sat a (encode P B)) (hi : i < B.steps) {C C' : Cfg}
+    (hag : Agrees P B a C i)
+    (hno : ∀ r, r < (shapeOf P B).nS1 → a (evAct (shapeOf P B) i r) = false)
+    (hpc : ∀ r, r < (shapeOf P B).nS1 → pcOf C' r = pcOf C r)
+    (hst : ∀ r x, r < (shapeOf P B).nS1 → x < (shapeOf P B).nV1 + 1 →
+              readVar x (storeOf C' r) = readVar x (storeOf C r))
+    (hkn : C'.kn = decKnSeq (shapeOf P B) P a (i + 1))
+    (hwf : ∀ r, r < (shapeOf P B).nS1 → StoreWF (shapeOf P B) (storeOf C' r))
+    (hlen : C'.sess.length = (shapeOf P B).nS1) :
+    Agrees P B a C' (i + 1) := by
+  refine ⟨?_, ?_, hkn, hwf, hlen⟩
+  · intro r hr
+    rw [hpc r hr, hag.1 r hr, decodePc_frame hi (lt_shS hr) h (hno r hr)]
+  · intro r x hr hx
+    rw [hst r x hr hx, hag.2.1 r x hr hx,
+      ← decSt_frame hi (lt_shS hr) hx h (hno r hr)]
+
+/-! ### Applying the freshness clauses -/
+
+/-- The guard literals of an acting position are false, so the body of a freshness clause
+must be satisfied. -/
+theorem fresh_body (hi : i < B.steps) (hq : q < shS (shapeOf P B))
+    (hc : c < shPc (shapeOf P B)) (h : Sat a (encode P B))
+    (ha : a (evAct (shapeOf P B) i q) = true) (hpc : a (vpc (shapeOf P B) i q c) = true)
+    {rest : List Lit}
+    (hcl : (actGuard (shapeOf P B) i q c ++ rest) ∈
+        freshClausesAt (shapeOf P B) P i q c) :
+    Clause.eval a rest = true := by
+  have := sat_fresh h _ (mem_fresh hi hq hc hcl)
+  refine clause_eval_append_of_false (actGuard (shapeOf P B) i q c) rest this ?_
+  intro l hl
+  unfold actGuard at hl
+  rw [List.mem_cons] at hl
+  rcases hl with rfl | hl
+  · simp [neg_eval, ha]
+  · rw [List.mem_cons] at hl
+    rcases hl with rfl | hl
+    · simp [neg_eval, hpc]
+    · exact absurd hl (by simp)
+
+/-- A variable an action writes is within the shape's store-slot bound. -/
+theorem lt_shV_of_written {q c : Nat} {act : Action} (hact : P.actionAt q c = some act)
+    {x : Nat} (hx : x ∈ act.written) : x < shV (shapeOf P B) := by
+  have h1 : x ∈ (P.roles.flatMap fun r =>
+      r.acts.flatMap fun a => a.written ++ a.exprs.flatMap Expr.vars) := by
+    have ha : act ∈ P.roles.flatMap (fun r => r.acts) := mem_acts_of_actionAt hact
+    rw [List.mem_flatMap] at ha ⊢
+    obtain ⟨r, hr, ham⟩ := ha
+    refine ⟨r, hr, List.mem_flatMap.mpr ⟨act, ham, ?_⟩⟩
+    rw [List.mem_append]
+    exact Or.inl hx
+  have h2 : x ≤ (shapeOf P B).nV1 := le_maxNat_of_mem _ _ h1
+  show x < (shapeOf P B).nV1 + 1
+  omega
+
+/-- A variable read by an expression of the protocol is within the shape's store-slot
+bound: the bound is taken over the variables of every subexpression of every action. -/
+theorem lt_shV_of_mem {e : Expr} (he : e ∈ allExprs P) {x : Nat}
+    (hx : x ∈ Expr.vars e) : x < shV (shapeOf P B) := by
+  rw [allExprs, List.mem_eraseDups] at he
+  obtain ⟨r, hr, ham⟩ := List.mem_flatMap.mp he
+  obtain ⟨act, ham2, hmem⟩ := List.mem_flatMap.mp ham
+  have h1 : x ∈ (P.roles.flatMap fun r =>
+      r.acts.flatMap fun a => a.written ++ a.exprs.flatMap Expr.vars) := by
+    refine List.mem_flatMap.mpr ⟨r, hr, List.mem_flatMap.mpr ⟨act, ham2, ?_⟩⟩
+    rw [List.mem_append]
+    exact Or.inr (List.mem_flatMap.mpr ⟨e, hmem, hx⟩)
+  have h2 : x ≤ (shapeOf P B).nV1 := le_maxNat_of_mem _ _ h1
+  show x < (shapeOf P B).nV1 + 1
+  omega
+
+/-- Membership in a list is reading it at some index. -/
+theorem mem_rget {α : Type} : ∀ (l : List α) (x : α), x ∈ l -> ∃ i, i < l.length ∧
+    rget l i = some x := by
+  intro l
+  induction l with
+  | nil => intro x h; exact absurd h (by simp)
+  | cons y ys ih =>
+      intro x hx
+      rw [List.mem_cons] at hx
+      rcases hx with rfl | hx
+      · exact ⟨0, by simp, rfl⟩
+      · obtain ⟨i, hi, heq⟩ := ih x hx
+        exact ⟨i + 1, by simpa [List.length_cons] using hi, by rw [rget_succ, heq]⟩
+
+/-- A Boolean whose negation is true is false. -/
+theorem bool_not_true {x : Bool} (h : (!x) = true) : x = false := by
+  cases x <;> simp_all
+
+/-! ### The core of specification 8A -/
+
+/-- Agrees after a step that only advances the acting session (a test, a declaration or an
+authentication event): the stores are untouched and nothing is published. -/
+theorem agrees_succ_advance (h : Sat a (encode P B)) (hi : i < B.steps) {C : Cfg}
+    (hag : Agrees P B a C i) {q : Nat} (hq : q < shS (shapeOf P B))
+    (hk : decCode P B a i = 1 + q) {act : Action}
+    (hact : P.actionAt q (decodePc (shapeOf P B) a i q) = some act)
+    (hw : writtenVar act = none)
+    (hlearn : decLearn (shapeOf P B) P a i = none) :
+    Agrees P B a (succAdvance C q) (i + 1) := by
+  have haq : a (evAct (shapeOf P B) i q) = true := evAct_eq_of_code hi h hq hk
+  have hnS : q < (shapeOf P B).nS1 := lt_nS1_of_evAct hi h hq haq
+  refine ⟨pcOf_succ_act h hi hag hq hk
+      (pcOf_succAdvance' C q (by rw [hag.2.2.2.2]; exact hnS))
+      (fun r hr hne => pcOf_succAdvance_other C q r hne),
+    decSt_succ_keep h hi hag hq hk hact hw _
+      (fun r x => congrArg (readVar x) (storeOf_succAdvance C q r)),
+    (decKn_succ_none h hag hlearn : C.kn = decKnSeq (shapeOf P B) P a (i + 1)),
+    storeWF_succ_keep hag _ (fun r => storeOf_succAdvance C q r),
+    by rw [sessLength_succAdvance, hag.2.2.2.2]⟩
+
+/-- Every premise index of a universe deduction instance is an in-range universe position.
+The instances are built from ProtSat.Encode.tIx and from first-occurrence indices of
+messages that are in the universe, so this is a case analysis over the eleven rule shapes of
+specification section 2. -/
+theorem dedInstsOf_prem_lt {sh : Shape} {u : Nat} (hu : u < sh.U.length) {ins : DedInst}
+    (h : ins ∈ dedInstsOf sh u) : ∀ p ∈ ins.prem, p < sh.U.length := by
+  obtain ⟨t', ht'⟩ := rget_lt sh.U u hu
+  have hix : ∀ x ∈ sh.U, ixOf x sh.U < sh.U.length := by
+    intro x hx
+    by_contra e
+    have h1 : rget sh.U (ixOf x sh.U) = some x := rget_ixOf sh.U x hx
+    have h2 : rget sh.U (ixOf x sh.U) = none := rget_oob_ge sh.U _ (by omega)
+    rw [h2] at h1; simp at h1
+  have one : ∀ {b : Nat}, b < sh.U.length -> ∀ q ∈ ([b] : List Nat), q < sh.U.length := by
+    intro b hb q hq
+    rw [List.mem_singleton] at hq
+    cases hq
+    exact hb
+  have two : ∀ {b₁ b₂ : Nat}, b₁ < sh.U.length -> b₂ < sh.U.length ->
+      ∀ q ∈ ([b₁, b₂] : List Nat), q < sh.U.length := by
+    intro b₁ b₂ hb₁ hb₂ q hq
+    rw [List.mem_cons] at hq
+    rcases hq with hq | hq
+    · cases hq; exact hb₁
+    · rw [List.mem_singleton] at hq; cases hq; exact hb₂
+  unfold dedInstsOf at h
+  rw [ht'] at h
+  simp only [List.mem_cons, List.mem_append, List.mem_filterMap] at h
+  rcases h with h | ⟨a, ha, ham⟩
+  · rcases h with h | h
+    · subst h
+      exact one hu
+    · cases t' with
+      | agent A => simp at h; subst h; simp
+      | key k =>
+          cases k with
+          | pub A => simp at h; subst h; simp
+          | _ => simp at h
+      | pair x y =>
+          rcases h5 : tIx sh x with ⟨b₁⟩|⟨b₁⟩
+          · simp [h5] at h
+          · rcases h6 : tIx sh y with ⟨b₂⟩|⟨b₂⟩
+            · simp [h6] at h
+            · simp [h5, h6] at h
+              subst h
+              exact two (tIx_lt h5) (tIx_lt h6)
+      | encS m k =>
+          rcases h5 : tIx sh m with ⟨b₁⟩|⟨b₁⟩
+          · simp [h5] at h
+          · rcases h6 : tIx sh (Term.key k) with ⟨b₂⟩|⟨b₂⟩
+            · simp [h6] at h
+            · simp [h5, h6] at h
+              subst h
+              exact two (tIx_lt h5) (tIx_lt h6)
+      | encA m ag =>
+          rcases h5 : tIx sh m with ⟨b₁⟩|⟨b₁⟩
+          · simp [h5] at h
+          · simp [h5] at h
+            subst h
+            exact one (tIx_lt h5)
+      | hash m =>
+          rcases h5 : tIx sh m with ⟨b₁⟩|⟨b₁⟩
+          · simp [h5] at h
+          · simp [h5] at h
+            subst h
+            exact one (tIx_lt h5)
+      | _ => simp at h
+  · cases a with
+    | pair x y =>
+        by_cases h1 : x = t'
+        · simp at ham
+          rw [if_pos h1] at ham
+          simp at ham
+          subst ham
+          exact one (hix (Term.pair x y) ha)
+        · by_cases h2 : y = t'
+          · simp at ham
+            rw [if_neg h1, if_pos h2] at ham
+            simp at ham
+            subst ham
+            exact one (hix (Term.pair x y) ha)
+          · simp at ham
+            rw [if_neg h1, if_neg h2] at ham
+            simp at ham
+    | encS m k =>
+        by_cases h1 : m = t'
+        · simp at ham
+          rcases ham with ⟨h3, ham⟩
+          rcases h5 : tIx sh (Term.key k) with ⟨b₂⟩|⟨b₂⟩
+          · rw [h5] at ham
+            simp at ham
+          · simp [h5] at ham
+            subst ham
+            exact two (hix (Term.encS m k) ha) (tIx_lt h5)
+        · simp at ham
+          rcases ham with ⟨h3, _⟩
+          exact absurd h3 h1
+    | encA m ag =>
+        by_cases h1 : m = t'
+        · simp at ham
+          rcases ham with ⟨h3, ham⟩
+          rcases h5 : tIx sh (Term.key (Key.priv ag)) with ⟨b₂⟩|⟨b₂⟩
+          · rw [h5] at ham
+            simp at ham
+          · simp [h5] at ham
+            subst ham
+            exact two (hix (Term.encA m ag) ha) (tIx_lt h5)
+        · simp at ham
+          rcases ham with ⟨h3, _⟩
+          exact absurd h3 h1
+    | _ => simp at ham
+
+
+/-- **Every decoded step is a transition of the operational semantics.**  Let a be a
+satisfying assignment of the encoding, let C be a configuration that agrees with a at step
+i (in the sense of ProtSat.Encoding.Agrees), and assume the universe hypothesis.  Then the
+event the assignment selects at step i is an instance of ProtSat.Rel from C, and the
+configuration decoded at step i+1 is exactly the one Rel prescribes.
+
+This is the soundness half of the encoding correspondence (specification 8A).  The proof
+reads each clause group back as a semantic fact: the step clauses give the successor, the
+deduction clauses plus kn_sound give the attacker's one-step derivation, the delivery
+clauses give that a received message is known, the evaluation clauses give that an
+expression evaluates to the value its Tseitin group selected, and the freshness clauses
+give the side condition of ProtSat.Rel.rFresh.  Nothing here uses the solver: the argument
+is about satisfying assignments, which is what makes the certificate checker of
+ProtSat.Certificate independent. -/
+theorem rel_agrees (hU : univClosed (shapeOf P B) P) (h : Sat a (encode P B))
+    {i : Nat} (hi : i < B.steps) {C : Cfg} (hag : Agrees P B a C i) :
+    Rel P C (decEv (shapeOf P B) P a i) (decStep P B a C i) ∧
+      Agrees P B a (decStep P B a C i) (i + 1) := by
+  rcases ev_cases hi h with h0 | ⟨q, hq, hk⟩ | ⟨n, hn, hk⟩
+  · -- ---- the idle step ----
+    have hev : decEv (shapeOf P B) P a i = Ev.idle := by
+      rw [decEv_code hi h, h0]
+      simp
+    have hstep : decStep P B a C i = C := by unfold decStep; rw [hev]
+    have hno : ∀ r, r < (shapeOf P B).nS1 → a (evAct (shapeOf P B) i r) = false := by
+      intro r hr
+      by_contra e
+      have := decCode_of_evAct hi h (lt_shS hr) (by simpa [evAct] using e)
+      omega
+    have hlearn : decLearn (shapeOf P B) P a i = none := by
+      rw [decLearn_code hi h, h0]
+      simp
+    refine ⟨?_, ?_⟩
+    · rw [hev, hstep]
+      exact Rel.rIdle P C
+    · rw [hstep]
+      exact agrees_of_noact h hi hno hag hlearn
+  · -- ---- session q acts ----
+    have haq : a (evAct (shapeOf P B) i q) = true := evAct_eq_of_code hi h hq hk
+    have hnS : q < (shapeOf P B).nS1 := lt_nS1_of_evAct hi h hq haq
+    have hc : decodePc (shapeOf P B) a i q < shPc (shapeOf P B) :=
+      decodePc_lt (Nat.le_of_lt hi) hq h
+    have hpc0 : a (vpc (shapeOf P B) i q (decodePc (shapeOf P B) a i q)) = true :=
+      decodePc_true (Nat.le_of_lt hi) hq h
+    have hev : decEv (shapeOf P B) P a i = Ev.act q (decDeliver (shapeOf P B) a i q)
+        (decNonce (shapeOf P B) a i q) := decEv_act_of_code hi h hq hk
+    have hno : ∀ r, r < (shapeOf P B).nS1 → r ≠ q →
+        a (evAct (shapeOf P B) i r) = false :=
+      fun r hr hne => evAct_false_of_other h hi hq (lt_shS hr) hne hk
+    have hpcq : pcOf C q = decodePc (shapeOf P B) a i q := hag.1 q hnS
+    have hlenC : C.sess.length = (shapeOf P B).nS1 := hag.2.2.2.2
+    cases hact : P.actionAt q (decodePc (shapeOf P B) a i q) with
+    | none => exact absurd hact (some_actionAt_of_evAct hi hq h haq)
+    | some act =>
+      cases act with
+      | fresh x N =>
+          have hred : actionClauses (shapeOf P B) P i q (decodePc (shapeOf P B) a i q)
+              (Action.fresh x N) =
+              ((List.range (shD (shapeOf P B))).flatMap fun d =>
+                  freshStepClauses (shapeOf P B) i q (decodePc (shapeOf P B) a i q) x d)
+                ++ [actGuard (shapeOf P B) i q (decodePc (shapeOf P B) a i q) ++
+                      [neg (vfr (shapeOf P B) i q (shD (shapeOf P B) - 1))]] := by
+            simp [actionClauses]
+          obtain ⟨d, hd, hdlt, hvfr⟩ := decodeFr_val hi hq h
+          -- the dummy nonce alternative is excluded, so the choice is a real domain nonce
+          have hcl : actGuard (shapeOf P B) i q (decodePc (shapeOf P B) a i q) ++
+              [neg (vfr (shapeOf P B) i q (shD (shapeOf P B) - 1))] ∈
+              stepClausesAt (shapeOf P B) P i q (decodePc (shapeOf P B) a i q) := by
+            rw [stepClausesAt_some (shapeOf P B) P i q (decodePc (shapeOf P B) a i q)
+              (Action.fresh x N) hact, hred]
+            exact List.mem_append_right _ (List.mem_append_right _ (List.Mem.head _))
+          have h1 := step_body hi hq hc h haq hpc0 hcl
+          simp only [Clause.eval_cons, clause_eval_nil, Bool.or_false, Bool.false_or, neg_eval] at h1
+          have hd2 : d < (shapeOf P B).D.length := by
+            by_contra e
+            have hs : shD (shapeOf P B) = (shapeOf P B).D.length + 1 := rfl
+            have h2 : d = shD (shapeOf P B) - 1 := by
+              rw [hs]
+              omega
+            rw [h2] at hvfr
+            exact absurd hvfr (by simpa using h1)
+          obtain ⟨N', hN'⟩ := rget_lt (shapeOf P B).D d hd2
+          have hdN : decNonce (shapeOf P B) a i q = N' := by
+            unfold decNonce; simp [hd, hN']
+          have hD : N' ∈ P.nonceDomain := by
+            rw [← D_eq]; exact rget_mem (shapeOf P B).D d N' hd2 hN'
+          have hUn : Term.nonce N' ∈ (shapeOf P B).U := nonceDomain_mem_univ hD
+          have hxlt : x < shV (shapeOf P B) := lt_shV_of_written hact (by simp [Action.written])
+          -- the fresh step clause writes the nonce into the store slot
+          have hcl2 : actGuard (shapeOf P B) i q (decodePc (shapeOf P B) a i q) ++
+              [neg (vfr (shapeOf P B) i q d),
+                pos (vst (shapeOf P B) (i + 1) q x
+                  (uIdx (shapeOf P B) (some (Term.nonce N'))))] ∈
+              stepClausesAt (shapeOf P B) P i q (decodePc (shapeOf P B) a i q) := by
+            rw [stepClausesAt_some (shapeOf P B) P i q (decodePc (shapeOf P B) a i q)
+              (Action.fresh x N) hact, hred]
+            refine List.mem_append_right _ (List.mem_append_left _
+              (List.mem_flatMap.mpr ⟨d, List.mem_range.mpr hdlt, ?_⟩))
+            rw [freshStepClauses, hN']
+            exact List.Mem.head _
+          have h2 := step_body hi hq hc h haq hpc0 hcl2
+          simp only [Clause.eval_cons, clause_eval_nil, Bool.or_false, Bool.or_false, Bool.or_false, Bool.false_or, neg_eval, hvfr,
+            Bool.not_true, pos_eval] at h2
+          have hwt : decSt (shapeOf P B) a (i + 1) q x = some (Term.nonce N') := by
+            unfold decSt decVal
+            have h3 : (stOh (shapeOf P B) (i + 1) q x).decode a =
+                some (uIdx (shapeOf P B) (some (Term.nonce N'))) :=
+              Oh.decode_of_true (sat_stOh (Nat.succ_le_of_lt hi) hq hxlt h)
+                (List.mem_range.mpr (uIdx_lt' (shapeOf P B) (some (Term.nonce N')))) h2
+            simp [h3, valAt_uIdx_some (shapeOf P B) hUn]
+          -- the nonce is unused: neither in a store nor known
+          have hnu : nonceUsed C N' = false := by
+            by_contra e
+            have htrue : nonceUsed C N' = true := by
+              cases h : nonceUsed C N' with
+              | true => rfl
+              | false => exact absurd h e
+            rw [nonceUsed, Bool.or_eq_true] at htrue
+            rcases htrue with h1 | h2
+            · obtain ⟨st, hst, hf⟩ := List.any_eq_true.mp h1
+              obtain ⟨r, hr, heq⟩ := mem_rget C.sess st hst
+              have hr' : r < (shapeOf P B).nS1 := by rw [← hlenC]; exact hr
+              have hs : storeOf C r = st.store := by
+                unfold storeOf sessAt
+                rw [heq]
+                rfl
+              rw [← hs] at hf
+              have hmem : Term.nonce N' ∈ storeVals (storeOf C r) := by simpa using hf
+              have := (hag.storeVals_iff hr' (Term.nonce N')).mp hmem
+              obtain ⟨x', hx', he⟩ := this
+              have hv : a (vst (shapeOf P B) i r x'
+                  (uIdx (shapeOf P B) (some (Term.nonce N')))) = true :=
+                decSt_some_vst (Nat.le_of_lt hi) (lt_shS hr') hx' h hUn he
+              have hcl3 : actGuard (shapeOf P B) i q (decodePc (shapeOf P B) a i q) ++
+                  [neg (vfr (shapeOf P B) i q d),
+                    neg (vst (shapeOf P B) i r x'
+                      (uIdx (shapeOf P B) (some (Term.nonce N'))))] ∈
+                  freshClausesAt (shapeOf P B) P i q (decodePc (shapeOf P B) a i q) := by
+                rw [freshClausesAt, hact]
+                refine List.mem_flatMap.mpr ⟨d, List.mem_range.mpr hdlt, ?_⟩
+                rw [freshUseClauses, hN']
+                refine List.mem_append_left _ (List.mem_flatMap.mpr ⟨r,
+                  List.mem_range.mpr (lt_shS hr'), List.mem_map.mpr ⟨x', List.mem_range.mpr hx', rfl⟩⟩)
+              have h3 := fresh_body hi hq hc h haq hpc0 hcl3
+              simp only [Clause.eval_cons, clause_eval_nil, Bool.or_false, Bool.or_false, Bool.false_or, neg_eval, hvfr,
+                Bool.not_true] at h3
+              exact absurd (hv ▸ bool_not_true h3) (by simp)
+            · have hk' : Term.nonce N' ∈ C.kn := by simpa using h2
+              rw [hag.2.2.1] at hk'
+              have hv : a (vkn (shapeOf P B) i
+                  (uIdx (shapeOf P B) (some (Term.nonce N')))) = true :=
+                kn_complete h (uIdx_lt_of_mem hUn)
+                  (valAt_uIdx_some (shapeOf P B) hUn) i (Nat.le_of_lt hi) hk'
+              have hcl4 : actGuard (shapeOf P B) i q (decodePc (shapeOf P B) a i q) ++
+                  [neg (vfr (shapeOf P B) i q d),
+                    neg (vkn (shapeOf P B) i (uIdx (shapeOf P B) (some (Term.nonce N'))))] ∈
+                  freshClausesAt (shapeOf P B) P i q (decodePc (shapeOf P B) a i q) := by
+                rw [freshClausesAt, hact]
+                refine List.mem_flatMap.mpr ⟨d, List.mem_range.mpr hdlt, ?_⟩
+                rw [freshUseClauses, hN']
+                exact List.mem_append_right _ (List.Mem.head _)
+              have h4 := fresh_body hi hq hc h haq hpc0 hcl4
+              simp only [Clause.eval_cons, clause_eval_nil, Bool.or_false, Bool.or_false, Bool.false_or, neg_eval, hvfr,
+                Bool.not_true] at h4
+              exact absurd (hv ▸ bool_not_true h4) (by simp)
+          have hlearn : decLearn (shapeOf P B) P a i = none :=
+            decLearn_none_of_not_send hi h hq hk hact (by intro a' e heq; cases heq)
+          have hstep : decStep P B a C i = succStore C q x (Term.nonce N') := by
+            unfold decStep; simp [hev, hpcq, hact, hdN]
+          refine ⟨?_, ?_⟩
+          · rw [hev, hstep, hdN]
+            exact Rel.rFresh (by rw [hpcq]; exact hact) hD hnu
+          rw [hstep]
+          refine ⟨pcOf_succ_act h hi hag hq hk (pcOf_succStore' C q x (Term.nonce N')
+              (by rw [hlenC]; exact hnS)) (fun r hr hne => pcOf_succStore_other C q r x _ hne),
+            decSt_succ_write h hi hag hq hk hact rfl hwt,
+            (decKn_succ_none h hag hlearn : C.kn = decKnSeq (shapeOf P B) P a (i + 1)),
+            storeWF_succ_write h hi hag hq hxlt hk,
+            by rw [sessLength_succStore, hag.2.2.2.2]⟩
+      | send a' e =>
+          have hmem : e ∈ allExprs P := mem_allExprs_send hact
+          obtain ⟨v, hv, hvlt, hvv⟩ := decodeXe_lt hmem (Nat.le_of_lt hi) hq h
+          have hdec : decXe (shapeOf P B) P a i q e = valAt (shapeOf P B) v := by
+            unfold decXe decVal; rw [hv]
+          -- a send cannot evaluate to the unset value
+          have hred : actionClauses (shapeOf P B) P i q (decodePc (shapeOf P B) a i q)
+              (Action.send a' e) =
+              [sendRealClause (shapeOf P B) i q (decodePc (shapeOf P B) a i q) (eIdx P e)]
+                ++ mapMsg (shapeOf P B) (fun w =>
+                    sendPublishClause (shapeOf P B) i q (decodePc (shapeOf P B) a i q)
+                      (eIdx P e) w) := by
+            simp [actionClauses]
+          have hcl : actGuard (shapeOf P B) i q (decodePc (shapeOf P B) a i q) ++
+              [neg (vxe (shapeOf P B) i q (eIdx P e) ((shapeOf P B).U.length))] ∈
+              stepClausesAt (shapeOf P B) P i q (decodePc (shapeOf P B) a i q) := by
+            rw [stepClausesAt_some (shapeOf P B) P i q (decodePc (shapeOf P B) a i q)
+              (Action.send a' e) hact, hred]
+            exact List.mem_append_right _ (List.mem_append_left _ (List.Mem.head _))
+          have h1 := step_body hi hq hc h haq hpc0 hcl
+          simp only [Clause.eval_cons, clause_eval_nil, Bool.or_false, Bool.false_or, neg_eval] at h1
+          have hvlt' : v < (shapeOf P B).U.length := by
+            have hs : shVal (shapeOf P B) = (shapeOf P B).U.length + 1 := rfl
+            by_contra e2
+            have hv2 : v = (shapeOf P B).U.length := by
+              rw [hs] at hvlt
+              omega
+            rw [hv2] at hvv
+            exact absurd (hvv ▸ bool_not_true h1) (by simp)
+          obtain ⟨t, ht⟩ := rget_lt (shapeOf P B).U v hvlt'
+          have hdec' : decXe (shapeOf P B) P a i q e = some t := by
+            rw [hdec]
+            exact ht
+          -- the value the Tseitin group selected is the value of the expression in the store
+          have h2 : ∀ x, x ∈ e.vars ->
+              Expr.lookup x (storeOf C q) = Expr.lookup x (decodeStore (shapeOf P B) a i q) := by
+            intro x hx
+            have hxv : x < shV (shapeOf P B) := lt_shV_of_mem hmem hx
+            show readVar x (storeOf C q) = readVar x (decodeStore (shapeOf P B) a i q)
+            rw [hag.2.1 q x hnS hxv, readVar_decodeStore hxv]
+          have heval : Expr.eval e (storeOf C q) = some t := by
+            have h3 : decXe (shapeOf P B) P a i q e =
+                Expr.eval e (decodeStore (shapeOf P B) a i q) :=
+              decXe_eq hU h (Nat.le_of_lt hi) hq e hmem
+            have h4 : Expr.eval e (decodeStore (shapeOf P B) a i q) = some t := by
+              rw [← h3, hdec']
+            rw [← h4]
+            exact Expr.eval_congr h2
+          have hact2 : P.actionAt q (pcOf C q) = some (Action.send a' e) := by
+            rw [hpcq]; exact hact
+          -- the send publishes the value it sends
+          have hlearn : decLearn (shapeOf P B) P a i = some t := by
+            simp [decLearn_act hi h hq hk, hact, hdec']
+          have hstep : decStep P B a C i = succSend C q t := by
+            unfold decStep; simp [hev, hpcq, hact, heval]
+          refine ⟨?_, ?_⟩
+          · rw [hev, hstep]
+            exact Rel.rSend hact2 heval
+          rw [hstep]
+          have hst : ∀ r x, readVar x (storeOf (succSend C q t) r) = readVar x (storeOf C r) := by
+            intro r x
+            by_cases hne : r = q
+            · subst hne; rw [storeOf_succSend_same]
+            · rw [storeOf_succSend_other C q r t hne]
+          have hwf : ∀ r, r < (shapeOf P B).nS1 →
+              StoreWF (shapeOf P B) (storeOf (succSend C q t) r) := by
+            intro r hr
+            by_cases hne : r = q
+            · subst hne; rw [storeOf_succSend_same]; exact hag.2.2.2.1 r hr
+            · rw [storeOf_succSend_other C q r t hne]; exact hag.2.2.2.1 r hr
+          refine ⟨pcOf_succ_act h hi hag hq hk
+              (pcOf_succSend' C q t (by rw [hlenC]; exact hnS))
+              (fun r hr hne => pcOf_succSend_other C q r _ hne),
+            decSt_succ_keep h hi hag hq hk hact rfl _ hst, ?_, hwf,
+            by rw [sessLength_succSend, hag.2.2.2.2]⟩
+          · rw [decKnSeq_succ, kn_succSend, hag.2.2.1]
+            simp [hlearn]
+      | recv a' x =>
+          have hred : actionClauses (shapeOf P B) P i q (decodePc (shapeOf P B) a i q)
+              (Action.recv a' x) = (eachVal (shapeOf P B) fun w =>
+              if w < (shapeOf P B).U.length then
+                [recvStoreClause (shapeOf P B) i q (decodePc (shapeOf P B) a i q) w x,
+                  recvKnowClause (shapeOf P B) i q (decodePc (shapeOf P B) a i q) w x]
+              else [recvRealClause (shapeOf P B) i q (decodePc (shapeOf P B) a i q) w]) := by
+            simp [actionClauses]
+          obtain ⟨u, hu, hult, hudl⟩ := decodeDl_val hi hq h
+          have hxlt : x < shV (shapeOf P B) := lt_shV_of_written hact (by simp [Action.written])
+          by_cases hurlt : u < (shapeOf P B).U.length
+          · -- the delivered value is a real universe message
+            obtain ⟨m, hm⟩ := rget_lt (shapeOf P B).U u hurlt
+            have hdl : decDeliver (shapeOf P B) a i q = m := by
+              unfold decDeliver decVal
+              rw [hu]
+              show Option.getD (rget (shapeOf P B).U u) (Term.nonce 0) = m
+              rw [hm]
+              rfl
+            -- it is known to the attacker
+            have hcl : actGuard (shapeOf P B) i q (decodePc (shapeOf P B) a i q) ++
+                [neg (vdl (shapeOf P B) i q u), pos (vkn (shapeOf P B) i u)] ∈
+                stepClausesAt (shapeOf P B) P i q (decodePc (shapeOf P B) a i q) := by
+              rw [stepClausesAt_some (shapeOf P B) P i q (decodePc (shapeOf P B) a i q)
+                (Action.recv a' x) hact, hred, eachVal]
+              refine List.mem_append_right _ (List.mem_flatMap.mpr ⟨u, List.mem_range.mpr hult, ?_⟩)
+              rw [if_pos hurlt]
+              exact List.Mem.tail _ (List.Mem.head _)
+            have h1 := step_body hi hq hc h haq hpc0 hcl
+            simp only [Clause.eval_cons, clause_eval_nil, Bool.or_false, Bool.or_false, Bool.false_or, neg_eval, hudl,
+              Bool.not_true, pos_eval] at h1
+            have hkn : m ∈ C.kn := by
+              rw [hag.2.2.1]
+              exact kn_sound h hm i (Nat.le_of_lt hi) h1
+            -- and it lands in the store slot
+            have hcl2 : actGuard (shapeOf P B) i q (decodePc (shapeOf P B) a i q) ++
+                [neg (vdl (shapeOf P B) i q u), pos (vst (shapeOf P B) (i + 1) q x u)] ∈
+                stepClausesAt (shapeOf P B) P i q (decodePc (shapeOf P B) a i q) := by
+              rw [stepClausesAt_some (shapeOf P B) P i q (decodePc (shapeOf P B) a i q)
+                (Action.recv a' x) hact, hred, eachVal]
+              refine List.mem_append_right _ (List.mem_flatMap.mpr ⟨u, List.mem_range.mpr hult, ?_⟩)
+              rw [if_pos hurlt]
+              exact List.Mem.head _
+            have h2 := step_body hi hq hc h haq hpc0 hcl2
+            simp only [Clause.eval_cons, clause_eval_nil, Bool.or_false, Bool.or_false, Bool.false_or, neg_eval, hudl,
+              Bool.not_true, pos_eval] at h2
+            have hwt : decSt (shapeOf P B) a (i + 1) q x = some m := by
+              unfold decSt decVal
+              have h5 : (stOh (shapeOf P B) (i + 1) q x).decode a = some u :=
+                Oh.decode_of_true (sat_stOh (Nat.succ_le_of_lt hi) hq hxlt h)
+                  (List.mem_range.mpr hult) h2
+              rw [h5]
+              show rget (shapeOf P B).U u = some m
+              exact hm
+            have hlearn : decLearn (shapeOf P B) P a i = none :=
+              decLearn_none_of_not_send hi h hq hk hact (by intro a' e heq; cases heq)
+            have hstep : decStep P B a C i = succStore C q x m := by
+              unfold decStep; simp [hev, hdl, hpcq, hact]
+            refine ⟨?_, ?_⟩
+            · rw [hev, hstep, hdl]
+              exact Rel.rRecv (by rw [hpcq]; exact hact) hkn
+            rw [hstep]
+            refine ⟨pcOf_succ_act h hi hag hq hk
+                (pcOf_succStore' C q x m (by rw [hlenC]; exact hnS))
+                (fun r hr hne => pcOf_succStore_other C q r x _ hne),
+              decSt_succ_write h hi hag hq hk hact rfl hwt,
+              (decKn_succ_none h hag hlearn : C.kn = decKnSeq (shapeOf P B) P a (i + 1)),
+              storeWF_succ_write h hi hag hq hxlt hk,
+              by rw [sessLength_succStore, hag.2.2.2.2]⟩
+          · -- the delivery group cannot select the unset value
+            have hcl : actGuard (shapeOf P B) i q (decodePc (shapeOf P B) a i q) ++
+                [neg (vdl (shapeOf P B) i q u)] ∈
+                stepClausesAt (shapeOf P B) P i q (decodePc (shapeOf P B) a i q) := by
+              rw [stepClausesAt_some (shapeOf P B) P i q (decodePc (shapeOf P B) a i q)
+                (Action.recv a' x) hact, hred, eachVal]
+              refine List.mem_append_right _ (List.mem_flatMap.mpr ⟨u, List.mem_range.mpr hult, ?_⟩)
+              rw [if_neg hurlt]
+              exact List.Mem.head _
+            have h1 := step_body hi hq hc h haq hpc0 hcl
+            simp only [Clause.eval_cons, clause_eval_nil, Bool.or_false, Bool.false_or, neg_eval] at h1
+            exact absurd (hudl ▸ bool_not_true h1) (by simp)
+      | assign x e =>
+          have hred : actionClauses (shapeOf P B) P i q (decodePc (shapeOf P B) a i q)
+              (Action.assign x e) = (eachVal (shapeOf P B) fun w =>
+              if w < (shapeOf P B).U.length then
+                [assignClause (shapeOf P B) i q (decodePc (shapeOf P B) a i q) (eIdx P e) w x]
+              else [assignRealClause (shapeOf P B) i q (decodePc (shapeOf P B) a i q) (eIdx P e) w]) := by
+            simp [actionClauses]
+          have hmem : e ∈ allExprs P := mem_allExprs_assign hact
+          have hxlt : x < shV (shapeOf P B) := lt_shV_of_written hact (by simp [Action.written])
+          obtain ⟨v, hv, hvlt, hvv⟩ := decodeXe_lt hmem (Nat.le_of_lt hi) hq h
+          have hdec : decXe (shapeOf P B) P a i q e = valAt (shapeOf P B) v := by
+            unfold decXe decVal; rw [hv]
+          have hcl : actGuard (shapeOf P B) i q (decodePc (shapeOf P B) a i q) ++
+              [neg (vxe (shapeOf P B) i q (eIdx P e) ((shapeOf P B).U.length))] ∈
+              stepClausesAt (shapeOf P B) P i q (decodePc (shapeOf P B) a i q) := by
+            rw [stepClausesAt_some (shapeOf P B) P i q (decodePc (shapeOf P B) a i q)
+              (Action.assign x e) hact, hred, eachVal]
+            refine List.mem_append_right _ (List.mem_flatMap.mpr ⟨(shapeOf P B).U.length,
+                List.mem_range.mpr (lt_shVal (Nat.le_refl _)), ?_⟩)
+            rw [if_neg (by omega : ¬ ((shapeOf P B).U.length < (shapeOf P B).U.length))]
+            exact List.Mem.head _
+          have h1 := step_body hi hq hc h haq hpc0 hcl
+          simp only [Clause.eval_cons, clause_eval_nil, Bool.or_false, Bool.false_or, neg_eval] at h1
+          have hvlt' : v < (shapeOf P B).U.length := by
+            have hs : shVal (shapeOf P B) = (shapeOf P B).U.length + 1 := rfl
+            by_contra e2
+            have hv2 : v = (shapeOf P B).U.length := by
+              rw [hs] at hvlt
+              omega
+            rw [hv2] at hvv
+            exact absurd (hvv ▸ bool_not_true h1) (by simp)
+          obtain ⟨t, ht⟩ := rget_lt (shapeOf P B).U v hvlt'
+          have hdec' : decXe (shapeOf P B) P a i q e = some t := by
+            rw [hdec]
+            exact ht
+          have h2 : ∀ y, y ∈ e.vars ->
+              Expr.lookup y (storeOf C q) = Expr.lookup y (decodeStore (shapeOf P B) a i q) := by
+            intro y hy
+            have hyv : y < shV (shapeOf P B) := lt_shV_of_mem hmem hy
+            show readVar y (storeOf C q) = readVar y (decodeStore (shapeOf P B) a i q)
+            rw [hag.2.1 q y hnS hyv, readVar_decodeStore hyv]
+          have heval : Expr.eval e (storeOf C q) = some t := by
+            have h3 : decXe (shapeOf P B) P a i q e =
+                Expr.eval e (decodeStore (shapeOf P B) a i q) :=
+              decXe_eq hU h (Nat.le_of_lt hi) hq e hmem
+            have h4 : Expr.eval e (decodeStore (shapeOf P B) a i q) = some t := by
+              rw [← h3, hdec']
+            rw [← h4]
+            exact Expr.eval_congr h2
+          have hcl2 : actGuard (shapeOf P B) i q (decodePc (shapeOf P B) a i q) ++
+              [neg (vxe (shapeOf P B) i q (eIdx P e) v), pos (vst (shapeOf P B) (i + 1) q x v)] ∈
+              stepClausesAt (shapeOf P B) P i q (decodePc (shapeOf P B) a i q) := by
+            rw [stepClausesAt_some (shapeOf P B) P i q (decodePc (shapeOf P B) a i q)
+              (Action.assign x e) hact, hred, eachVal]
+            refine List.mem_append_right _ (List.mem_flatMap.mpr ⟨v, List.mem_range.mpr hvlt, ?_⟩)
+            rw [if_pos hvlt']
+            exact List.Mem.head _
+          have h3 := step_body hi hq hc h haq hpc0 hcl2
+          simp only [Clause.eval_cons, clause_eval_nil, Bool.or_false, Bool.or_false, Bool.false_or, neg_eval, hvv,
+            Bool.not_true, pos_eval] at h3
+          have hwt : decSt (shapeOf P B) a (i + 1) q x = some t := by
+            unfold decSt decVal
+            have h5 : (stOh (shapeOf P B) (i + 1) q x).decode a = some v :=
+              Oh.decode_of_true (sat_stOh (Nat.succ_le_of_lt hi) hq hxlt h)
+                (List.mem_range.mpr hvlt) h3
+            rw [h5]
+            show rget (shapeOf P B).U v = some t
+            exact ht
+          have hlearn : decLearn (shapeOf P B) P a i = none :=
+            decLearn_none_of_not_send hi h hq hk hact (by intro a' e heq; cases heq)
+          have hstep : decStep P B a C i = succStore C q x t := by
+            unfold decStep; simp [hev, hpcq, hact, heval]
+          refine ⟨?_, ?_⟩
+          · rw [hev, hstep]
+            exact Rel.rAssign (by rw [hpcq]; exact hact) heval
+          rw [hstep]
+          refine ⟨pcOf_succ_act h hi hag hq hk
+              (pcOf_succStore' C q x t (by rw [hlenC]; exact hnS))
+              (fun r hr hne => pcOf_succStore_other C q r x _ hne),
+            decSt_succ_write h hi hag hq hk hact rfl hwt,
+            (decKn_succ_none h hag hlearn : C.kn = decKnSeq (shapeOf P B) P a (i + 1)),
+            storeWF_succ_write h hi hag hq hxlt hk,
+            by rw [sessLength_succStore, hag.2.2.2.2]⟩
+      | check e₁ e₂ =>
+          have hred : actionClauses (shapeOf P B) P i q (decodePc (shapeOf P B) a i q)
+              (Action.check e₁ e₂) =
+              [checkRealClause (shapeOf P B) i q (decodePc (shapeOf P B) a i q) (eIdx P e₁),
+                checkRealClause (shapeOf P B) i q (decodePc (shapeOf P B) a i q) (eIdx P e₂)]
+                ++ (eachVal (shapeOf P B) fun w =>
+                    (List.range (shVal (shapeOf P B))).filterMap fun z =>
+                      if w == z then none
+                      else some (checkEqClause (shapeOf P B) i q
+                        (decodePc (shapeOf P B) a i q) (eIdx P e₁) (eIdx P e₂) w z)) := by
+            simp [actionClauses]
+          obtain ⟨hm₁, hm₂⟩ := mem_allExprs_check hact
+          obtain ⟨v₁, hde₁, hvl₁, hvar₁⟩ := decodeXe_lt hm₁ (Nat.le_of_lt hi) hq h
+          obtain ⟨v₂, hde₂, hvl₂, hvar₂⟩ := decodeXe_lt hm₂ (Nat.le_of_lt hi) hq h
+          have hs : shVal (shapeOf P B) = (shapeOf P B).U.length + 1 := rfl
+          -- both sides denote real messages
+          have hr₁ : a (vxe (shapeOf P B) i q (eIdx P e₁) ((shapeOf P B).U.length)) = false := by
+            have hcl : actGuard (shapeOf P B) i q (decodePc (shapeOf P B) a i q) ++
+                [neg (vxe (shapeOf P B) i q (eIdx P e₁) ((shapeOf P B).U.length))] ∈
+                stepClausesAt (shapeOf P B) P i q (decodePc (shapeOf P B) a i q) := by
+              rw [stepClausesAt_some (shapeOf P B) P i q (decodePc (shapeOf P B) a i q)
+                (Action.check e₁ e₂) hact, hred, eachVal]
+              refine List.mem_append_right _ (List.mem_append_left _ ?_)
+              exact List.Mem.head _
+            have h1 := step_body hi hq hc h haq hpc0 hcl
+            simp only [Clause.eval_cons, clause_eval_nil, Bool.or_false, Bool.false_or,
+              neg_eval] at h1
+            exact bool_not_true h1
+          have hr₂ : a (vxe (shapeOf P B) i q (eIdx P e₂) ((shapeOf P B).U.length)) = false := by
+            have hcl : actGuard (shapeOf P B) i q (decodePc (shapeOf P B) a i q) ++
+                [neg (vxe (shapeOf P B) i q (eIdx P e₂) ((shapeOf P B).U.length))] ∈
+                stepClausesAt (shapeOf P B) P i q (decodePc (shapeOf P B) a i q) := by
+              rw [stepClausesAt_some (shapeOf P B) P i q (decodePc (shapeOf P B) a i q)
+                (Action.check e₁ e₂) hact, hred, eachVal]
+              refine List.mem_append_right _ (List.mem_append_left _ ?_)
+              exact List.Mem.tail _ (List.Mem.head _)
+            have h1 := step_body hi hq hc h haq hpc0 hcl
+            simp only [Clause.eval_cons, clause_eval_nil, Bool.or_false, Bool.false_or,
+              neg_eval] at h1
+            exact bool_not_true h1
+          have hv₁ : v₁ < (shapeOf P B).U.length := by
+            by_contra e
+            have h1 : v₁ = (shapeOf P B).U.length := by
+              rw [hs] at hvl₁
+              omega
+            rw [h1] at hvar₁
+            exact absurd (hvar₁ ▸ hr₁) (by simp)
+          have hv₂ : v₂ < (shapeOf P B).U.length := by
+            by_contra e
+            have h1 : v₂ = (shapeOf P B).U.length := by
+              rw [hs] at hvl₂
+              omega
+            rw [h1] at hvar₂
+            exact absurd (hvar₂ ▸ hr₂) (by simp)
+          -- and they denote the same message
+          have heqv : v₁ = v₂ := by
+            by_contra e
+            have hcl : actGuard (shapeOf P B) i q (decodePc (shapeOf P B) a i q) ++
+                [neg (vxe (shapeOf P B) i q (eIdx P e₁) v₁),
+                  neg (vxe (shapeOf P B) i q (eIdx P e₂) v₂)] ∈
+                stepClausesAt (shapeOf P B) P i q (decodePc (shapeOf P B) a i q) := by
+              rw [stepClausesAt_some (shapeOf P B) P i q (decodePc (shapeOf P B) a i q)
+                (Action.check e₁ e₂) hact, hred, eachVal]
+              refine List.mem_append_right _ (List.mem_append_right _
+                (List.mem_flatMap.mpr ⟨v₁, List.mem_range.mpr hvl₁, ?_⟩))
+              show actGuard (shapeOf P B) i q (decodePc (shapeOf P B) a i q) ++
+                  [neg (vxe (shapeOf P B) i q (eIdx P e₁) v₁),
+                    neg (vxe (shapeOf P B) i q (eIdx P e₂) v₂)] ∈
+                (List.range (shVal (shapeOf P B))).filterMap fun z =>
+                  if v₁ == z then none
+                  else some (checkEqClause (shapeOf P B) i q (decodePc (shapeOf P B) a i q)
+                    (eIdx P e₁) (eIdx P e₂) v₁ z)
+              refine List.mem_filterMap.mpr ⟨v₂, List.mem_range.mpr hvl₂, ?_⟩
+              rw [if_neg (by intro h; exact e (by simpa using h))]
+              rfl
+            have h1 := step_body hi hq hc h haq hpc0 hcl
+            simp only [Clause.eval_cons, clause_eval_nil, Bool.or_false, Bool.false_or,
+              neg_eval, hvar₁, hvar₂, Bool.not_true] at h1
+            exact absurd h1 (by simp)
+          subst heqv
+          obtain ⟨t, ht⟩ := rget_lt (shapeOf P B).U v₁ hv₁
+          have hdec₁ : decXe (shapeOf P B) P a i q e₁ = some t := by
+            unfold decXe decVal
+            rw [hde₁]
+            show rget (shapeOf P B).U v₁ = some t
+            exact ht
+          have hdec₂ : decXe (shapeOf P B) P a i q e₂ = some t := by
+            unfold decXe decVal
+            rw [hde₂]
+            show rget (shapeOf P B).U v₁ = some t
+            exact ht
+          have hc₁ : ∀ x, x ∈ Expr.vars e₁ ->
+              Expr.lookup x (storeOf C q) = Expr.lookup x (decodeStore (shapeOf P B) a i q) := by
+            intro x hx
+            have hxv : x < shV (shapeOf P B) := lt_shV_of_mem hm₁ hx
+            show readVar x (storeOf C q) = readVar x (decodeStore (shapeOf P B) a i q)
+            rw [hag.2.1 q x hnS hxv, readVar_decodeStore hxv]
+          have hc₂ : ∀ x, x ∈ Expr.vars e₂ ->
+              Expr.lookup x (storeOf C q) = Expr.lookup x (decodeStore (shapeOf P B) a i q) := by
+            intro x hx
+            have hxv : x < shV (shapeOf P B) := lt_shV_of_mem hm₂ hx
+            show readVar x (storeOf C q) = readVar x (decodeStore (shapeOf P B) a i q)
+            rw [hag.2.1 q x hnS hxv, readVar_decodeStore hxv]
+          have he₁ : Expr.eval e₁ (storeOf C q) = some t := by
+            have h3 : decXe (shapeOf P B) P a i q e₁ =
+                Expr.eval e₁ (decodeStore (shapeOf P B) a i q) :=
+              decXe_eq hU h (Nat.le_of_lt hi) hq e₁ hm₁
+            have h4 : Expr.eval e₁ (decodeStore (shapeOf P B) a i q) = some t := by
+              rw [← h3, hdec₁]
+            rw [← h4]
+            exact Expr.eval_congr hc₁
+          have he₂ : Expr.eval e₂ (storeOf C q) = some t := by
+            have h3 : decXe (shapeOf P B) P a i q e₂ =
+                Expr.eval e₂ (decodeStore (shapeOf P B) a i q) :=
+              decXe_eq hU h (Nat.le_of_lt hi) hq e₂ hm₂
+            have h4 : Expr.eval e₂ (decodeStore (shapeOf P B) a i q) = some t := by
+              rw [← h3, hdec₂]
+            rw [← h4]
+            exact Expr.eval_congr hc₂
+          have hlearn : decLearn (shapeOf P B) P a i = none :=
+            decLearn_none_of_not_send hi h hq hk hact (by intro a' e heq; cases heq)
+          have hstep : decStep P B a C i = succAdvance C q := by
+            unfold decStep; simp [hev, hpcq, hact]
+          refine ⟨?_, ?_⟩
+          · rw [hev, hstep]
+            exact Rel.rCheck (by rw [hpcq]; exact hact) he₁ he₂
+          · rw [hstep]
+            exact agrees_succ_advance h hi hag hq hk hact rfl hlearn
+
+      | secret e =>
+          have hlearn : decLearn (shapeOf P B) P a i = none :=
+            decLearn_none_of_not_send hi h hq hk hact (by intro a' e heq; cases heq)
+          have hstep : decStep P B a C i = succAdvance C q := by
+            unfold decStep; simp [hev, hpcq, hact]
+          refine ⟨?_, ?_⟩
+          · rw [hev, hstep]
+            exact Rel.rSecret (by rw [hpcq]; exact hact)
+          rw [hstep]
+          exact agrees_succ_advance h hi hag hq hk hact rfl hlearn
+      | claim tg peer v =>
+          have hlearn : decLearn (shapeOf P B) P a i = none :=
+            decLearn_none_of_not_send hi h hq hk hact (by intro a' e heq; cases heq)
+          have hstep : decStep P B a C i = succAdvance C q := by
+            unfold decStep; simp [hev, hpcq, hact]
+          refine ⟨?_, ?_⟩
+          · rw [hev, hstep]
+            exact Rel.rClaim (by rw [hpcq]; exact hact)
+          rw [hstep]
+          exact agrees_succ_advance h hi hag hq hk hact rfl hlearn
+      | commit tg peer v =>
+          have hlearn : decLearn (shapeOf P B) P a i = none :=
+            decLearn_none_of_not_send hi h hq hk hact (by intro a' e heq; cases heq)
+          have hstep : decStep P B a C i = succAdvance C q := by
+            unfold decStep; simp [hev, hpcq, hact]
+          refine ⟨?_, ?_⟩
+          · rw [hev, hstep]
+            exact Rel.rCommit (by rw [hpcq]; exact hact)
+          rw [hstep]
+          exact agrees_succ_advance h hi hag hq hk hact rfl hlearn
+  · -- ---- the attacker fires deduction instance n ----
+    obtain ⟨ins, hins0⟩ := rget_lt (dedInsts (shapeOf P B)) n hn
+    have hins : instAt (shapeOf P B) n = some ins := hins0
+    have hev : a (evDed (shapeOf P B) i n) = true := by
+      have : a (vev (shapeOf P B) i (decCode P B a i)) = true := decCode_true hi h
+      rw [hk] at this
+      exact this
+    have hno : ∀ r, r < (shapeOf P B).nS1 → a (evAct (shapeOf P B) i r) = false := by
+      intro r hr
+      by_contra e
+      have hlt : r < shS (shapeOf P B) := lt_shS hr
+      have := decCode_of_evAct hi h hlt (by simpa [evAct] using e)
+      have hpos : 0 < shS (shapeOf P B) := by unfold shS; omega
+      omega
+    cases hval : valAt (shapeOf P B) ins.concl with
+    | none =>
+        have hev' : decEv (shapeOf P B) P a i = Ev.idle := by
+          rw [decEv_code hi h, hk,
+            show (1 + shS (shapeOf P B) + n - 1 - shS (shapeOf P B)) = n by omega]
+          simp [hins, hval]
+        have hstep : decStep P B a C i = C := by unfold decStep; rw [hev']
+        have hlearn : decLearn (shapeOf P B) P a i = none := by
+          rw [decLearn_ded hi h hn ins hins hk, hval]
+        refine ⟨?_, ?_⟩
+        · rw [hev', hstep]
+          exact Rel.rIdle P C
+        · rw [hstep]
+          exact agrees_of_noact h hi hno hag hlearn
+    | some t =>
+        have hev' : decEv (shapeOf P B) P a i = Ev.ded t := by
+          rw [decEv_code hi h, hk,
+            show (1 + shS (shapeOf P B) + n - 1 - shS (shapeOf P B)) = n by omega]
+          simp [hins, hval]
+        have hstep : decStep P B a C i = succDed C t := by unfold decStep; rw [hev']
+        have hlearn : decLearn (shapeOf P B) P a i = some t := by
+          rw [decLearn_ded hi h hn ins hins hk, hval]
+        obtain ⟨u, hu, him⟩ := mem_dedInsts hins
+        have hprem : instPremises (shapeOf P B) ins C.kn := by
+          unfold instPremises
+          intro p hp
+          have hcl : [neg (evDed (shapeOf P B) i n), pos (vkn (shapeOf P B) i p)] ∈
+              dedClausesAt (shapeOf P B) i n := by
+            rw [dedClausesAt, hins]
+            exact List.mem_append_left _ (List.mem_map.mpr ⟨p, hp, rfl⟩)
+          have hsat := sat_ded h _ (mem_ded hi hn hcl)
+          simp only [Clause.eval, List.any_cons, List.any_nil, Bool.or_false, Bool.or_false, Bool.false_or, neg_eval, hev,
+            Bool.not_true, pos_eval] at hsat
+          have hprange : p < (shapeOf P B).U.length := dedInstsOf_prem_lt hu him p hp
+          obtain ⟨q, hq⟩ := rget_lt (shapeOf P B).U p hprange
+          refine ⟨q, ?_, hq⟩
+          rw [hag.2.2.1]
+          exact kn_sound h hq i (Nat.le_of_lt hi) hsat
+        have hone : OneStep C.kn t := dedInst_oneStep him hprem hval
+        refine ⟨?_, ?_⟩
+        · rw [hev', hstep]
+          exact Rel.rDed hone
+        · rw [hstep]
+          refine agrees_of_frame h hi hag hno ?_ ?_ ?_ ?_ ?_
+          · intro r hr; exact pcOf_succDed C r t
+          · intro r x hr hx; exact readVar_succDed C r x t
+          · rw [decKnSeq_succ, kn_succDed, hag.2.2.1, hlearn]
+            show decKnSeq (shapeOf P B) P a i ++ [t] = decKnSeq (shapeOf P B) P a i ++ [t]
+            rfl
+          · intro r hr; exact hag.2.2.2.1 r hr
+          · rw [sessLength_succDed, hag.2.2.2.2]

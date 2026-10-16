@@ -474,6 +474,16 @@ def stepClausesAt (sh : Shape) (P : Protocol) (i q c : Nat) : List (List Lit) :=
         ++ stepKeepClauses sh i q c act
         ++ actionClauses sh P i q c act
 
+/-- The unfolding of the step clauses of a position where there is an action: the advance
+clause, the keep clauses and the action-specific clauses.  Every proof that consumes a step
+clause rewrites with this lemma first, because the match of ProtSat.Encode.stepClausesAt does
+not reduce under a rewrite. -/
+theorem stepClausesAt_some (sh : Shape) (P : Protocol) (i q c : Nat) (act : Action)
+    (hact : P.actionAt q c = some act) :
+    stepClausesAt sh P i q c =
+      [advClause sh i q c] ++ stepKeepClauses sh i q c act ++ actionClauses sh P i q c act := by
+  rw [stepClausesAt, hact]
+
 /-- The advance clause of an acting position is present whenever there is an action there. -/
 theorem advClause_mem_stepClausesAt (sh : Shape) (P : Protocol) (i q c : Nat)
     (h : P.actionAt q c ≠ none) :
