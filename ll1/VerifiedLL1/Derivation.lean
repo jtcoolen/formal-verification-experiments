@@ -280,6 +280,14 @@ theorem derives_valid {A : N} {ws : List T} (h : Derives G [Sym.var A] (toks ws)
   rw [hts, Tree.yieldForest_map_leaf] at hy
   simpa [Tree.yieldForest_cons, Tree.yield_node] using hy
 
+/-- **Forest completeness.**  Every derivation of a terminal word from an *arbitrary*
+sentential form is realised by a forest of valid subtrees matching that form.  This is
+the generalisation of `derives_valid` that the LL(1) argument needs: the parser's stack
+continuation is not a single nonterminal. -/
+theorem derives_forest {xs : List (Sym T N)} {ws : List T} (h : Derives G xs (toks ws)) :
+    ∃ ts, MatchList G xs ts ∧ Tree.yieldForest ts = ws := by
+  obtain ⟨ts, hm, hy⟩ := substitute h (MatchList.match_toks ws)
+  exact ⟨ts, hm, by simpa using hy⟩
 /--
 **Phase 1 main theorem — correspondence between valid parse trees and grammar
 derivations.**  For every grammar, every nonterminal and every terminal word, the

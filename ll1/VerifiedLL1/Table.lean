@@ -61,6 +61,26 @@ def lbeq [BEq T] : LTok T → LTok T → Bool
   | LTok.eof, LTok.eof => true
   | _, _ => false
 
+/-- `lbeq` decides equality of lookaheads. -/
+theorem lbeq_eq_iff [BEq T] [LawfulBEq T] {x y : LTok T} : lbeq x y = true ↔ x = y := by
+  cases x with
+  | tok a =>
+      cases y with
+      | tok b =>
+          have h1 : lbeq (LTok.tok a) (LTok.tok b) = (a == b) := rfl
+          rw [h1, beq_iff_eq]
+          exact ⟨congrArg LTok.tok, LTok.tok.inj⟩
+      | eof =>
+          constructor
+          · intro h; exact absurd h (by simp [lbeq])
+          · intro h; exact absurd h (by simp)
+  | eof =>
+      cases y with
+      | tok b =>
+          constructor
+          · intro h; exact absurd h (by simp [lbeq])
+          · intro h; exact absurd h (by simp)
+      | eof => exact ⟨fun _ => rfl, fun _ => rfl⟩
 /-- The first token of a word, with `eof` for the empty word. -/
 def lookaheadOf {T : Type u} (ws : List T) : LTok T :=
   match ws with
