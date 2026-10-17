@@ -3,7 +3,7 @@ Copyright (c) 2026 Formally Verified Examples.
 Licensed under the MIT License. See the file LICENSE in the project root for
 license information.
 -/
-import VerifiedLL1.First
+import VerifiedLL1.Follow
 
 /-!
 # Phase 1.4 — A worked example grammar
@@ -353,4 +353,121 @@ def firstPairs : List (Sym Tok Var × LTok Tok) :=
 #eval firstPairs
 
 end First
+
+section Reach
+
+/-- `s` occurs: it is the start symbol. -/
+theorem occurs_s : G.Occurs s := ⟨[], [], derives_refl _⟩
+
+/-- `s ⇒ p q', so `p' occurs (with `q' to its right). -/
+theorem occurs_p : G.Occurs p :=
+  ⟨[], [Sym.var q], derives_production s [var p, var q] mem_sq⟩
+
+/-- and so does `q'. -/
+theorem occurs_q : G.Occurs q :=
+  ⟨[Sym.var p], [], derives_production s [var p, var q] mem_sq⟩
+
+/-- `u' is mentioned in the alphabet but never produced by `G'. -/
+theorem u_absent : ∀ pr ∈ G.productions, Sym.var u ∉ pr.2 := by decide
+
+/-- **Unreachable nonterminal.**  Because `u \neq s` and no right-hand side mentions it,
+`u' occurs in no sentential form. -/
+theorem not_occurs_u : ¬ G.Occurs u :=
+  not_occurs_of_absent G u (by decide) u_absent
+
+/-- The computation agrees: `s, p, q' occur and `u' does not. -/
+theorem occurs_s_p_q : G.occurs s && G.occurs p && G.occurs q = true := by decide
+theorem not_occurs_u' : G.occurs u = false := by decide
+
+/-- The computed occurrence set. -/
+def occursList : List Var :=
+  (FiniteEnum.elems (α := Var)).filter G.occurs
+
+#eval occursList
+
+end Reach
+
+section Follow
+
+/-- `s \Rightarrow p q' and `q \Rightarrow b q': in the form `p q' the nonterminal `p' is
+followed by something beginning with `b'. -/
+theorem follow_sym_p_b : G.FollowSym p (LTok.tok b) :=
+  ⟨[], [Sym.var q], derives_production s [var p, var q] mem_sq,
+    ⟨[Sym.var q], derives_production q [tok b, var q] mem_qbq⟩⟩
+
+/-- `p \Rightarrow \varepsilon' is also possible, so `p' can be followed by the end of
+input: the form `p q' has an erasable suffix `q'. -/
+theorem follow_sym_p_eof : G.FollowSym p LTok.eof :=
+  ⟨[], [Sym.var q], derives_production s [var p, var q] mem_sq,
+    derives_production q [] mem_qe⟩
+
+/-- `q' is the last symbol of the form `p q', so `eof \in FOLLOW(q)'. -/
+theorem follow_sym_q_eof : G.FollowSym q LTok.eof :=
+  ⟨[Sym.var p], [], derives_production s [var p, var q] mem_sq, derives_refl []⟩
+
+theorem follow_p_b : G.follow p (LTok.tok b) = true := (follow_iff G _ _).mpr follow_sym_p_b
+theorem follow_p_eof : G.follow p LTok.eof = true := (follow_iff G _ _).mpr follow_sym_p_eof
+theorem follow_q_eof : G.follow q LTok.eof = true := (follow_iff G _ _).mpr follow_sym_q_eof
+
+/-- The start symbol can always be followed by the end of input. -/
+theorem follow_s_eof : G.follow s LTok.eof = true := follow_start G
+
+/-- **Counterexample to a naive rule R2.**  The production `q \to b q' has `q' with an
+empty suffix, and `u' has no production at all, so nothing follows `u': the computed
+`FOLLOW(u)' is empty.  This is where the `REACH' side condition of rule R2 matters. -/
+theorem not_follow_u (x : LTok Tok) : G.follow u x = false := by
+  have h2 : G.follow u x = true → False := by
+    intro h
+    obtain ⟨pre, post, hder, _⟩ := (follow_iff G u x).mp h
+    exact not_occurs_u ⟨pre, post, hder⟩
+  cases h : G.follow u x with
+  | true => exact absurd h h2
+  | false => exact h
+
+/-- `q' is always the last symbol of a sentential form of `G', so no token is in its
+`FOLLOW'.  Decided by the kernel on the finite iteration. -/
+theorem not_follow_q_b : G.follow q (LTok.tok b) = false := by decide
+theorem not_follow_s_b : G.follow s (LTok.tok b) = false := by decide
+
+/-- The computed FOLLOW relation, as a finite list of pairs. -/
+def followPairs : List (Var × LTok Tok) :=
+  (FiniteEnum.elems (α := Var × LTok Tok)).filter (fun p => G.follow p.1 p.2)
+
+#eval followPairs
+
+end Follow
+
+
+section Render
+
+/-- Compact strings for the demo executable (the enumerations derive `Repr`, not
+`ToString`, and Lean core has no `deriving ToString` for inductives). -/
+def tokStr : Tok → String
+  | a => "a" | b => "b" | c => "c"
+
+def varStr : Var → String
+  | s => "s" | p => "p" | q => "q" | u => "u"
+
+def symStr : Sym Tok Var → String
+  | Sym.tok t => tokStr t
+  | Sym.var A => varStr A
+
+def ltokStr : LTok Tok → String
+  | LTok.tok t => tokStr t
+  | LTok.eof => "eof"
+
+/-- The computed NULLABLE set. -/
+def nullableStrs : List String := G.nullableSet.map varStr
+
+/-- The computed REACH set. -/
+def occursStrs : List String := occursList.map varStr
+
+/-- The computed FIRST relation. -/
+def firstStrs : List String := firstPairs.map fun p => symStr p.1 ++ " -> " ++ ltokStr p.2
+
+/-- The computed FOLLOW relation. -/
+def followStrs : List String := followPairs.map fun p => varStr p.1 ++ " -> " ++ ltokStr p.2
+
+end Render
+
 end VerifiedLL1.Examples.Toy

@@ -489,4 +489,82 @@ theorem first_eof_iff_nullable (G : Grammar T N) (s : Sym T N) :
 
 end Main
 
+
+section SpecAPI
+
+variable [DecidableEq T] [DecidableEq N] [FiniteEnum T] [FiniteEnum N]
+
+/-- **FIRST is preserved backwards along a derivation** (specification level): if `xs`
+derives `ys` and `ys` can begin with `x`, so can `xs`. -/
+theorem Grammar.FirstList.backwards_derives {G : Grammar T N} {xs ys : List (Sym T N)}
+    (x : LTok T) (hder : Derives G xs ys) (h : G.FirstList ys x) : G.FirstList xs x := by
+  cases x with
+  | tok t =>
+      obtain ⟨w, hd⟩ := h
+      exact ⟨w, derives_trans hder hd⟩
+  | eof => exact derives_trans hder h
+
+/-- A token lookahead survives appending symbols on the right. -/
+theorem Grammar.FirstList.spec_prepend {G : Grammar T N} (xs ys : List (Sym T N)) (t : T)
+    (h : G.FirstList xs (LTok.tok t)) : G.FirstList (xs ++ ys) (LTok.tok t) := by
+  obtain ⟨w, hd⟩ := h
+  exact ⟨w ++ ys, derives_append hd (derives_refl ys)⟩
+
+/-- If a prefix erases, the FIRST of the suffix is a FIRST of the whole. -/
+theorem Grammar.FirstList.append_left_of_null {G : Grammar T N}
+    (xs ys : List (Sym T N)) (x : LTok T)
+    (hx : Derives G xs []) (h : G.FirstList ys x) : G.FirstList (xs ++ ys) x := by
+  cases x with
+  | tok t =>
+      obtain ⟨w, hd⟩ := h
+      exact ⟨w, derives_append hx hd⟩
+  | eof => exact derives_append hx h
+
+/-- **The list-level characterisation.**  The computed test decides the specification
+for whole symbol lists, not just single symbols. -/
+theorem firstList_iff (G : Grammar T N) (xs : List (Sym T N)) (x : LTok T) :
+    G.FirstList xs x ↔ firstListTest G.first (firstNul G) xs x = true := by
+  constructor
+  · intro h
+    cases x with
+    | tok t =>
+        obtain ⟨ys, hder⟩ := h
+        have h2 :
+            firstListTest G.first (firstNul G) (Sym.tok t :: ys) (LTok.tok t) = true := by
+          rw [firstListTest]
+          refine Fixpoint.or_eq_true_iff.mpr
+            (Or.inl (Fixpoint.and_eq_true_iff.mpr ⟨first_tok G t, by simp [isEof]⟩))
+        exact first_backwards G xs (Sym.tok t :: ys) (LTok.tok t) hder h2
+    | eof =>
+        have h2 :
+            firstListTest G.first (firstNul G) ([] : List (Sym T N)) LTok.eof = true := by
+          simp [firstListTest]
+        exact first_backwards G xs [] LTok.eof h h2
+  · intro h
+    exact firstListTest_sound G (firstNul G) (symNull_iff G) G.first
+      (fun s y hy => (first_iff G s y).mp hy) xs x h
+
+/-- **Where a lookahead of a concatenation comes from**: either from the prefix, or the
+prefix erases and it comes from the suffix. -/
+theorem Grammar.FirstList.append_decomp {G : Grammar T N} (xs ys : List (Sym T N))
+    (x : LTok T) (h : G.FirstList (xs ++ ys) x) :
+    G.FirstList xs x ∨ (Derives G xs [] ∧ G.FirstList ys x) := by
+  have hc := (firstList_iff G (xs ++ ys) x).mp h
+  rcases firstListTest.append_imp G.first (firstNul G) xs ys hc with h1 | h2
+  · exact Or.inl ((firstList_iff G xs x).mpr h1)
+  · refine Or.inr ⟨derives_nil_of_symbols xs (fun s hs => (symNull_iff G s).mp (h2.1 s hs)),
+      (firstList_iff G ys x).mpr h2.2⟩
+
+/-- If a concatenation erases, so does each half. -/
+theorem derives_nil_append {G : Grammar T N} (xs ys : List (Sym T N))
+    (h : Derives G (xs ++ ys) []) : Derives G xs [] ∧ Derives G ys [] := by
+  have hall : ∀ s ∈ xs ++ ys, symNull (G.nullable) s = true := fun s hs =>
+    nullable_backward G (xs ++ ys) [] h (by simp) s hs
+  refine ⟨derives_nil_of_symbols xs (fun s hs => (symNull_iff G s).mp
+      (hall s (List.mem_append.mpr (Or.inl hs)))),
+    derives_nil_of_symbols ys (fun s hs => (symNull_iff G s).mp
+      (hall s (List.mem_append.mpr (Or.inr hs))))⟩
+
+end SpecAPI
+
 end VerifiedLL1

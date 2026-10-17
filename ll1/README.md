@@ -19,7 +19,7 @@ lake env lean Axioms.lean # prints the axiom dependencies of every main theorem
 | 1 | Context-free grammars, parse trees, yield, derivation relation, correspondence theorem | **done** |
 | 2 | Predictive table type, table-driven parser, independent table-correctness predicate, soundness | **done** |
 | 3 | Completeness, termination, rejection of non-members | **done** |
-| 4 | `NULLABLE` / `FIRST` / `FOLLOW` specifications + fixed-point computations, soundness/completeness/termination | `NULLABLE` and `FIRST` **done**; `FOLLOW` in progress |
+| 4 | `NULLABLE` / `REACH` / `FIRST` / `FOLLOW` specifications + fixed-point computations, soundness/completeness/termination | **done** |
 | 5 | `SELECT` sets, LL(1) conflict check, table generation, end-to-end theorem | not started |
 | 6 | Quantum circuit DSL as a worked instance | grammar + trees + derivations done (Phase 1 slice) |
 
@@ -40,6 +40,8 @@ ll1/
 │   ├── Fixpoint.lean           # generic finite monotone fixed-point iteration
 │   ├── Nullable.lean           # NULLABLE spec + computation + soundness/completeness
 │   ├── First.lean              # FIRST spec + computation + soundness/completeness
+│   ├── Reach.lean              # REACH: which nonterminals occur in a sentential form
+│   ├── Follow.lean             # FOLLOW spec + computation + soundness/completeness
 │   └── Examples/
 │       ├── Toy.lean            # ε-productions, acceptance *and* rejection proofs
 │       ├── Circuits.lean       # quantum circuit DSL grammar (Phase 6 language)
@@ -158,9 +160,10 @@ The correspondence theorem and its ingredients depend only on `propext` and
 
 ## Limitations of the current state
 
-* Phases 4–5 are not implemented yet: there is no `FIRST`/`FOLLOW` computation and
-  no LL(1) condition, so no table has yet been *generated* — the example tables are
-  hand-written and certified against the Phase 2 predicate.
+* Phase 5 is not implemented yet: the four analyses are available and proved correct,
+  but there is no `SELECT`-set construction, no LL(1) conflict check and no generated
+  table yet — the example tables are hand-written and certified against the Phase 2
+  predicate.
 * `Grammar.wellFormed` is stated but not yet *used* by any theorem; when Phase 5
   states the generator's correctness it will appear as an explicit hypothesis.
 * `Leftmost.lean` proves that parse trees, general derivations and leftmost
@@ -422,13 +425,85 @@ Rather than repeat the termination proof, `VerifiedLL1.Fixpoint` provides it onc
   and `first_u_not_eof` shows the computation rejecting `eof` for the one nonterminal
   that cannot vanish.  `#eval firstPairs` prints the whole computed relation.
 
+### `Reach.lean` — REACH (an auxiliary analysis FOLLOW needs)
+
+* **Specification**: `G.Occurs A := ∃ pre post, Derives G [var G.start] (pre ++ [var A] ++
+  post)` — `A` occurs *somewhere* in a sentential form.  This is deliberately not
+  `G.Reachable [var A]`, which asks for `A` to occur at the *end* of a form.
+* **Why it is needed**: the textbook rule "`B → α A β`, `t ∈ FIRST(β)` ⟹ `t ∈ FOLLOW(A)`"
+  is unsound for an unreachable `B`, because that production contributes no occurrence of
+`A` at all.  `Follow.lean` therefore makes `G.occurs B` a side condition of that rule
+instead of quietly assuming every nonterminal is reachable.
+* **Computation**: least fixed point over the carrier `N` (`occursTest`), one pass per
+nonterminal.
+* **Theorems**: `occursP_mono`, `occurs_sound`, `occurs_complete` (induction on the
+derivation of the form, with the occurrence located by `occurrence_append`), `occurs_iff`,
+`occurs_stable` (termination), plus `not_occurs_of_absent` — a cheap syntactic rejection
+criterion: if `B ≠ start` and no right-hand side mentions `B`, then `B` occurs nowhere.
+* **Example**: `occurs_s`, `occurs_p`, `occurs_q` are exhibited as derivations;
+`not_occurs_u` proves the fifth nonterminal of the toy grammar unreachable, and
+`#eval occursList` prints `[s, p, q]`.
+
+### `Follow.lean` — FOLLOW
+
+* **Specification** (algorithm-free): `G.FollowSym A x := ∃ pre post, Derives G
+  [var G.start] (pre ++ [var A] ++ post) ∧ G.FirstList post x`.  Since `FirstList` is
+  itself stated with `Derives`, this mentions neither the fixed point nor the parser.
+  `Grammar.followSym_of_reachable` is the form the generator needs: a reachable stack top
+  `var A` with continuation `cont` inherits every lookahead of `cont`.
+* **Computation**: least fixed point over the finite carrier `N × LTok T` of the rules
+  `R1` (`eof ∈ FOLLOW(start)`), `R2` (`B` occurs, `x` a *token* of `FIRST(β)` for a
+  production `B → α A β`), `R3` (`β` erases and `x ∈ FOLLOW(B)`), with the already
+  computed NULLABLE, FIRST and REACH as fixed inputs.
+* **Two subtleties the formalisation forces us to state** (both are silent assumptions in
+  the textbook presentation):
+  * `R2` needs the REACH side condition (above).
+  * `R2` must be restricted to *token* lookaheads.  `eof ∈ FIRST(β)` only says `β ⇒* ε`;
+    the real suffix after `A` is `β ++ post` where `post` is whatever followed `B` in the
+    form, and `post` need not erase.  `eof` therefore has to travel along `R3`, seeded by
+    `R1` — which is exactly the classical convention "`eof ∈ FOLLOW(S)` only".
+* **Theorems**: `followP_mono`, `follow_sound` (induction on the iteration stage; each
+  rule is discharged by building the witness sentential form), `follow_complete`
+  (induction on the derivation of the form with the marked occurrence carried along;
+  `Grammar.FirstList.append_decomp` decides whether a lookahead comes from the suffix
+  inside the production or from further out, which is precisely what selects `R2` versus
+  `R3`), `follow_iff`, `follow_eof_iff` (the ε/end-of-input characterisation),
+`follow_stable` (termination).
+* **Examples**: `follow_p_b` (`b ∈ FOLLOW(p)`, from the form `p q`), `follow_p_eof`
+  (`eof ∈ FOLLOW(p)`, because the suffix `q` erases), `follow_q_eof`, `follow_s_eof`;
+  `not_follow_u` proves `FOLLOW(u) = ∅` *semantically* (via REACH), and
+  `not_follow_q_b`/`not_follow_s_b` are rejected by the computation.  `#eval followPairs`
+  prints `{s ↦ eof, p ↦ {b, eof}, q ↦ eof}`.
+
+### Theorem inventory (Phase 4)
+
+| Theorem | Statement (schematic) |
+|---|---|
+| `Fixpoint.iterP_increasing` | approximants of a monotone transformer grow |
+| `Fixpoint.iterP_stable` | **termination**: `iterP P (\|carrier\| + 1) = iterP P \|carrier\|` |
+| `Fixpoint.iterP_closed` | the limit is closed under the transformer |
+| `nullable_iff` | `G.nullable A = true ↔ Derives G [var A] []` |
+| `nullable_eps_tree` | computed NULLABLE = roots of valid trees with empty yield |
+| `first_iff` | `G.first s x = true ↔ G.FirstSym s x` |
+| `first_eof_iff_nullable` | `eof ∈ FIRST(s)` exactly when `s ⇒* ε` |
+| `firstList_iff` | the same for whole symbol lists |
+| `Grammar.FirstList.append_decomp` | a lookahead of `xs ++ ys` comes from `xs`, or `xs` erases and it comes from `ys` |
+| `Grammar.FirstList.backwards_derives` | FIRST is preserved backwards along a derivation |
+| `occurs_iff` | `G.occurs A = true ↔ A` occurs in a sentential form |
+| `not_occurs_of_absent` | syntactic unreachability criterion |
+| `follow_iff` | `G.follow A x = true ↔ G.FollowSym A x` |
+| `follow_eof_iff` | `eof ∈ FOLLOW(A)` iff `A` can be followed by an erasable suffix |
+| `occurs_stable`, `follow_stable` | the iterations are stable at their bounds |
+
 ## Next step
 
-* `Follow.lean`: `G.FollowSym A x := ∃ pre post, Derives G [var start]
-  (toks pre ++ [var A] ++ post) ∧ G.FirstList post x` — the classical `S ⇒* α A β` with
-  `x ∈ FIRST(β)`; it puts `eof ∈ FOLLOW(A)` exactly when `A` can be followed by nothing,
-  computed by the same `Fixpoint.iterP` machinery over `N × LTok T`.
-* Phase 5: `SELECT` sets from `FIRST`/`FOLLOW`, the LL(1) conflict check, table
-  construction with explicit rejection of conflicts, and the proof that the generated
-  table is `Correct` and `Progressing` — at which point `language_iff_accepts` gives the
-  end-to-end "accepts exactly the language" theorem.
+* Phase 5 (`Generator.lean`): `SELECT(A, rhs) = (FIRST(rhs) ∩ tokens) ∪ (if rhs erases
+  then FOLLOW(A))`; the LL(1) conflict check as a decidable predicate that *rejects*
+  conflicting entries explicitly; table construction over the reachable nonterminals;
+  and the proof that a conflict-free grammar yields a table that is `Sound`, `Adequate`,
+  `Complete` and `Progressing`.  The key bridge lemma to prove is: if
+  `Derives G (rhs ++ cont) (toks w)` and `lookaheadOf w = x` and `var A :: cont` is
+  reachable, then `x ∈ SELECT(A, rhs)` — it is exactly `FirstList.append_decomp` plus
+  `followSym_of_reachable`.
+* Phase 6: qubit payloads and an AST for the circuit DSL, plus a pretty-printer with a
+  proved parser–printer round trip.

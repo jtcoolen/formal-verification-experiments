@@ -13,6 +13,8 @@ import VerifiedLL1.Completeness
 import VerifiedLL1.Fixpoint
 import VerifiedLL1.Nullable
 import VerifiedLL1.First
+import VerifiedLL1.Reach
+import VerifiedLL1.Follow
 import VerifiedLL1.Examples.Toy
 import VerifiedLL1.Examples.Circuits
 import VerifiedLL1.Examples.Loop
@@ -32,6 +34,8 @@ import VerifiedLL1.Examples.Continuation
 * `VerifiedLL1.Fixpoint`    - generic finite monotone fixed-point iteration
 * `VerifiedLL1.Nullable`     - NULLABLE: specification, computation, soundness, completeness
 * `VerifiedLL1.First`        - FIRST: specification, computation, soundness, completeness
+* `VerifiedLL1.Reach`        - REACH: which nonterminals occur in a sentential form
+* `VerifiedLL1.Follow`       - FOLLOW: specification, computation, soundness, completeness
 * `VerifiedLL1.Examples.Loop` - a correct table that loops: why progress is needed
 * `VerifiedLL1.Examples.Continuation` - why table correctness needs reachability
 * `VerifiedLL1.Examples.Toy` - a worked example grammar with acceptance *and*

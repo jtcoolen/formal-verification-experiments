@@ -89,6 +89,30 @@ axiom appearing below is a bug.
 #print axioms VerifiedLL1.parse_ok_imp_shape
 #print axioms VerifiedLL1.language_iff_accepts
 
+-- Phase 4: FIRST at list level
+#print axioms VerifiedLL1.firstList_iff
+#print axioms VerifiedLL1.Grammar.FirstList.backwards_derives
+#print axioms VerifiedLL1.Grammar.FirstList.append_decomp
+#print axioms VerifiedLL1.Grammar.FirstList.append_left_of_null
+
+-- Phase 4: REACH
+#print axioms VerifiedLL1.occursP_mono
+#print axioms VerifiedLL1.occurs_sound
+#print axioms VerifiedLL1.occurs_complete
+#print axioms VerifiedLL1.occurs_iff
+#print axioms VerifiedLL1.occurs_stable
+#print axioms VerifiedLL1.not_occurs_of_absent
+
+-- Phase 4: FOLLOW
+#print axioms VerifiedLL1.followP_mono
+#print axioms VerifiedLL1.follow_sound
+#print axioms VerifiedLL1.follow_complete
+#print axioms VerifiedLL1.follow_iff
+#print axioms VerifiedLL1.follow_eof_iff
+#print axioms VerifiedLL1.follow_stable
+#print axioms VerifiedLL1.Grammar.followSym_of_reachable
+#print axioms VerifiedLL1.Grammar.followSym_start
+
 def main : IO Unit := do
   IO.println "The axiom audit above is produced when this module is built."
   IO.println "Re-run it with:  lake env lean Axioms.lean"

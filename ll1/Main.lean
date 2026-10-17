@@ -147,6 +147,21 @@ def main : IO Unit := do
   IO.println ""
 
   IO.println line
+  IO.println "PHASE 4 — GRAMMAR ANALYSIS (computed on the toy grammar"
+  IO.println "             s -> p q | p -> a | p -> eps | q -> b q | q -> eps)"
+  IO.println line
+  IO.println ("  NULLABLE (computed)  " ++ toString Toy.nullableStrs)
+  IO.println ("  REACH    (computed)  " ++ toString Toy.occursStrs)
+  IO.println ("  FIRST    (computed)  " ++ toString Toy.firstStrs)
+  IO.println ("  FOLLOW   (computed)  " ++ toString Toy.followStrs)
+  IO.println ""
+  IO.println "  nullable_iff / occurs_iff / first_iff / follow_iff: each computed set is"
+  IO.println "  proved equivalent to a derivation-level specification, and iterP_stable"
+  IO.println "  proves the iteration reaches its fixed point within |carrier| passes."
+  IO.println "  u is unreachable, so FOLLOW(u) is empty (not_follow_u): that is the REACH"
+  IO.println "  side condition of rule R2 at work; eof enters FOLLOW only via FOLLOW(start)."
+  IO.println ""
+  IO.println line
   IO.println "MAIN CORRESPONDENCE THEOREM (Phase 1)"
   IO.println line
   IO.println "  tree_iff_derives : (∃ ts, Valid G (node A ts) ∧ yield (node A ts) = ws)"
