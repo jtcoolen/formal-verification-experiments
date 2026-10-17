@@ -20,6 +20,7 @@ import VerifiedLL1.Examples.Toy
 import VerifiedLL1.Examples.Circuits
 import VerifiedLL1.Examples.Loop
 import VerifiedLL1.Examples.Continuation
+import VerifiedLL1.Examples.QCircuits
 
 /-!
 # A formally verified LL(1) parser generator in Lean 4
@@ -40,6 +41,7 @@ import VerifiedLL1.Examples.Continuation
 * `VerifiedLL1.Generator`    - SELECT, the LL(1) check, table generation, correctness
 * `VerifiedLL1.Examples.Loop` - a correct table that loops: why progress is needed
 * `VerifiedLL1.Examples.Continuation` - why table correctness needs reachability
+* `VerifiedLL1.Examples.QCircuits` - the circuit DSL with qubit payloads, an AST, a printer
 * `VerifiedLL1.Examples.Toy` - a worked example grammar with acceptance *and*
   rejection proofs
 

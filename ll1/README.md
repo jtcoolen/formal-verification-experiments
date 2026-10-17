@@ -21,7 +21,7 @@ lake env lean Axioms.lean # prints the axiom dependencies of every main theorem
 | 3 | Completeness, termination, rejection of non-members | **done** |
 | 4 | `NULLABLE` / `REACH` / `FIRST` / `FOLLOW` specifications + fixed-point computations, soundness/completeness/termination | **done** |
 | 5 | `SELECT` sets, LL(1) conflict check, table generation, end-to-end theorem | **done** |
-| 6 | Quantum circuit DSL as a worked instance | grammar + hand table + **generated table**, end-to-end acceptance proved; payloads/AST pending |
+| 6 | Quantum circuit DSL as a worked instance | **done**: token-kind grammar + hand table, payload grammar + generated table, AST, printer, round trip |
 
 ## Layout
 
@@ -45,7 +45,8 @@ ll1/
 │   ├── Generator.lean          # SELECT, LL(1) check, table generation, correctness, end-to-end
 │   └── Examples/
 │       ├── Toy.lean            # ε-productions, acceptance *and* rejection proofs
-│       ├── Circuits.lean       # quantum circuit DSL grammar (Phase 6 language)
+│       ├── Circuits.lean       # quantum circuit DSL, token kinds (Phase 6 language)
+│       ├── QCircuits.lean      # circuit DSL with qubit payloads: generated table, AST, printer
 │       ├── Continuation.lean   # why table correctness needs a reachability hypothesis
 │       └── Loop.lean           # a Correct table that loops: progress is necessary
 ├── Main.lean                   # lake exe verifiedLL1Demo
@@ -598,5 +599,63 @@ criterion: if `B ≠ start` and no right-hand side mentions `B`, then `B` occurs
 * The `decide` proofs of `circ_ll1` / `circ_no_left_recursion` cost seconds of kernel time
   because `Fixpoint.iterP` does not memoise; a list-fold iteration would make them
   near-instant.  This is a performance issue, not a soundness one.
-* Phase 6 remainder: qubit *payloads* (structured tokens) and an AST for the circuit
-  language, plus a pretty-printer with a proved parser–printer round trip.
+## Phase 6 — the quantum circuit language
+
+Two grammars, one with token kinds and one with qubit *payloads*.
+
+### `Examples/Circuits.lean` (token kinds)
+
+`h q0 ;`, `cx q0 q1 ;`, `s q1 ;`, `m q0 ;` with sequences and the empty program; the qubit
+positions are fixed by the grammar.  A hand-written table `M` is certified against the
+Phase 2 predicate (`M_sound`, by `decide`), the parser reconstructs the Phase 1 trees by
+`rfl` (`parse_hcx_ok`), soundness is instantiated (`parse_hcx_sound`), and malformed inputs
+fail with structured errors (`parse_bad_err`, `parse_truncated_err`).  Phase 5 then proves
+that the *generated* table agrees with `M` on every index pair (`gen_eq_hand_list` style
+checks are expensive for this grammar, so the table is printed instead).
+
+### `Examples/QCircuits.lean` (qubit payloads, AST, printer)
+
+Here the qubit identifier is structured data: a nonterminal `qubit -> q0 | q1` appears in
+the gate productions, so `h q1 ;` is a program.  This grammar is parsed by the *generated*
+table — no hand-written table is needed.
+
+* `qc_ll1 : Q.ll1Check = true` and `qc_no_left_recursion : Q.noLeftRecursion = true`, both
+  discharged by `decide` (kernel computations, a few seconds each), so the Phase 5
+  correctness and termination theorems apply; `qc_end_to_end` states the characterisation.
+* `Qubit`, `Instr` (`hadamard`, `cnot`, `phase`, `measure`), `Program = List Instr` — the
+  AST.  `printInstr` / `printProg` are the pretty-printer; `qubitOfTree` … `progOfTree` are
+  the AST extractor (total functions returning `Option`, failing on shapes the grammar
+  cannot produce).
+* `progTree : Program → Tree Tok Var` builds the canonical parse tree, and
+  `valid_progTree`, `yield_progTree`, `progOf_progTree` prove it is valid, prints to
+  `printProg p`, and extracts back to `p`.
+* `language_printProg p : Q.language (printProg p)` — printing produces a word of the
+  language, hence (Phase 5) the generated parser accepts it.
+* **`round_trip`**: for every program `p`, `progOfTree (progTree p) = some p`,
+  `yield (progTree p) = printProg p`, and *the generated parser accepts the printed
+  program* with a valid tree whose yield is exactly `printProg p` — i.e. print → parse →
+  (extract) is the identity on programs, and the parser consumes the whole printed input.
+* Invalid inputs: `h ;` and `h q0` are rejected with structured errors (printed by
+  `#eval`); the general guarantee is `never_accepts_of_not_language`, which needs only
+  table soundness.
+
+### What is *not* claimed
+
+* The extractor is proved to invert the *canonical* tree builder.  Proving that it is also
+  total on an *arbitrary* parser output tree (i.e. that every valid `prog` tree is the
+  canonical tree of the program it yields) needs a per-nonterminal shape analysis of valid
+  trees; the grammar makes that analysis finite (each nonterminal's right-hand sides are
+  enumerated by `decide`), and the pieces are straightforward but were not needed for
+  `round_trip`, so they are left as the natural next lemma.
+* Qubit identifiers are enumerated (`q0`, `q1`) rather than arbitrary numerals: a numeral
+  payload would need the parser to match a *class* of tokens, which the Phase 2 parser
+  deliberately does not do (it compares terminals for equality).
+
+## Remaining work
+
+* Prove the extraction-totality lemma sketched above, and (with it) the uniqueness of
+  parse trees for generated tables.
+* Derive `noLeftRecursion` from `Ll1` for reachable, productive grammars, collapsing the
+  two hypotheses of the end-to-end theorem into one.
+* Memoise `Fixpoint.iterP` (iterate a list of booleans instead of a predicate) to make the
+  `decide` proofs on larger grammars fast.

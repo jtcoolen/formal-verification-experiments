@@ -142,6 +142,18 @@ axiom appearing below is a bug.
 #print axioms VerifiedLL1.Examples.Circuits.gen_parse_hcx
 #print axioms VerifiedLL1.Examples.Loop.loop_not_ll1
 
+-- Phase 6: circuit DSL with payloads, AST and printer
+#print axioms VerifiedLL1.Examples.QCircuits.qc_ll1
+#print axioms VerifiedLL1.Examples.QCircuits.qc_no_left_recursion
+#print axioms VerifiedLL1.Examples.QCircuits.qc_end_to_end
+#print axioms VerifiedLL1.Examples.QCircuits.valid_progTree
+#print axioms VerifiedLL1.Examples.QCircuits.yield_progTree
+#print axioms VerifiedLL1.Examples.QCircuits.progOf_progTree
+#print axioms VerifiedLL1.Examples.QCircuits.language_printProg
+#print axioms VerifiedLL1.Examples.QCircuits.round_trip
+#print axioms VerifiedLL1.Examples.QCircuits.accepts_hq1
+#print axioms VerifiedLL1.Examples.QCircuits.accepts_hcx
+
 def main : IO Unit := do
   IO.println "The axiom audit above is produced when this module is built."
   IO.println "Re-run it with:  lake env lean Axioms.lean"
