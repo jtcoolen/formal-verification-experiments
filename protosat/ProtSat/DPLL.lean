@@ -190,23 +190,184 @@ theorem unit_forced {a : Assignment} {cs : List Clause} {l : Lit}
   have := h [l] hl
   simpa [Clause.eval, List.any_cons, List.any_nil] using this
 
-/-- **propagate** iterates unit propagation.  Each step deletes at least the unit
-clause it consumes, so the depth bound cs.length is enough to reach a fixpoint.  The
-result carries the forced assignments (most recent first) and the reduced clause set. -/
-def propagate : Nat -> List Clause -> Option (List (BVar × Bool) × List Clause)
-  | _, [] => some ([], [])
-  | 0, cs => some ([], cs)
-  | n + 1, cs =>
-      if [] ∈ cs then none
-      else match findUnit cs with
+/-! ### Termination of unit propagation -/
+
+/-- A literal is made true by its own variable set to the polarity it asks for. -/
+theorem madeTrue_self (l : Lit) : madeTrue l.var (!l.neg) l = true := by
+  cases l with
+  | mk w neg =>
+      unfold madeTrue litVal
+      cases neg <;> simp
+
+/-- Filtering out at least one element shortens the list. -/
+theorem length_filter_lt {α : Type} (p : α -> Bool) : ∀ (l : List α),
+    (∃ x ∈ l, p x = false) -> (l.filter p).length < l.length := by
+  intro l
+  induction l with
+  | nil => intro h; exact absurd h (by simp)
+  | cons x xs ih =>
+      intro h
+      obtain ⟨y, hy, hp⟩ := h
+      rw [List.mem_cons] at hy
+      rcases hy with rfl | hy
+      · rw [List.filter_cons_of_neg (by simpa using hp)]
+        exact Nat.lt_of_le_of_lt (List.length_filter_le p xs) (by simp)
+      · have h1 := ih ⟨y, hy, hp⟩
+        by_cases hx : p x = true
+        · rw [List.filter_cons_of_pos hx]
+          simp [List.length_cons]
+          omega
+        · rw [List.filter_cons_of_neg (by simpa using hx)]
+          simp [List.length_cons]
+          omega
+
+/-- The first unit clause found by findUnit really is a member of the list. -/
+theorem findUnit_some : ∀ (cs : List Clause) (l : Lit), findUnit cs = some l -> [l] ∈ cs := by
+  intro cs
+  induction cs with
+  | nil => intro l h; cases h
+  | cons c rest ih =>
+      intro l h
+      cases rest with
+      | nil =>
+          cases c with
+          | nil => cases h
+          | cons x xs =>
+              cases xs with
+              | nil =>
+                  have h2 : findUnit [c] = some x := rfl
+                  rw [h2] at h
+                  cases h
+                  exact List.Mem.head _
+              | cons y ys => cases h
+      | cons y ys =>
+          have h2 : findUnit (c :: y :: ys) = findUnit (y :: ys) := rfl
+          rw [h2] at h
+          exact List.Mem.tail _ (ih l h)
+
+/-- Assigning the variable of a unit clause deletes at least that clause, so the clause
+count strictly decreases: this is the termination measure of ProtSat.DPLL.propagate. -/
+theorem assign_length_lt {cs : List Clause} {v : BVar} {b : Bool} (l : Lit)
+    (hmem : [l] ∈ cs) (htrue : madeTrue v b l = true) :
+    (assign v b cs).length < cs.length := by
+  unfold assign
+  rw [List.length_map]
+  refine length_filter_lt (fun c : Clause => Bool.not (List.any (madeTrue v b) c))
+    ⟨[l], hmem, by simp [htrue]⟩
+
+/-- **Unit propagation.**  Repeatedly assign the literal of a unit clause and reduce the
+clause set, until either the empty clause appears (conflict, the result is none) or no unit
+clause is left (the result is the list of forced assignments, in the order they were applied,
+together with the reduced clause set).
+
+Termination (specification 8H): every recursive call assigns the variable of a unit clause
+that is a member of the current clause set, and that clause is deleted by the assignment, so
+the clause count strictly decreases. -/
+def propagate : List Clause -> Option (List (BVar × Bool) × List Clause)
+  | [] => some ([], [])
+  | cs =>
+      if h : [] ∈ cs then none
+      else match h2 : findUnit cs with
         | none => some ([], cs)
         | some l =>
-            (propagate n (assign l.var (!l.neg) cs)).map
+            (propagate (assign l.var (!l.neg) cs)).map
               fun r => (((l.var, !l.neg) :: r.1), r.2)
+termination_by cs => cs.length
+decreasing_by
+  simp_wf
+  cases h2 with
+  | mk l hl => exact assign_length_lt _ (findUnit_some _ _ hl) (madeTrue_self l)
 
-/-- The variables occurring in a clause list. -/
-def clauseVars : List Clause -> List BVar
-  | [] => []
-  | c :: cs => (c.map (fun l => l.var)) ++ clauseVars cs
+/-- A conflict is detected only when the empty clause is present, so a satisfiable clause set
+never propagates to none. -/
+theorem propagate_none_unsat : ∀ (cs : List Clause) (a : Assignment),
+    SatList a cs -> propagate cs = none -> False := by
+  intro cs
+  induction cs with
+  | nil => intro a ha h; cases h
+  | cons c rest ih =>
+      intro a ha h
+      by_cases h0 : [] ∈ c :: rest
+      · obtain ⟨l, hl, rfl⟩ := List.mem_cons.mp h0
+        exact absurd (ha [] hl (by simp)) (by simp)
+      · unfold propagate at h
+        rw [if_neg h0] at h
+        cases h2 : findUnit (c :: rest) with
+        | none => cases h
+        | some l =>
+            obtain ⟨v, hv⟩ := h
+            rw [Option.map_eq_none'] at hv
+            have hmem : [l] ∈ c :: rest := findUnit_some _ _ h2
+            have hagree : a l.var = !l.neg := by
+              have := unit_forced ha hmem
+              cases l with
+              | mk w neg =>
+                  cases neg
+                  · simpa [Lit.eval, pos_eval] using this
+                  · simpa [Lit.eval, neg_eval] using this
+            have h1 : SatList a (assign l.var (!l.neg) (c :: rest)) :=
+              satList_assign ha hagree
+            exact ih a h1 hv
 
-end ProtSat.DPLL
+/-- **Unit propagation is an equivalence.**  When propagation succeeds with forced
+assignments `forced` and reduced set `cs'`, a model of the original set that agrees with
+the forced assignments is a model of the reduced set, and conversely: extending any model of
+the reduced set by the forced literals gives a model of the original.  Both directions are
+iterated applications of ProtSat.DPLL.satList_assign and its converse. -/
+theorem propagate_spec : ∀ (cs : List Clause) (forced : List (BVar × Bool))
+    (cs' : List Clause), propagate cs = some (forced, cs') ->
+      (∀ a, SatList a cs -> (∀ p ∈ forced, a p.1 = p.2) -> SatList a cs') ∧
+      (∀ a, SatList a cs' -> (∀ p ∈ forced, a p.1 = p.2) -> SatList a cs) := by
+  intro cs
+  induction cs with
+  | nil =>
+      intro forced cs' h
+      cases h with
+      | mk f hc =>
+          cases f with
+          | mk v b => cases h
+          | nil =>
+              cases hc with
+              | mk v b => cases h
+              | nil =>
+                  exact ⟨fun a ha _ => ha, fun a ha _ => ha⟩
+  | cons c rest ih =>
+      intro forced cs' h
+      by_cases h0 : [] ∈ c :: rest
+      · unfold propagate at h
+        rw [if_pos h0] at h
+        cases h
+      · unfold propagate at h
+        rw [if_neg h0] at h
+        cases h2 : findUnit (c :: rest) with
+        | none =>
+            cases h
+            exact ⟨fun a ha _ => ha, fun a ha _ => ha⟩
+        | some l =>
+            cases forced with
+            | nil => cases h
+            | cons head tail =>
+                cases head with
+                | mk v b =>
+                    have hmem : [l] ∈ c :: rest := findUnit_some _ _ h2
+                    have hb : v = l.var ∧ b = !l.neg := by
+                      have h2' : ((l.var, !l.neg) :: tail.1, tail.2) = ((v, b), cs') := by
+                        simpa using h
+                      exact congrArg (fun p => p) (congrArg List.head? h2') |> id
+                    obtain ⟨rfl, rfl⟩ := by
+                      show (v, b) = (l.var, !l.neg)
+                      simpa using (List.head_eq_of_cons_eq (by simpa using h :
+                        ((v, b) :: tail) = _))
+                    obtain ⟨f2, c2, hf, hcs'⟩ := h
+                    rw [Option.map_eq_some'] at hf
+                    obtain ⟨rr, hr1, hr2⟩ := hf
+                    obtain ⟨hfor, hback⟩ := ih f2 c2 hr1
+                    refine ⟨?_, ?_⟩
+                    · intro a ha hagree
+                      have h1 : SatList a (assign l.var (!l.neg) (c :: rest)) :=
+                        satList_assign ha (hagree _ (List.Mem.head _))
+                      exact hfor a h1 (by intro p hp; exact hagree p (List.Mem.tail _ hp))
+                    · intro a ha hagree
+                      have h1 : SatList a (assign l.var (!l.neg) (c :: rest)) :=
+                        hback a ha (by intro p hp; exact hagree p (List.Mem.tail _ hp))
+                      exact satList_assign_back h1 (hagree _ (List.Mem.head _))

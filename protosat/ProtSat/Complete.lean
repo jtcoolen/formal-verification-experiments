@@ -4,6 +4,7 @@ Licensed under the MIT License. See the file LICENSE in the project root for
 license information.
 -/
 import ProtSat.Encoding
+import Mathlib.Tactic.Linarith
 
 /-!
 # ProtSat: the converse correspondence (specification section 8B)
@@ -165,27 +166,275 @@ theorem runs_rel {P : Protocol} {C0 : Cfg} {tr : List Ev} {Cs : List Cfg}
 
 /-! ### The boundedness hypothesis -/
 
-/-- **The run stays inside the bounds.**  Every message the attacker ever knows and every
-value any session ever stores is a universe message; every session that acts is one the
-bounds instantiate and every nonce it generates is in the nonce domain; every message the
-attacker learns in one step is in the universe; and every program counter and every store
-variable stays inside the shape's bounds.  These are exactly the conditions under which a
-finite encoding can represent the run at all - a run that leaves the universe has no finite
-name. -/
+/-- **The run stays inside the shape** (the general form, stated for an arbitrary shape).
+Every message the attacker ever knows and every value any session ever stores is a universe
+message; every session that acts is one the shape instantiates, and both the message
+delivered to it and the nonce it generates belong to the shape; every message the attacker
+learns in one step is in the universe; and every program counter and every store variable
+stays inside the shape's bounds.  These are exactly the conditions under which a finite
+encoding can represent the run at all - a run that leaves the universe has no finite name,
+and a run whose session index is not instantiated has no event alternative. -/
+def RunOK (sh : Shape) (P : Protocol) (cfg : Nat → Cfg) (ev : Nat → Ev) : Prop :=
+  (∀ i t, t ∈ (cfg i).kn → t ∈ sh.U) ∧
+  (∀ i q v, q < sh.nS1 → v ∈ storeVals (storeOf (cfg i) q) → v ∈ sh.U) ∧
+  (∀ i q m d, ev i = Ev.act q m d → q < sh.nS1 ∧ m ∈ sh.U ∧ d ∈ sh.D) ∧
+  (∀ i t, ev i = Ev.ded t → t ∈ sh.U) ∧
+  (∀ i q, q < sh.nS1 → pcOf (cfg i) q < shPc sh) ∧
+  (∀ i q x, q < sh.nS1 → x ∈ (storeOf (cfg i) q).map Prod.fst → x < shV sh)
+
+/-- **The run stays inside the bounds**: ProtSat.Complete.RunOK at the shape of the analysis.
+This is the hypothesis the completeness theorem (specification 8B) needs and the analyser
+checks, because a run that leaves the declared bounds cannot be named by the formula at all.
+-/
 def WithinBounds (P : Protocol) (B : Bounds) (cfg : Nat → Cfg) (ev : Nat → Ev) : Prop :=
-  (∀ i t, t ∈ (cfg i).kn → t ∈ (shapeOf P B).U) ∧
-  (∀ i q v, q < (shapeOf P B).nS1 → v ∈ storeVals (storeOf (cfg i) q) →
-      v ∈ (shapeOf P B).U) ∧
-  (∀ i, match ev i with
-      | Ev.idle => True
-      | Ev.act q m d => q < (shapeOf P B).nS1 ∧ m ∈ (shapeOf P B).U ∧ d ∈ P.nonceDomain
-      | Ev.ded t => t ∈ (shapeOf P B).U) ∧
-  (∀ i q, q < (shapeOf P B).nS1 → pcOf (cfg i) q < shPc (shapeOf P B)) ∧
-  (∀ i q x, q < (shapeOf P B).nS1 → x ∈ (storeOf (cfg i) q).map Prod.fst →
-      x < shV (shapeOf P B))
+  RunOK (shapeOf P B) P cfg ev
 
-/-! ### Rule instances that actually fire -/
+/-! ### Block ranges of the positional codes
 
-/-! ### The assignment of a run  (under construction: see KB/PROTOSAT.md) -/
+The variables of the encoding live in nine disjoint blocks (ProtSat.Encode.bsPc, bsSt, bsKn,
+bsEv, bsDl, bsFr, bsXe, bsTotal, bsAu).  The lemmas below say that every positional code of a
+family, evaluated at in-range indices, lands inside its own block.  They are what makes the
+cascade of range tests in ProtSat.Complete.assignOf unambiguous: the block of a variable is
+found by comparison, never by division. -/
+
+section Ranges
+
+/-- Scaling a bounded index: i ≤ L and q < S put i*S + q strictly below (L+1)*S. -/
+theorem scale_lt {i L S q : Nat} (hi : i ≤ L) (hS : 0 < S) (hq : q < S) :
+    i * S + q < (L + 1) * S := by
+  have h1 : i * S ≤ L * S := Nat.mul_le_mul_right S hi
+  have h2 : i * S + q < L * S + S := Nat.add_lt_add_of_le_of_lt h1 hq
+  have h3 : (L + 1) * S = L * S + S := by rw [Nat.add_mul, Nat.one_mul]
+  rw [h3]
+  exact h2
+
+/-- Scaling a strictly bounded index: i < L and q < S put i*S + q strictly below L*S. -/
+theorem scale_lt' {i L S q : Nat} (hi : i < L) (hS : 0 < S) (hq : q < S) :
+    i * S + q < L * S := by
+  have h1 : i * S + q < (i + 1) * S := by
+    have h1' : (i + 1) * S = i * S + S := by rw [Nat.add_mul, Nat.one_mul]
+    rw [h1']
+    exact Nat.add_lt_add_left hq _
+  exact Nat.lt_of_lt_of_le h1 (Nat.mul_le_mul_right S (Nat.succ_le_of_lt hi))
+
+/-- One Horner step: X < A and c < C with C positive put X*C + c strictly below A*C. -/
+theorem horner_lt {X A C c : Nat} (hX : X < A) (hC : 0 < C) (hc : c < C) :
+    X * C + c < A * C := by
+  have h1 : X * C + c < X * C + C := Nat.add_lt_add_left hc _
+  have h2 : X * C + C = (X + 1) * C := by rw [Nat.add_mul, Nat.one_mul]
+  rw [h2] at h1
+  exact Nat.lt_of_lt_of_le h1 (Nat.mul_le_mul_right C (Nat.succ_le_of_lt hX))
+
+variable (sh : Shape)
+
+/-- A program-counter code lies below the store block. -/
+theorem vpc_lt_bsSt (i q c : Nat) (hi : i ≤ sh.steps) (hq : q < shS sh) (hc : c < shPc sh) :
+    vpc sh i q c < bsSt sh := by
+  have h1 : i * shS sh + q < (sh.steps + 1) * shS sh := scale_lt hi (shS_pos sh) hq
+  have h2 : (i * shS sh + q) * shPc sh + c < (sh.steps + 1) * shS sh * shPc sh :=
+    horner_lt h1 (shPc_pos sh) hc
+  simp only [vpc, bsPc, bsSt, szPc, Nat.zero_add]
+  exact h2
+
+/-- A store code lies at or above the store block's base. -/
+theorem vst_ge (i q x u : Nat) : bsSt sh ≤ vst sh i q x u := Nat.le_add_right _ _
+
+/-- A store code lies below the knowledge block. -/
+theorem vst_lt_bsKn (i q x u : Nat) (hi : i ≤ sh.steps) (hq : q < shS sh) (hx : x < shV sh)
+    (hu : u < shVal sh) : vst sh i q x u < bsKn sh := by
+  have h1 : i * shS sh + q < (sh.steps + 1) * shS sh := scale_lt hi (shS_pos sh) hq
+  have h2 : (i * shS sh + q) * shV sh + x < (sh.steps + 1) * shS sh * shV sh :=
+    horner_lt h1 (shV_pos sh) hx
+  have h3 : ((i * shS sh + q) * shV sh + x) * shVal sh + u
+      < (sh.steps + 1) * shS sh * shV sh * shVal sh := horner_lt h2 (shVal_pos sh) hu
+  simp only [vst, bsKn, bsSt, bsPc, szSt, szPc, Nat.zero_add]
+  exact Nat.add_lt_add_left h3 _
+
+/-- A knowledge code lies at or above the knowledge block's base. -/
+theorem vkn_ge (i u : Nat) : bsKn sh ≤ vkn sh i u := Nat.le_add_right _ _
+
+/-- A knowledge code lies below the event block. -/
+theorem vkn_lt_bsEv (i u : Nat) (hi : i ≤ sh.steps) (hu : u < shVal sh) :
+    vkn sh i u < bsEv sh := by
+  have h1 : i * shVal sh + u < (sh.steps + 1) * shVal sh :=
+    horner_lt (by omega : i < sh.steps + 1) (shVal_pos sh) hu
+  simp only [vkn, bsEv, bsKn, bsSt, bsPc, szKn, szSt, szPc, Nat.zero_add]
+  exact Nat.add_lt_add_left h1 _
+
+/-- An event code lies at or above the event block's base. -/
+theorem vev_ge (i k : Nat) : bsEv sh ≤ vev sh i k := Nat.le_add_right _ _
+
+/-- An event code lies below the delivery block. -/
+theorem vev_lt_bsDl (i k : Nat) (hi : i < sh.steps) (hk : k < shEv sh) :
+    vev sh i k < bsDl sh := by
+  have h1 : i * shEv sh + k < sh.steps * shEv sh := horner_lt hi (shEv_pos sh) hk
+  have h2 : i * shEv sh + k < (sh.steps + 1) * shEv sh :=
+    Nat.lt_of_lt_of_le h1 (Nat.mul_le_mul_right (shEv sh) (Nat.le_succ sh.steps))
+  simp only [vev, bsDl, bsEv, bsKn, bsSt, bsPc, szEv, szKn, szSt, szPc, Nat.zero_add]
+  exact Nat.add_lt_add_left h2 _
+
+/-- A delivery code lies at or above the delivery block's base. -/
+theorem vdl_ge (i q u : Nat) : bsDl sh ≤ vdl sh i q u := Nat.le_add_right _ _
+
+/-- A delivery code lies below the freshness block. -/
+theorem vdl_lt_bsFr (i q u : Nat) (hi : i < sh.steps) (hq : q < shS sh) (hu : u < shVal sh) :
+    vdl sh i q u < bsFr sh := by
+  have h1 : i * shS sh + q < sh.steps * shS sh := scale_lt' hi (shS_pos sh) hq
+  have h2 : (i * shS sh + q) * shVal sh + u < sh.steps * shS sh * shVal sh :=
+    horner_lt h1 (shVal_pos sh) hu
+  simp only [vdl, bsFr, bsDl, bsEv, bsKn, bsSt, bsPc, szDl, szEv, szKn, szSt, szPc, Nat.zero_add]
+  exact Nat.add_lt_add_left h2 _
+
+/-- A freshness code lies at or above the freshness block's base. -/
+theorem vfr_ge (i q d : Nat) : bsFr sh ≤ vfr sh i q d := Nat.le_add_right _ _
+
+/-- A freshness code lies below the evaluation block. -/
+theorem vfr_lt_bsXe (i q d : Nat) (hi : i < sh.steps) (hq : q < shS sh) (hd : d < shD sh) :
+    vfr sh i q d < bsXe sh := by
+  have h1 : i * shS sh + q < sh.steps * shS sh := scale_lt' hi (shS_pos sh) hq
+  have h2 : (i * shS sh + q) * shD sh + d < sh.steps * shS sh * shD sh :=
+    horner_lt h1 (shD_pos sh) hd
+  simp only [vfr, bsXe, bsFr, bsDl, bsEv, bsKn, bsSt, bsPc, szFr, szDl, szEv, szKn, szSt, szPc,
+    Nat.zero_add]
+  exact Nat.add_lt_add_left h2 _
+
+/-- An evaluation code lies at or above the evaluation block's base. -/
+theorem vxe_ge (i q e u : Nat) : bsXe sh ≤ vxe sh i q e u := Nat.le_add_right _ _
+
+/-- An evaluation code lies below the publisher-auxiliary block. -/
+theorem vxe_lt_bsTotal (i q e u : Nat) (hi : i ≤ sh.steps) (hq : q < shS sh) (he : e < shE sh)
+    (hu : u < shVal sh) : vxe sh i q e u < bsTotal sh := by
+  have h1 : i * shS sh + q < (sh.steps + 1) * shS sh := scale_lt hi (shS_pos sh) hq
+  have h2 : (i * shS sh + q) * shE sh + e < (sh.steps + 1) * shS sh * shE sh :=
+    horner_lt h1 (shE_pos sh) he
+  have h3 : ((i * shS sh + q) * shE sh + e) * shVal sh + u
+      < (sh.steps + 1) * shS sh * shE sh * shVal sh := horner_lt h2 (shVal_pos sh) hu
+  simp only [vxe, bsTotal, bsXe, bsFr, bsDl, bsEv, bsKn, bsSt, bsPc, szXe, szFr, szDl, szEv,
+    szKn, szSt, szPc, Nat.zero_add]
+  exact Nat.add_lt_add_left h3 _
+
+/-- A publisher-auxiliary code lies at or above the auxiliary block's base. -/
+theorem vpb_ge (i q c u : Nat) : bsTotal sh ≤ vpb sh i q c u :=
+  Nat.le_trans (Nat.le_add_right _ _) (Nat.le_add_right _ _)
+
+/-- A publisher-auxiliary code lies below the leak-auxiliary block. -/
+theorem vpb_lt_bsAu (i q c u : Nat) (hi : i < sh.steps) (hq : q < shS sh) (hc : c < shPc sh)
+    (hu : u < shVal sh) : vpb sh i q c u < bsAu sh := by
+  have h1 : i * shS sh + q < sh.steps * shS sh := scale_lt' hi (shS_pos sh) hq
+  have h2 : (i * shS sh + q) * shPc sh + c < sh.steps * shS sh * shPc sh :=
+    horner_lt h1 (shPc_pos sh) hc
+  have h3 : ((i * shS sh + q) * shPc sh + c) * shVal sh + u
+      < sh.steps * shS sh * shPc sh * shVal sh := horner_lt h2 (shVal_pos sh) hu
+  simp only [vpb, bsAu, bsTotal, bsXe, bsFr, bsDl, bsEv, bsKn, bsSt, bsPc, szPb, szXe, szFr,
+    szDl, szEv, szKn, szSt, szPc, Nat.zero_add]
+  rw [Nat.add_assoc]
+  exact Nat.add_lt_add_left h3 _
+
+/-- A leak-auxiliary code lies at or above the leak block's base. -/
+theorem vau_ge (i q x u : Nat) : bsAu sh ≤ vau sh i q x u :=
+  Nat.le_trans (Nat.le_add_right _ _) (Nat.le_add_right _ _)
+
+/-- A leak-auxiliary code lies below the total number of variables. -/
+theorem vau_lt_nVarsAll (i q x u : Nat) (hi : i ≤ sh.steps) (hq : q < shS sh) (hx : x < shV sh)
+    (hu : u < shVal sh) : vau sh i q x u < nVarsAll sh := by
+  have h1 : i * shS sh + q < (sh.steps + 1) * shS sh := scale_lt hi (shS_pos sh) hq
+  have h2 : (i * shS sh + q) * shV sh + x < (sh.steps + 1) * shS sh * shV sh :=
+    horner_lt h1 (shV_pos sh) hx
+  have h3 : ((i * shS sh + q) * shV sh + x) * shVal sh + u
+      < (sh.steps + 1) * shS sh * shV sh * shVal sh := horner_lt h2 (shVal_pos sh) hu
+  simp only [vau, nVarsAll, bsAu, bsTotal, bsXe, bsFr, bsDl, bsEv, bsKn, bsSt, bsPc, szAu,
+    szPb, szXe, szFr, szDl, szEv, szKn, szSt, szPc, Nat.zero_add]
+  rw [Nat.add_assoc]
+  exact Nat.add_lt_add_left h3 _
+
+end Ranges
+
+/-! ### Full injectivity of the positional codes
+
+The one-argument injectivity lemmas of ProtSat.Encode are not enough for the cascade: when a
+variable is recognised as belonging to a family, *all* of the family's indices have to be
+recovered, not just the last one.  The lemmas below do that, two and three coordinates at a
+time, with ProtSat.Encode.lin_inj2 and ProtSat.Encode.lin_inj3. -/
+
+/-- The program-counter code determines step, session and counter. -/
+theorem vpc_inj_full {sh : Shape} {i q c i' q' c' : Nat} (hq : q < shS sh) (hq' : q' < shS sh)
+    (hc : c < shPc sh) (hc' : c' < shPc sh)
+    (h : vpc sh i q c = vpc sh i' q' c') : i = i' ∧ q = q' ∧ c = c' := by
+  unfold vpc bsPc at h
+  obtain ⟨h1, hc2⟩ := lin_inj2 (shPc_pos sh) hc hc' (Nat.add_left_cancel h)
+  obtain ⟨h2, h3⟩ := lin_inj2 (shS_pos sh) hq hq' h1
+  exact ⟨h2, h3, hc2⟩
+
+/-- The store code determines step, session, slot and value. -/
+theorem vst_inj_full {sh : Shape} {i q x u i' q' x' u' : Nat} (hq : q < shS sh)
+    (hq' : q' < shS sh) (hx : x < shV sh) (hx' : x' < shV sh)
+    (hu : u < shVal sh) (hu' : u' < shVal sh)
+    (h : vst sh i q x u = vst sh i' q' x' u') : i = i' ∧ q = q' ∧ x = x' ∧ u = u' := by
+  unfold vst bsSt at h
+  obtain ⟨h1, hu2⟩ := lin_inj2 (shVal_pos sh) hu hu' (Nat.add_left_cancel h)
+  obtain ⟨h2, h3, h4⟩ := lin_inj3 (shS_pos sh) (shV_pos sh) hq hq' hx hx' h1
+  exact ⟨h2, h3, h4, hu2⟩
+
+/-- The knowledge code determines step and value. -/
+theorem vkn_inj_full {sh : Shape} {i u i' u' : Nat} (hu : u < shVal sh) (hu' : u' < shVal sh)
+    (h : vkn sh i u = vkn sh i' u') : i = i' ∧ u = u' := by
+  unfold vkn bsKn at h
+  exact lin_inj2 (shVal_pos sh) hu hu' (Nat.add_left_cancel h)
+
+/-- The event code determines step and alternative. -/
+theorem vev_inj_full {sh : Shape} {i k i' k' : Nat} (hk : k < shEv sh) (hk' : k' < shEv sh)
+    (h : vev sh i k = vev sh i' k') : i = i' ∧ k = k' := by
+  unfold vev bsEv at h
+  exact lin_inj2 (shEv_pos sh) hk hk' (Nat.add_left_cancel h)
+
+/-- The delivery code determines step, session and value. -/
+theorem vdl_inj_full {sh : Shape} {i q u i' q' u' : Nat} (hq : q < shS sh) (hq' : q' < shS sh)
+    (hu : u < shVal sh) (hu' : u' < shVal sh)
+    (h : vdl sh i q u = vdl sh i' q' u') : i = i' ∧ q = q' ∧ u = u' := by
+  unfold vdl bsDl at h
+  obtain ⟨h1, hu2⟩ := lin_inj2 (shVal_pos sh) hu hu' (Nat.add_left_cancel h)
+  obtain ⟨h2, h3⟩ := lin_inj2 (shS_pos sh) hq hq' h1
+  exact ⟨h2, h3, hu2⟩
+
+/-- The freshness code determines step, session and nonce. -/
+theorem vfr_inj_full {sh : Shape} {i q d i' q' d' : Nat} (hq : q < shS sh) (hq' : q' < shS sh)
+    (hd : d < shD sh) (hd' : d' < shD sh)
+    (h : vfr sh i q d = vfr sh i' q' d') : i = i' ∧ q = q' ∧ d = d' := by
+  unfold vfr bsFr at h
+  obtain ⟨h1, hd2⟩ := lin_inj2 (shD_pos sh) hd hd' (Nat.add_left_cancel h)
+  obtain ⟨h2, h3⟩ := lin_inj2 (shS_pos sh) hq hq' h1
+  exact ⟨h2, h3, hd2⟩
+
+/-- The evaluation code determines step, session, table entry and value. -/
+theorem vxe_inj_full {sh : Shape} {i q e u i' q' e' u' : Nat} (hq : q < shS sh)
+    (hq' : q' < shS sh) (he : e < shE sh) (he' : e' < shE sh)
+    (hu : u < shVal sh) (hu' : u' < shVal sh)
+    (h : vxe sh i q e u = vxe sh i' q' e' u') : i = i' ∧ q = q' ∧ e = e' ∧ u = u' := by
+  unfold vxe bsXe at h
+  obtain ⟨h1, hu2⟩ := lin_inj2 (shVal_pos sh) hu hu' (Nat.add_left_cancel h)
+  obtain ⟨h2, h3, h4⟩ := lin_inj3 (shS_pos sh) (shE_pos sh) hq hq' he he' h1
+  exact ⟨h2, h3, h4, hu2⟩
+
+/-- The publisher-auxiliary code determines step, session, counter and value. -/
+theorem vpb_inj_full {sh : Shape} {i q c u i' q' c' u' : Nat} (hq : q < shS sh)
+    (hq' : q' < shS sh) (hc : c < shPc sh) (hc' : c' < shPc sh)
+    (hu : u < shVal sh) (hu' : u' < shVal sh)
+    (h : vpb sh i q c u = vpb sh i' q' c' u') : i = i' ∧ q = q' ∧ c = c' ∧ u = u' := by
+  unfold vpb bsTotal at h
+  rw [Nat.add_assoc, Nat.add_assoc] at h
+  obtain ⟨h1, hu2⟩ := lin_inj2 (shVal_pos sh) hu hu' (Nat.add_left_cancel h)
+  obtain ⟨h2, h3, h4⟩ := lin_inj3 (shS_pos sh) (shPc_pos sh) hq hq' hc hc' h1
+  exact ⟨h2, h3, h4, hu2⟩
+
+/-- The leak-auxiliary code determines step, session, slot and value. -/
+theorem vau_inj_full {sh : Shape} {i q x u i' q' x' u' : Nat} (hq : q < shS sh)
+    (hq' : q' < shS sh) (hx : x < shV sh) (hx' : x' < shV sh)
+    (hu : u < shVal sh) (hu' : u' < shVal sh)
+    (h : vau sh i q x u = vau sh i' q' x' u') : i = i' ∧ q = q' ∧ x = x' ∧ u = u' := by
+  unfold vau bsAu at h
+  rw [Nat.add_assoc, Nat.add_assoc] at h
+  obtain ⟨h1, hu2⟩ := lin_inj2 (shVal_pos sh) hu hu' (Nat.add_left_cancel h)
+  obtain ⟨h2, h3, h4⟩ := lin_inj3 (shS_pos sh) (shV_pos sh) hq hq' hx hx' h1
+  exact ⟨h2, h3, h4, hu2⟩
 
 end ProtSat.Complete
