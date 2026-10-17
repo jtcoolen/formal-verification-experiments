@@ -3,7 +3,7 @@ Copyright (c) 2026 Formally Verified Examples.
 Licensed under the MIT License. See the file LICENSE in the project root for
 license information.
 -/
-import VerifiedLL1.Parser
+import VerifiedLL1.Generator
 
 /-!
 # Phase 1.5 — the grammar of a small quantum circuit language
@@ -335,3 +335,53 @@ theorem parse_hcx_out_of_fuel :
 #eval Parser.parse C M 40 input_hcx
 #eval Parser.parse C M 40 input_bad
 #eval tokensOf input_hcx
+section Generator
+
+-- The generator needs the alphabets as explicit finite enumerations.
+instance : FiniteEnum Tok where
+  elems := [h, cx, s, m, q0, q1, semi]
+  complete := by
+    intro x
+    cases x <;> simp
+
+instance : FiniteEnum Var where
+  elems := [prog, instrs, instr, hi, cxi, si, mi]
+  complete := by
+    intro x
+    cases x <;> simp
+
+set_option maxHeartbeats 4000000000
+set_option maxRecDepth 100000
+
+/-- **The circuit grammar is LL(1)**: the decidable conflict check passes.  This is a
+kernel computation, and `ll1Check_iff` proves it equivalent to the statement that no
+lookahead selects two different productions. -/
+theorem circ_ll1 : C.ll1Check = true := by decide
+
+/-- **And it has no (direct or indirect) left recursion**, which is what makes the
+generated parser terminate. -/
+theorem circ_no_left_recursion : C.noLeftRecursion = true := by decide
+
+-- The generated table.
+#eval C.genTable.entries
+
+/-- **End-to-end.**  The generated parser accepts exactly the circuit language. -/
+theorem circ_end_to_end (ws : List Tok) : C.language ws ↔ ∃ fuel t,
+    Parser.parse C C.genTable fuel (ltoks ws ++ [LTok.eof]) = PRes.ok t [LTok.eof] :=
+  Grammar.generated_language_iff C circ_ll1 circ_no_left_recursion ws
+
+/-- `h q0; cx q0 q1;` is in the language, so the *generated* parser accepts it with a
+valid parse tree whose yield is the whole input. -/
+theorem gen_parse_hcx : ∃ fuel t,
+    Parser.parse C C.genTable fuel input_hcx = PRes.ok t [LTok.eof] ∧
+      Valid C t ∧ Tree.yield t = [h, q0, semi, cx, q0, q1, semi] :=
+  Grammar.generated_accepts_tree C circ_ll1 circ_no_left_recursion _ language_prog_hcx
+
+/-- The empty program is accepted too. -/
+theorem gen_parse_empty : ∃ fuel t,
+    Parser.parse C C.genTable fuel input_empty = PRes.ok t [LTok.eof] ∧
+      Valid C t ∧ Tree.yield t = [] :=
+  Grammar.generated_accepts_tree C circ_ll1 circ_no_left_recursion _ language_empty
+
+end Generator
+

@@ -113,6 +113,35 @@ axiom appearing below is a bug.
 #print axioms VerifiedLL1.Grammar.followSym_of_reachable
 #print axioms VerifiedLL1.Grammar.followSym_start
 
+-- Phase 5: SELECT / LL(1) / generation
+#print axioms VerifiedLL1.Grammar.select_iff
+#print axioms VerifiedLL1.Grammar.ll1Check_iff
+#print axioms VerifiedLL1.Grammar.select_of_derives
+#print axioms VerifiedLL1.Grammar.genTable_get
+#print axioms VerifiedLL1.Grammar.genTable_sound
+#print axioms VerifiedLL1.Grammar.genTable_adequate
+#print axioms VerifiedLL1.Grammar.genTable_complete
+#print axioms VerifiedLL1.Grammar.genTable_correct
+#print axioms VerifiedLL1.Grammar.leftCorner_iff
+#print axioms VerifiedLL1.Grammar.lcReach_iff
+#print axioms VerifiedLL1.Grammar.noLeftRecursion_iff
+#print axioms VerifiedLL1.Grammar.lcRank_lt
+#print axioms VerifiedLL1.Grammar.genTable_progressing
+#print axioms VerifiedLL1.Grammar.generated_language_iff
+#print axioms VerifiedLL1.Grammar.generated_accepts_tree
+
+-- Phase 5 instances
+#print axioms VerifiedLL1.Examples.Toy.toy_ll1
+#print axioms VerifiedLL1.Examples.Toy.toy_no_left_recursion
+#print axioms VerifiedLL1.Examples.Circuits.circ_ll1
+#print axioms VerifiedLL1.Examples.Circuits.circ_no_left_recursion
+#print axioms VerifiedLL1.Examples.Circuits.gen_parse_empty
+#print axioms VerifiedLL1.Examples.Toy.toy_end_to_end
+#print axioms VerifiedLL1.Examples.Toy.toy_accepts_ab
+#print axioms VerifiedLL1.Examples.Circuits.circ_end_to_end
+#print axioms VerifiedLL1.Examples.Circuits.gen_parse_hcx
+#print axioms VerifiedLL1.Examples.Loop.loop_not_ll1
+
 def main : IO Unit := do
   IO.println "The axiom audit above is produced when this module is built."
   IO.println "Re-run it with:  lake env lean Axioms.lean"

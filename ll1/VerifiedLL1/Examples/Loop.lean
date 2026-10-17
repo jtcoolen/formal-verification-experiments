@@ -3,7 +3,7 @@ Copyright (c) 2026 Formally Verified Examples.
 Licensed under the MIT License. See the file LICENSE in the project root for
 license information.
 -/
-import VerifiedLL1.Completeness
+import VerifiedLL1.Generator
 
 /-!
 # Phase 3 counterexample - a *correct* table that never terminates
@@ -222,5 +222,55 @@ theorem never_accepts_nil :
   exact absurd hcall (by simp)
 
 end NonTermination
+
+section Ll1
+
+instance : FiniteEnum Tok where
+  elems := [a]
+  complete := by
+    intro x
+    cases x <;> simp
+
+instance : FiniteEnum Var where
+  elems := [p]
+  complete := by
+    intro x
+    cases x <;> simp
+
+/-- The looping grammar really is conflicted: under the lookahead `a` both `p -> p` and
+`p -> a` are selected. -/
+theorem loop_conflict_a : L.Conflict p (LTok.tok a) :=
+  ⟨[var p], [tok a], mem_pp, mem_pa,
+    by intro h; obtain ⟨h1, _⟩ := List.cons.inj h; exact absurd h1 (Sym.ne_var_tok p a),
+    Or.inl ⟨by simp [isEof], ⟨[], derives_production p [tok a] mem_pa⟩⟩,
+    Or.inl ⟨by simp [isEof], ⟨[], derives_refl [tok a]⟩⟩⟩
+
+/-- And under `eof` both `p -> p` (because `p` erases) and `p -> ε` are selected. -/
+theorem loop_conflict_eof : L.Conflict p LTok.eof :=
+  ⟨[var p], [], mem_pp, mem_pe, by simp,
+    Or.inr ⟨derives_production p [] mem_pe,
+      ⟨[], [], derives_refl _, derives_refl _⟩⟩,
+    Or.inr ⟨derives_refl [], ⟨[], [], derives_refl _, derives_refl _⟩⟩⟩
+
+/-- **The generator refuses this grammar.**  So the counterexample above is not a gap in
+the generator: the LL(1) check rejects exactly the grammars whose correct tables can
+loop. -/
+theorem loop_not_ll1 : L.ll1Check = false := by
+  have h2 : ¬ (L.ll1Check = true) := by
+    intro h
+    exact (Grammar.ll1Check_iff L |>.mp h) p (LTok.tok a) loop_conflict_a
+  cases h : L.ll1Check with
+  | true => exact absurd h h2
+  | false => exact h
+
+/-- The grammar is also directly left-recursive, so the second hypothesis of the
+end-to-end theorem fails as well. -/
+theorem loop_left_recursive : L.noLeftRecursion = false := by decide
+
+-- The generated table for the looping grammar: with a conflict the entry for (p, a) is
+-- whichever production the filter happens to see first, and the parser never finishes.
+#eval L.genTable.entries
+
+end Ll1
 
 end VerifiedLL1.Examples.Loop

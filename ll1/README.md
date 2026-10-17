@@ -20,8 +20,8 @@ lake env lean Axioms.lean # prints the axiom dependencies of every main theorem
 | 2 | Predictive table type, table-driven parser, independent table-correctness predicate, soundness | **done** |
 | 3 | Completeness, termination, rejection of non-members | **done** |
 | 4 | `NULLABLE` / `REACH` / `FIRST` / `FOLLOW` specifications + fixed-point computations, soundness/completeness/termination | **done** |
-| 5 | `SELECT` sets, LL(1) conflict check, table generation, end-to-end theorem | not started |
-| 6 | Quantum circuit DSL as a worked instance | grammar + trees + derivations done (Phase 1 slice) |
+| 5 | `SELECT` sets, LL(1) conflict check, table generation, end-to-end theorem | **done** |
+| 6 | Quantum circuit DSL as a worked instance | grammar + hand table + **generated table**, end-to-end acceptance proved; payloads/AST pending |
 
 ## Layout
 
@@ -42,6 +42,7 @@ ll1/
 │   ├── First.lean              # FIRST spec + computation + soundness/completeness
 │   ├── Reach.lean              # REACH: which nonterminals occur in a sentential form
 │   ├── Follow.lean             # FOLLOW spec + computation + soundness/completeness
+│   ├── Generator.lean          # SELECT, LL(1) check, table generation, correctness, end-to-end
 │   └── Examples/
 │       ├── Toy.lean            # ε-productions, acceptance *and* rejection proofs
 │       ├── Circuits.lean       # quantum circuit DSL grammar (Phase 6 language)
@@ -160,12 +161,13 @@ The correspondence theorem and its ingredients depend only on `propext` and
 
 ## Limitations of the current state
 
-* Phase 5 is not implemented yet: the four analyses are available and proved correct,
-  but there is no `SELECT`-set construction, no LL(1) conflict check and no generated
-  table yet — the example tables are hand-written and certified against the Phase 2
-  predicate.
-* `Grammar.wellFormed` is stated but not yet *used* by any theorem; when Phase 5
-  states the generator's correctness it will appear as an explicit hypothesis.
+* The generator (Phase 5) is implemented and proved correct, but the *converse* — that
+  every correct table comes from the generator — is not claimed: the generator produces
+  *a* correct table for an LL(1) grammar.
+* `Grammar.wellFormed` is stated as a standing sanity condition on grammars but is not
+  needed as a hypothesis by the generator theorems: `genTable_sound` holds for every
+  grammar, and adequacy/completeness are quantified over *reachable* stack contents, so a
+  nonterminal without productions can never be the top of a reachable stack.
 * `Leftmost.lean` proves that parse trees, general derivations and leftmost
   derivations coincide for terminal yields, but the parser of Phase 2 will still have
   to be *connected* to `LeftDerives` (its trace is a leftmost derivation by
@@ -495,15 +497,106 @@ criterion: if `B ≠ start` and no right-hand side mentions `B`, then `B` occurs
 | `follow_eof_iff` | `eof ∈ FOLLOW(A)` iff `A` can be followed by an erasable suffix |
 | `occurs_stable`, `follow_stable` | the iterations are stable at their bounds |
 
-## Next step
+## Phase 5 — the LL(1) parser generator
 
-* Phase 5 (`Generator.lean`): `SELECT(A, rhs) = (FIRST(rhs) ∩ tokens) ∪ (if rhs erases
-  then FOLLOW(A))`; the LL(1) conflict check as a decidable predicate that *rejects*
-  conflicting entries explicitly; table construction over the reachable nonterminals;
-  and the proof that a conflict-free grammar yields a table that is `Sound`, `Adequate`,
-  `Complete` and `Progressing`.  The key bridge lemma to prove is: if
-  `Derives G (rhs ++ cont) (toks w)` and `lookaheadOf w = x` and `var A :: cont` is
-  reachable, then `x ∈ SELECT(A, rhs)` — it is exactly `FirstList.append_decomp` plus
-  `followSym_of_reachable`.
-* Phase 6: qubit payloads and an AST for the circuit DSL, plus a pretty-printer with a
-  proved parser–printer round trip.
+### `Generator.lean`
+
+* **`SELECT`, specified semantically.**  `G.Select A rhs x` says
+  `(x is a token and x ∈ FIRST(rhs))` or `(rhs erases and x ∈ FOLLOW(A))` — where
+  `FIRST`/`FOLLOW` are themselves the derivation-level predicates of Phase 4, so `Select`
+  never mentions the table or the parser.  `Grammar.selectTest` computes it from the
+  computed analyses and `select_iff` proves the two equivalent.
+* **The LL(1) condition.**  `G.Conflict A x` exhibits two *different* productions of `A`
+  both selected by `x`; `G.Ll1` says no pair is conflicted.  `G.ll1Check` is the decidable
+  version (for every `(A, x)` all selected right-hand sides agree) and `ll1Check_iff`
+  proves it equivalent to `Ll1`.  **The generator refuses a conflicted grammar**:
+  `Examples/Loop.lean` now also proves `loop_not_ll1 : L.ll1Check = false` and
+  `loop_left_recursive : L.noLeftRecursion = false` — the looping grammar of Phase 3 is
+  rejected by the check, with the two concrete conflicts `loop_conflict_a` and
+  `loop_conflict_eof` exhibited.
+* **Table construction.**  `Grammar.genEntry` writes, for each pair `(A, x)`, the unique
+  selected production (or nothing); `Grammar.genTable` collects them over the finite
+  enumeration of `N × LTok T`.  `genTable_get` computes a lookup by an explicit induction
+  over that enumeration (only the entry generated from `(A, x)` can match the lookup), and
+  `genTable_sound` gives `Table.Sound`.
+* **The bridge lemma** `select_of_derives`: if `var A :: cont` is reachable and
+  `rhs ++ cont` derives the remaining input `w`, then `lookaheadOf w ∈ SELECT(A, rhs)`.
+  This is `FirstList.append_decomp` (the lookahead comes from `rhs`, or `rhs` erases and it
+  comes from `cont`) plus `followSym_of_reachable`.  It is the only place where the
+  derivation semantics and the analysis meet.
+* **Correctness of the generated table.**  `genTable_adequate` and `genTable_complete`
+  (assuming `ll1Check G = true`) give `genTable_correct : … → Table.Correct G`.  Adequacy
+  is the interesting one: the derivation of the input is turned into a forest
+  (`derives_forest`, Phase 1) and `MatchList.eq_node_cons` reveals *the* production used at
+  the top; the bridge lemma says it is selected by the real lookahead, and conflict-freeness
+  identifies it with the table's entry.  No leftmost-derivation reordering is needed.
+* **Termination.**  `Progressing` (Phase 3) is discharged from a *new* decidable
+  hypothesis: the **left-corner** relation `G.LeftCorner A B` (in one step `A` derives a
+  form whose leftmost symbol is `B`), its reachability `lcReach` as a second monotone
+  fixed point (`lcReach_iff` proves it is the least one containing `A` and closed under left
+  corners), and `noLeftRecursion` (no `A` reaches itself).  The ranking is
+  `lcRank A = |{B | lcReach A B}|`, and `lcRank_lt` proves it strictly decreases along a
+  left corner — the pigeonhole argument `Fixpoint.length_filter_lt_of_new` again.
+  `lc_of_match` is the link back to the parser: if a forest matching `rhs` is
+  `pre ++ node B … :: post` with every tree of `pre` yielding nothing, then `B` sits at a
+  left corner of `rhs` (the symbols before it are exactly the heads of the empty-yielding
+  trees, and each of them erases).  `genTable_progressing` puts the two together.
+* **End-to-end.**  `generated_language_iff`: if `ll1Check G = true` and
+  `noLeftRecursion G = true` then for every word `ws`,
+
+      G.language ws  ↔  ∃ fuel t, parse G (genTable G) fuel (ltoks ws ++ [eof]) = ok t [eof]
+
+  and `generated_accepts_tree` adds that the returned tree is `Valid` with yield exactly
+  `ws`.  Rejection of non-members is `never_accepts_of_not_language` (Phase 3) and needs
+  only `Sound`, which holds unconditionally.  **Assumptions stated explicitly**: the two
+  decidable hypotheses above; `FiniteEnum` instances for both alphabets; and the
+  reachability hypothesis inside `Table.Adequate`/`Complete` (see Phase 2).
+
+### Worked instances
+
+* `Examples/Toy.lean`: `toy_ll1` and `toy_no_left_recursion` are discharged by `decide`;
+  `#eval genEntries` prints the textbook table
+  `s ↦ p q` on `{a,b,eof}`, `p ↦ a` on `a`, `p ↦ ε` on `{b,eof}`, `q ↦ b q` on `b`,
+  `q ↦ ε` on `eof`.  `toy_accepts_ab` exhibits the acceptance of `a b` through the
+  generated parser, and `gen_no_c` that no production of `s` is selected by `c`.
+* `Examples/Circuits.lean`: `circ_ll1`, `circ_no_left_recursion` (both by `decide`, a few
+  seconds of kernel time), `#eval C.genTable.entries` prints the 18-entry table for the
+  circuit DSL, and `circ_end_to_end` / `gen_parse_hcx` / `gen_parse_empty` prove that the
+  *generated* parser accepts `h q0; cx q0 q1;` and the empty program with valid parse trees
+  covering the whole input.
+
+### Theorem inventory (Phase 5)
+
+| Theorem | Statement (schematic) |
+|---|---|
+| `select_iff` | computed `SELECT` = the derivation-level `Select` |
+| `ll1Check_iff` | the decidable check = the LL(1) condition |
+| `select_of_derives` | **bridge**: reachable + `rhs ++ cont ⇒* w` ⟹ `lookaheadOf w ∈ SELECT(A,rhs)` |
+| `genTable_get` | lookup in the generated table = the head of its `selectRhs` list |
+| `genTable_sound` | every generated entry is a production (unconditional) |
+| `genTable_adequate` | `ll1Check` ⟹ the table never destroys a derivation |
+| `genTable_complete` | `ll1Check` ⟹ the table offers a production whenever one exists |
+| `genTable_correct` | `ll1Check` ⟹ `Sound ∧ Adequate ∧ Complete` |
+| `leftCorner_iff` | computed left-corner = the derivation-level relation |
+| `lcReach_iff` | computed reachability = the least closed set |
+| `noLeftRecursion_iff` | the check = no nonterminal is its own left corner |
+| `lcRank_lt` | no left recursion ⟹ the rank drops along every left corner |
+| `lc_of_match` | an empty-yielding prefix puts the child at a left corner |
+| `genTable_progressing` | no left recursion ⟹ `Table.Progressing` |
+| `generated_language_iff` | **end-to-end**: LL(1) + no left recursion ⟹ accepts exactly the language |
+| `generated_accepts_tree` | the accepted tree is valid and yields the whole input |
+
+## Limitations and next steps
+
+* `Table.Correct` is *not* proved equivalent to "the table was generated": the generator
+  produces *a* correct table, and `Examples/Continuation.lean` shows no table can satisfy
+  the unrestricted variant of `Complete`.
+* `ll1Check G = true` does not by itself imply `noLeftRecursion G = true`; the end-to-end
+  theorem therefore takes both.  (For grammars in which every nonterminal is reachable and
+  productive the classical argument derives the second from the first; formalising that is
+  future work.)
+* The `decide` proofs of `circ_ll1` / `circ_no_left_recursion` cost seconds of kernel time
+  because `Fixpoint.iterP` does not memoise; a list-fold iteration would make them
+  near-instant.  This is a performance issue, not a soundness one.
+* Phase 6 remainder: qubit *payloads* (structured tokens) and an AST for the circuit
+  language, plus a pretty-printer with a proved parser–printer round trip.

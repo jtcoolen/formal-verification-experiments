@@ -445,4 +445,361 @@ theorem Grammar.genTable_correct (G : Grammar T N) (hall : G.ll1Check = true) :
 
 end Correctness
 
+section LeftCorner
+
+variable [DecidableEq T] [DecidableEq N] [FiniteEnum T] [FiniteEnum N]
+
+/-- Some occurrence of `var B` in `rhs` is preceded only by erasable symbols. -/
+def lcRhsTest [BEq N] (nul : Sym T N → Bool) : List (Sym T N) → N → Bool
+  | [], _ => false
+  | s :: ss, B => (s == Sym.var B) || (nul s && lcRhsTest nul ss B)
+
+theorem lcRhsTest_iff [BEq N] [LawfulBEq N] (nul : Sym T N → Bool) (B : N) :
+    ∀ (rhs : List (Sym T N)), lcRhsTest nul rhs B = true ↔
+      ∃ α β, rhs = α ++ [Sym.var B] ++ β ∧ ∀ s ∈ α, nul s = true := by
+  intro rhs
+  induction rhs with
+  | nil =>
+    constructor
+    · intro h
+      exact absurd h (by simp [lcRhsTest])
+    · rintro ⟨α, β, heq, _⟩
+      cases α with
+      | nil => cases heq
+      | cons a as => cases heq
+  | cons s ss ih =>
+    constructor
+    · intro h
+      simp only [lcRhsTest] at h
+      rcases Fixpoint.or_eq_true_iff.mp h with h | h
+      · have hs : s = Sym.var B := eq_of_beq h
+        exact ⟨[], ss, hs ▸ rfl, by simp⟩
+      · obtain ⟨h1, h2⟩ := Fixpoint.and_eq_true_iff.mp h
+        obtain ⟨α, β, hrhs, hall⟩ := ih.mp h2
+        refine ⟨s :: α, β, by rw [hrhs]; rfl, ?_⟩
+        intro x hx
+        rcases List.mem_cons.mp hx with heq | hx'
+        · exact heq ▸ h1
+        · exact hall x hx'
+    · rintro ⟨α, β, heq, hall⟩
+      cases α with
+      | nil =>
+        rw [List.nil_append] at heq
+        obtain ⟨hs, _⟩ := List.cons.inj heq
+        subst hs
+        simp only [lcRhsTest]
+        exact Fixpoint.or_eq_true_iff.mpr (Or.inl (by simp))
+      | cons a as =>
+        rw [List.cons_append] at heq
+        obtain ⟨hs, hrest⟩ := List.cons.inj heq
+        subst hs
+        rw [lcRhsTest]
+        refine Fixpoint.or_eq_true_iff.mpr (Or.inr (Fixpoint.and_eq_true_iff.mpr
+          ⟨hall s (List.Mem.head _), ?_⟩))
+        exact ih.mpr ⟨as, β, hrest, fun x hx => hall x (List.Mem.tail _ hx)⟩
+
+/-- **Specification.** `G.LeftCorner A B`: in one step `A` can derive a sentential form
+whose leftmost symbol is `B`.  A cycle in this relation is (direct or indirect) *left
+recursion*. -/
+def Grammar.LeftCorner (G : Grammar T N) (A B : N) : Prop :=
+  ∃ α β, (A, α ++ [Sym.var B] ++ β) ∈ G.productions ∧ Derives G α []
+
+/-- The computed left-corner test. -/
+def Grammar.leftCorner (G : Grammar T N) (A B : N) : Bool :=
+  G.productions.any fun pr => (pr.1 == A && lcRhsTest (firstNul G) pr.2 B)
+
+theorem Grammar.leftCorner_iff (G : Grammar T N) (A B : N) :
+    G.leftCorner A B = true ↔ G.LeftCorner A B := by
+  unfold Grammar.leftCorner Grammar.LeftCorner
+  constructor
+  · intro h
+    obtain ⟨pr, hpr, hand⟩ := List.any_eq_true.mp h
+    obtain ⟨h1, h2⟩ := Fixpoint.and_eq_true_iff.mp hand
+    have hA : pr.1 = A := eq_of_beq h1
+    obtain ⟨α, β, hrhs, hall⟩ := (lcRhsTest_iff (firstNul G) B pr.2).mp h2
+    refine ⟨α, β, hA ▸ hrhs ▸ hpr, derives_nil_of_symbols α (fun s hs =>
+      (symNull_iff G s).mp (hall s hs))⟩
+  · rintro ⟨α, β, hprod, hder⟩
+    refine List.any_eq_true.mpr ⟨(A, α ++ [Sym.var B] ++ β), hprod,
+      Fixpoint.and_eq_true_iff.mpr ⟨by simp,
+        (lcRhsTest_iff (firstNul G) B (α ++ [Sym.var B] ++ β)).mpr
+          ⟨α, β, rfl, fun s hs =>
+            nullable_backward G α [] hder (by simp) s hs⟩⟩⟩
+
+end LeftCorner
+
+section LeftRecursion
+
+variable [DecidableEq T] [DecidableEq N] [FiniteEnum T] [FiniteEnum N]
+
+/-- The transformer computing the left-corner closure of `{A}`: start at `A` and keep
+adding the left corners of everything already reached. -/
+def lcTCP (G : Grammar T N) (A : N) : (N → Bool) → N → Bool :=
+  fun S B => (A == B) || G.productions.any fun pr =>
+    S pr.1 && lcRhsTest (firstNul G) pr.2 B
+
+theorem lcTCP_mono (G : Grammar T N) (A : N) : Fixpoint.PMono (lcTCP G A) := by
+  intro f g hle B h
+  simp only [lcTCP] at h ⊢
+  rcases Fixpoint.or_eq_true_iff.mp h with h | h
+  · exact Fixpoint.or_eq_true_iff.mpr (Or.inl h)
+  · obtain ⟨pr, hpr, hand⟩ := List.any_eq_true.mp h
+    obtain ⟨h1, h2⟩ := Fixpoint.and_eq_true_iff.mp hand
+    refine Fixpoint.or_eq_true_iff.mpr (Or.inr (List.any_eq_true.mpr ⟨pr, hpr,
+      Fixpoint.and_eq_true_iff.mpr ⟨hle pr.1 h1, h2⟩⟩))
+
+/-- **Specification.** `G.LcReach A B`: `B` lies in every set of nonterminals that
+contains `A` and is closed under taking left corners — the least-fixed-point
+characterisation of reachability, which avoids indexing a chain of steps. -/
+def Grammar.LcReach (G : Grammar T N) (A B : N) : Prop :=
+  ∀ (S : N → Prop), S A → (∀ (C D : N), G.LeftCorner C D → S C → S D) → S B
+
+/-- The computed reachability: the limit of the closure iteration. -/
+def Grammar.lcReach (G : Grammar T N) (A B : N) : Bool :=
+  Fixpoint.iterP (lcTCP G A) (G.occursRounds) B
+
+theorem Grammar.lcReach_closed (G : Grammar T N) (A B : N) :
+    G.lcReach A B = true ↔ lcTCP G A (G.lcReach A) B = true := by
+  show Fixpoint.iterP (lcTCP G A) (G.occursRounds) B = true ↔
+      lcTCP G A (Fixpoint.iterP (lcTCP G A) (G.occursRounds)) B = true
+  exact Fixpoint.iterP_closed (FiniteEnum.elems (α := N)) (lcTCP G A)
+    (lcTCP_mono G A) FiniteEnum.complete B
+
+theorem Grammar.lcReach_refl (G : Grammar T N) (A : N) : G.lcReach A A = true := by
+  rw [lcReach_closed]
+  simp only [lcTCP]
+  exact Fixpoint.or_eq_true_iff.mpr (Or.inl (by simp))
+
+theorem Grammar.lcReach_step (G : Grammar T N) {A B C : N}
+    (hcorner : G.LeftCorner B C) (h : G.lcReach A B = true) : G.lcReach A C = true := by
+  rw [lcReach_closed]
+  obtain ⟨α, β, hprod, hder⟩ := hcorner
+  refine Fixpoint.or_eq_true_iff.mpr (Or.inr (List.any_eq_true.mpr
+    ⟨(B, α ++ [Sym.var C] ++ β), hprod, ?_⟩))
+  show (G.lcReach A B && lcRhsTest (firstNul G) (α ++ [Sym.var C] ++ β) C) = true
+  exact Fixpoint.and_eq_true_iff.mpr ⟨h,
+    (lcRhsTest_iff (firstNul G) C (α ++ [Sym.var C] ++ β)).mpr ⟨α, β, rfl,
+      fun s hs => nullable_backward G α [] hder (by simp) s hs⟩⟩
+
+theorem Grammar.lcReach_inv (G : Grammar T N) {A B : N} (h : G.lcReach A B = true) :
+    A = B ∨ ∃ C, G.LeftCorner C B ∧ G.lcReach A C = true := by
+  rw [lcReach_closed] at h
+  simp only [lcTCP] at h
+  rcases Fixpoint.or_eq_true_iff.mp h with h | h
+  · exact Or.inl (eq_of_beq h)
+  · obtain ⟨pr, hpr, hand⟩ := List.any_eq_true.mp h
+    obtain ⟨h1, h2⟩ := Fixpoint.and_eq_true_iff.mp hand
+    obtain ⟨α, β, hrhs, hall⟩ := (lcRhsTest_iff (firstNul G) B pr.2).mp h2
+    refine Or.inr ⟨pr.1, ⟨α, β, hrhs ▸ hpr,
+      derives_nil_of_symbols α (fun s hs => (symNull_iff G s).mp (hall s hs))⟩, h1⟩
+
+/-- **Induction principle for the computed reachability.**  Any set that contains `A` and
+is closed under left corners contains everything the iteration reaches from `A`. -/
+theorem Grammar.lcReach_ind (G : Grammar T N) (A : N) (S : N → Prop)
+    (hA : S A) (hstep : ∀ (C D : N), G.LeftCorner C D → S C → S D) :
+    ∀ (k : Nat) (D : N), Fixpoint.iterP (lcTCP G A) k D = true → S D := by
+  intro k
+  induction k with
+  | zero => intro D h; exact absurd h (by simp [Fixpoint.iterP])
+  | succ k ih =>
+    intro D h
+    rw [Fixpoint.iterP_succ] at h
+    simp only [lcTCP] at h
+    rcases Fixpoint.or_eq_true_iff.mp h with h | h
+    · have hAD : A = D := eq_of_beq h
+      exact hAD ▸ hA
+    · obtain ⟨pr, hpr, hand⟩ := List.any_eq_true.mp h
+      obtain ⟨ha, hb⟩ := Fixpoint.and_eq_true_iff.mp hand
+      obtain ⟨α, β, hrhs, hall⟩ := (lcRhsTest_iff (firstNul G) D pr.2).mp hb
+      refine hstep pr.1 D ⟨α, β, hrhs ▸ hpr,
+        derives_nil_of_symbols α (fun s hs => (symNull_iff G s).mp (hall s hs))⟩
+        (ih pr.1 ha)
+
+/-- **Soundness and completeness of the reachability computation**: the computed relation
+is exactly the least one containing `A` and closed under left corners. -/
+theorem Grammar.lcReach_iff (G : Grammar T N) (A B : N) :
+    G.lcReach A B = true ↔ G.LcReach A B := by
+  constructor
+  · intro h S hA hstep
+    exact lcReach_ind G A S hA hstep G.occursRounds B h
+  · intro h
+    exact h (fun X => G.lcReach A X = true) (lcReach_refl G A)
+      (fun C D hc hcd => lcReach_step G hc hcd)
+
+theorem Grammar.lcReach_trans (G : Grammar T N) {A B C : N}
+    (h1 : G.lcReach A B = true) (h2 : G.lcReach B C = true) : G.lcReach A C = true :=
+  (lcReach_iff G B C).mp h2 (fun X => G.lcReach A X = true) h1
+    (fun _D _E hd he => lcReach_step G hd he)
+
+/-- **The left-recursion check.**  No nonterminal is reachable from itself by one or more
+left-corner steps: the grammar is neither directly nor indirectly left-recursive. -/
+def Grammar.noLeftRecursion (G : Grammar T N) : Bool :=
+  (FiniteEnum.elems (α := N)).all fun A =>
+    (FiniteEnum.elems (α := N)).all fun B => !(G.leftCorner A B && G.lcReach B A)
+
+theorem Grammar.noLeftRecursion_iff (G : Grammar T N) :
+    G.noLeftRecursion = true ↔ ∀ A B, G.LeftCorner A B → G.lcReach B A = false := by
+  constructor
+  · intro hall A B hcorner
+    have htest := (List.all_eq_true.mp hall) A (FiniteEnum.complete A)
+    have htest' := (List.all_eq_true.mp htest) B (FiniteEnum.complete B)
+    have hc : G.leftCorner A B = true := (leftCorner_iff G A B).mpr hcorner
+    cases h : G.lcReach B A with
+    | true => exact absurd htest' (by simp [hc, h])
+    | false => rfl
+  · intro hall
+    show (FiniteEnum.elems (α := N)).all _ = true
+    rw [List.all_eq_true]
+    intro A hA
+    rw [List.all_eq_true]
+    intro B hB
+    by_cases hc : G.leftCorner A B = true
+    · have hlr : G.lcReach B A = false :=
+        hall A B ((leftCorner_iff G A B).mp hc)
+      simp [hc, hlr]
+    · simp [hc]
+
+/-- **The ranking used for termination**: the number of nonterminals reachable from `A`
+by left-corner steps.  Without left recursion every left corner has strictly fewer. -/
+def Grammar.lcRank (G : Grammar T N) (A : N) : Nat :=
+  ((FiniteEnum.elems (α := N)).filter (G.lcReach A)).length
+
+theorem Grammar.lcRank_lt (G : Grammar T N) (hnr : G.noLeftRecursion = true) {A B : N}
+    (hcorner : G.LeftCorner A B) : G.lcRank B < G.lcRank A := by
+  unfold Grammar.lcRank
+  refine Fixpoint.length_filter_lt_of_new (l := FiniteEnum.elems (α := N))
+    (G.lcReach B) (G.lcReach A) ?_ ⟨A, FiniteEnum.complete _, lcReach_refl G A,
+      (noLeftRecursion_iff G).mp hnr A B hcorner⟩
+  intro C hC h
+  exact lcReach_trans G (lcReach_step G hcorner (lcReach_refl G A)) h
+
+theorem Grammar.lcRank_le (G : Grammar T N) (A : N) :
+    G.lcRank A ≤ (FiniteEnum.elems (α := N)).length :=
+  Fixpoint.length_filter_le (FiniteEnum.elems (α := N)) (G.lcReach A)
+
+end LeftRecursion
+
+section Progressing
+
+variable [DecidableEq T] [DecidableEq N] [FiniteEnum T] [FiniteEnum N]
+
+/-- If a forest matching `rhs` is `pre ++ node B ts' :: post` and every tree in `pre`
+yields nothing, then `B` sits at a left corner of `rhs`: the symbols of `rhs` before it
+are exactly the heads of the empty-yielding trees. -/
+theorem lc_of_match {G : Grammar T N} (B : N) (ts' : List (Tree T N)) :
+    ∀ (pre : List (Tree T N)) (post : List (Tree T N)) (rhs : List (Sym T N)),
+      MatchList G rhs (pre ++ Tree.node B ts' :: post) →
+        (∀ u ∈ pre, Tree.yield u = []) →
+        ∃ α β, rhs = α ++ [Sym.var B] ++ β ∧ (∀ s ∈ α, firstNul G s = true) := by
+  intro pre
+  induction pre with
+  | nil =>
+    intro post rhs hmatch _
+    cases rhs with
+    | nil => exact absurd hmatch (by intro h; cases h)
+    | cons s ss =>
+      obtain ⟨t', rest, het, hone, htail⟩ := MatchList.cons_inv hmatch
+      obtain ⟨h1, h2⟩ := List.cons.inj het
+      subst h1
+      subst h2
+      cases s with
+      | tok a => exact absurd hone (by intro h; cases h)
+      | var C =>
+        obtain ⟨ts₁, rhsC, ts₂, heq, hp, hchild, hrest⟩ := MatchList.eq_node_cons hone
+        obtain ⟨hnode, hts₂⟩ := List.cons.inj heq
+        subst hts₂
+        obtain ⟨hCB, hts₁⟩ := Tree.node.inj hnode
+        subst hts₁
+        have hBC : C = B := by cases hCB; rfl
+        subst hBC
+        exact ⟨[], ss, rfl, by simp⟩
+  | cons u us ih =>
+    intro post rhs hmatch hyield
+    cases rhs with
+    | nil => exact absurd hmatch (by intro h; cases h)
+    | cons s ss =>
+      obtain ⟨t', rest, het, hone, htail⟩ := MatchList.cons_inv hmatch
+      obtain ⟨h1, h2⟩ := List.cons.inj het
+      subst h1
+      subst h2
+      obtain ⟨α, β, hrhs, hall⟩ :=
+        ih post ss htail (fun x hx => hyield x (List.Mem.tail _ hx))
+      refine ⟨s :: α, β, by rw [hrhs]; rfl, ?_⟩
+      intro x hx
+      rcases List.mem_cons.mp hx with heq | hx'
+      · -- the head symbol erases, because its tree yields nothing
+        subst heq
+        have hy : Tree.yield u = [] := hyield u (List.Mem.head _)
+        cases x with
+        | tok a =>
+          obtain ⟨t'', hty, _⟩ := MatchList.eq_leaf_cons hone
+          obtain ⟨h1, _⟩ := List.cons.inj hty
+          subst h1
+          exact absurd hy (by simp)
+        | var C =>
+          have hder' : Derives G [Sym.var C] (toks []) :=
+            by simpa [hy] using (matchList_derives hone :
+              Derives G [Sym.var C] (toks (Tree.yieldForest [u])))
+          have hder : Derives G [Sym.var C] [] := hder'
+          exact nullable_backward G [Sym.var C] [] hder (by simp) (Sym.var C)
+            (List.Mem.head _)
+      · exact hall x hx'
+
+/-- **The generated table progresses** (no left recursion): every child the parser can
+descend into without consuming input is a strict left corner, so its rank drops. -/
+theorem Grammar.genTable_progressing (G : Grammar T N) (_hall : G.ll1Check = true)
+    (hnr : G.noLeftRecursion = true) :
+    Table.Progressing G G.genTable (fun A => G.lcRank A + 1) := by
+  intro A x rhs hget pre t post ws rest B hmatch hyield hall' hroot hlook
+  cases t with
+  | leaf a => exact absurd hroot (by simp [Tree.root?])
+  | node C ts' =>
+    have hCB : C = B := Option.some.inj hroot
+    obtain ⟨α, β, hrhs, hall''⟩ :=
+      lc_of_match C ts' pre post rhs hmatch hall'
+    obtain ⟨hrhs', _⟩ := genTable_entry hget
+    have hprod : (A, α ++ [Sym.var C] ++ β) ∈ G.productions := hrhs ▸ hrhs'
+    have hcorner : G.LeftCorner A C :=
+      ⟨α, β, hprod, derives_nil_of_symbols α (fun s hs =>
+        (symNull_iff G s).mp (hall'' s hs))⟩
+    have hlt : G.lcRank C < G.lcRank A := lcRank_lt G hnr hcorner
+    rw [hCB] at hlt
+    exact Nat.succ_lt_succ hlt
+
+end Progressing
+
+section EndToEnd
+
+variable [DecidableEq T] [DecidableEq N] [FiniteEnum T] [FiniteEnum N]
+
+/-- The ranking is bounded by the size of the nonterminal alphabet. -/
+theorem Grammar.lcRank_bdd (G : Grammar T N) :
+    ∀ A, (fun A => G.lcRank A + 1) A ≤ (FiniteEnum.elems (α := N)).length + 1 := fun A =>
+  Nat.succ_le_succ (lcRank_le G A)
+
+/-- **The end-to-end theorem.**  Suppose the generator succeeds (the grammar is LL(1)) and
+the grammar has no left recursion.  Then the generated parser *accepts exactly the
+language of the grammar*: for every finite input word `ws`, `ws` is in the language if
+and only if some amount of fuel makes the parser return a tree with the whole input
+consumed.  Soundness (every acceptance is a real parse) holds unconditionally, and
+rejection of non-members holds at every fuel value: see `parse_ok_imp_language` and
+`never_accepts_of_not_language` (Phase 3). -/
+theorem Grammar.generated_language_iff (G : Grammar T N) (hall : G.ll1Check = true)
+    (hnr : G.noLeftRecursion = true) (ws : List T) :
+    G.language ws ↔ ∃ fuel t,
+      Parser.parse G G.genTable fuel (ltoks ws ++ [LTok.eof]) = PRes.ok t [LTok.eof] :=
+  language_iff_accepts (genTable_correct G hall) (genTable_progressing G hall hnr)
+    (lcRank_bdd G)
+
+/-- The same statement with the shape of the result spelled out: the accepted tree is a
+valid parse tree of `G` whose yield is exactly the input. -/
+theorem Grammar.generated_accepts_tree (G : Grammar T N) (hall : G.ll1Check = true)
+    (hnr : G.noLeftRecursion = true) (ws : List T) (h : G.language ws) : ∃ fuel t,
+      Parser.parse G G.genTable fuel (ltoks ws ++ [LTok.eof]) = PRes.ok t [LTok.eof] ∧
+        Valid G t ∧ Tree.yield t = ws :=
+  language_imp_accepts (genTable_correct G hall) (genTable_progressing G hall hnr)
+    (lcRank_bdd G) h
+
+end EndToEnd
+
 end VerifiedLL1

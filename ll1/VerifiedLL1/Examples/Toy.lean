@@ -3,7 +3,7 @@ Copyright (c) 2026 Formally Verified Examples.
 Licensed under the MIT License. See the file LICENSE in the project root for
 license information.
 -/
-import VerifiedLL1.Follow
+import VerifiedLL1.Generator
 
 /-!
 # Phase 1.4 — A worked example grammar
@@ -469,5 +469,42 @@ def firstStrs : List String := firstPairs.map fun p => symStr p.1 ++ " -> " ++ l
 def followStrs : List String := followPairs.map fun p => varStr p.1 ++ " -> " ++ ltokStr p.2
 
 end Render
+
+section Generator
+
+/-- The toy grammar is LL(1): no lookahead selects two different productions.  The check
+is a finite computation, discharged by the kernel. -/
+theorem toy_ll1 : G.ll1Check = true := by decide
+
+/-- And it has no left recursion. -/
+theorem toy_no_left_recursion : G.noLeftRecursion = true := by decide
+
+/-- The generated table. -/
+def genEntries : List (Var × (LTok Tok × List (Sym Tok Var))) := G.genTable.entries
+
+#eval genEntries
+
+/-- **End-to-end instance.**  The generated parser accepts exactly the language of `G`. -/
+theorem toy_end_to_end (ws : List Tok) : G.language ws ↔ ∃ fuel t,
+    Parser.parse G G.genTable fuel (ltoks ws ++ [LTok.eof]) = PRes.ok t [LTok.eof] :=
+  Grammar.generated_language_iff G toy_ll1 toy_no_left_recursion ws
+
+/-- The word `a b` is in the language, so the generated parser accepts it for some fuel,
+and the tree it returns is a valid parse tree with that yield. -/
+theorem toy_accepts_ab : ∃ fuel t,
+    Parser.parse G G.genTable fuel (ltoks [a, b] ++ [LTok.eof]) = PRes.ok t [LTok.eof] ∧
+      Valid G t ∧ Tree.yield t = [a, b] :=
+  Grammar.generated_accepts_tree G toy_ll1 toy_no_left_recursion _ language_ab
+
+/-- No production of `s` is selected by the token `c`, so the generated table has no
+entry for that pair; by `never_accepts_of_not_language` (Phase 3) any word outside the
+language is rejected at every fuel value. -/
+theorem gen_no_c : G.genTable.get s (LTok.tok c) = none := by decide
+
+-- The generated parser on `a b`: a concrete acceptance, and on `c`: a rejection.
+#eval Parser.parse G G.genTable 40 (ltoks [a, b] ++ [LTok.eof])
+#eval Parser.parse G G.genTable 40 (ltoks [c] ++ [LTok.eof])
+
+end Generator
 
 end VerifiedLL1.Examples.Toy
