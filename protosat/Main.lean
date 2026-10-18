@@ -6,51 +6,82 @@ license information.
 import ProtSat
 
 /-!
-# ProtSat demonstration
+# ProtSat: the command-line analyser
 
-Development snapshot: prints the message algebra and a toy protocol, so that
     lake exe protosatDemo
-runs end to end.  The full analyser pipeline (bounded model -> CNF -> DPLL -> trace ->
-independent certificate check) replaces this in a later round; see KB/PROTOSAT.md for
-the ordered list of remaining modules.
+
+prints, for each of the six protocol examples of specification section 9:
+
+* the model's shape (sessions, roles, universe size, deduction instances),
+* the size of the generated CNF,
+* the analyser's verdict - the real pipeline: bounded model, CNF, DPLL, decoded trace,
+  certificate - and, for an attack verdict, the certificate checker's answer,
+* for the Needham-Schroeder examples, the independently checked attack traces.
+
+Nothing here is a proof: the proofs are in the library (see the README's theorem
+inventory).  This program is the executable evidence that the pipeline runs and that the
+bounds are the ones the theorems need.
 -/
 
-open ProtSat
+open ProtSat Term OneHot Bounded Attacker Protocol Encode Encoding Certificate Analyzer Examples
+open ProtSat.DPLL (dpll)
 
-/-- A tiny symmetric protocol used by the placeholder demo: A sends a fresh nonce to B,
-B declares it secret. -/
-def toyProtocol : Protocol :=
-  { roles :=
-      [ { acts := [Action.fresh 0 0, Action.send 1 (Expr.var 0)] },
-        { acts := [Action.recv 0 0, Action.secret (Expr.var 0)] } ],
-    sessions := [{ role := 0, self := 0, peer := 1 }, { role := 1, self := 1, peer := 0 }],
-    agents := [0, 1],
-    nonceDomain := [7, 8],
-    compromised := [],
-    secrets := [Secret.store 0 0],
-    auths := [] }
+/-- Print a verdict in one line, with the certificate checker's answer when there is one. -/
+def showVerdict (P : Protocol) (v : Verdict) : String :=
+  match v with
+  | Verdict.boundsTooSmall => "BOUNDS TOO SMALL (univClosed fails: raise Bounds.rounds)"
+  | Verdict.safe => "SAFE within the declared bounds (no model of the CNF)"
+  | Verdict.attack c =>
+      "ATTACK (" ++ toString c.steps.length ++ " events); certificate accepted: "
+        ++ toString (checkCertificate P c)
 
-/-- One line of the demo output. -/
-def line (s : String) : IO Unit := IO.println s
+/-- One example, one block of output. -/
+def demo (name : String) (P : Protocol) (B : Bounds) : IO Unit := do
+  IO.println ("--- " ++ name)
+  IO.println ("    sessions " ++ toString P.sessions.length ++ ", roles " ++ toString P.roles.length
+    ++ ", universe " ++ toString ((shapeOf P B).U.length) ++ " messages, "
+    ++ toString (nInst (shapeOf P B)) ++ " deduction instances")
+  IO.println ("    CNF: " ++ toString (nVarsAll (shapeOf P B)) ++ " variables, "
+    ++ toString ((encode P B).clauses.length) ++ " clauses")
+  IO.println ("    univClosed: " ++ toString (univClosedBool (shapeOf P B) P))
+  IO.println ("    verdict: " ++ showVerdict P (analyze P B))
+  IO.println ""
+
+/-- The attack traces that are verified by the independent checker rather than by the solver,
+with the checker's answer recomputed here. -/
+def demoCert (name : String) (P : Protocol) (tr : List Ev) (expect : Bool) : IO Unit := do
+  let c := certOfTrace P tr
+  IO.println ("--- " ++ name)
+  IO.println ("    " ++ toString tr.length ++ " events; checkCertificate = "
+    ++ toString (checkCertificate P c) ++ " (expected " ++ toString expect ++ ")")
+  IO.println ("    trace: " ++ toString (certTrace c).length ++ " events replayed by the checker")
+  IO.println ""
 
 def main : IO Unit := do
-  line "ProtSat: symbolic protocol analyser (development snapshot)"
-  line "=========================================================="
-  let t : Term := .encS (.pair (.nonce 7) (.agent 1)) (Key.shrk 0 1)
-  line ("example message: " ++ t.show')
-  line ("  size " ++ toString t.size ++ ", depth " ++ toString t.depth)
-  let P := toyProtocol
-  line ("toy protocol: " ++ toString P.sessions.length ++ " sessions, "
-    ++ toString P.roles.length ++ " roles")
-  line ("  initial attacker knowledge: "
-    ++ toString (P.initKn.map fun k => k.show'))
-  line ("  closed secrets: " ++ toString (P.closedSecretTerms.map fun k => k.show'))
-  line ("  initial configuration has " ++ toString (initCfg P).sess.length
-    ++ " session states")
-  line ("  session 0 role length: " ++ toString (P.roleLen 0))
-  line ("  session 1 role length: " ++ toString (P.roleLen 1))
-  line ("  session 0 has an action at pc 0: " ++ toString ((P.actionAt 0 0).isSome))
-  line ("  session 0 has an action at pc 5: " ++ toString ((P.actionAt 0 5).isSome))
-  line ""
-  line "Modules built so far: Syntax, CNF, Attacker, Protocol, Operational, DPLL (core)."
-  line "Pending: Theory, Deduce, Bounded, Encode, Certificate, Analyzer, Examples."
+  IO.println "ProtSat: a proof-producing SAT-based protocol analyser, verified in Lean 4"
+  IO.println "=========================================================================="
+  IO.println ""
+  IO.println "EXAMPLES (specification section 9)"
+  IO.println ""
+  demo "1. challenge-response, secure under explicit assumptions" Challenge.P Challenge.B
+  demo "2. replay-vulnerable protocol (static authenticator)" Replay.P Replay.B
+  demo "3. secrecy violation by key disclosure (A compromised)" KeyDisclosure.P KeyDisclosure.B
+  demo "3b. the same protocol with the key NOT disclosed" KeyDisclosure.PSafe KeyDisclosure.B
+  IO.println "4/5. Needham-Schroeder public key and the Lowe attack"
+  IO.println ("     sessions " ++ toString NS.P.sessions.length ++ ", universe "
+    ++ toString ((shapeOf NS.P NS.B).U.length) ++ " messages at rounds "
+    ++ toString NS.B.rounds ++ ", steps " ++ toString NS.B.steps)
+  IO.println ("     CNF would have " ++ toString (nVarsAll (shapeOf NS.P NS.B))
+    ++ " variables: too large for the reference solver, so the attack is exhibited as a")
+  IO.println ("     certificate that the independent checker verifies (see below).")
+  IO.println ""
+  demoCert "5. Lowe attack on Needham-Schroeder (certificate)" NS.P NS.trace true
+  demoCert "6. the same attack on Needham-Schroeder-Lowe (rejected)" NSL.P NSL.trace false
+  IO.println "SOLVER SANITY CHECKS (all by the kernel, see ProtSat/DPLL.lean)"
+  IO.println ("    demoUnit      isSome = " ++ toString ((dpll DPLL.demoUnit).isSome))
+  IO.println ("    demoConflict  isSome = " ++ toString ((dpll DPLL.demoConflict).isSome))
+  IO.println ("    demoBranch    isSome = " ++ toString ((dpll DPLL.demoBranch).isSome))
+  IO.println ("    demoBranchSat isSome = " ++ toString ((dpll DPLL.demoBranchSat).isSome))
+  IO.println ""
+  IO.println "Executable attacker (specification section 2): ProtSat/Deduce.lean saturates a"
+  IO.println "finite universe and is proved sound, complete on it, and monotone."

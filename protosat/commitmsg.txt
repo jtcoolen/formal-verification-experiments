@@ -1,13 +1,20 @@
-ProtSat: Examples.lean - protocol models with kernel-checked attack certificates
+ProtSat: all six protocol examples + the command-line analyser (spec 9, 12)
 
-Adds ProtSat/Examples.lean (integrated into the library root):
-- simStep / certOfTrace: build a certificate by simulating a trace through the operational
-  semantics, so an attack trace is written as a plain list of events.
-- Example 1 Challenge (secure challenge-response, SAFE within bounds: 1335 vars / 2995 clauses,
-  univClosed decided; safe_if_none / verdict_if_none state the conditional verdict).
-- Example 2 Replay (no freshness check: attacker rebuilds the static authenticator from public
-  information and B hands over the session key) - checkCertificate of the 4-step trace is
-  DECIDED by the kernel, hence Attack P tr by 8C.
-- Example 3 KeyDisclosure (compromised key opens the ciphertext) - certificate decided, plus
-  the same protocol with compromised = [] as the control.
-Verified: lake build green, Examples.lean elaborates in 5s.
+Examples.lean now has the complete set:
+ 1 Challenge      secure challenge-response, SAFE at {steps 2, rounds 0} (1335 vars / 2995
+                  clauses); bounds_ok and the UNSAT verdict are kernel-decided.
+ 2 Replay         static authenticator, no freshness: DPLL finds a 4-event attack and
+                  checkCertificate of the decoded certificate is DECIDED true (8F).
+ 3 KeyDisclosure  compromised key opens the ciphertext: 2-event attack found by the solver,
+                  certificate decided; plus the control (compromised = []) which is SAFE.
+ 4 NS             original Needham-Schroeder public key, modelled per instantiation.
+ 5 Lowe attack    14-event trace (deduce the pair, project Na, rebuild {Na,A}_pubB, use A as
+                  an oracle for {Nb}_pubB): checkCertificate DECIDED true, hence Attack NS tr
+                  by 8C.  The SAT instance at these bounds has 2,586,336 variables, so the
+                  attack is exhibited by certificate rather than by a solver run.
+ 6 NSL            Needham-Schroeder-Lowe: the SAME script is REJECTED (decided false), and
+                  breaks_at_the_check proves the first nine steps are valid and A's identity
+                  check is not enabled - Lowe's fix, machine-checked.
+
+Main.lean: 'lake exe protosatDemo' prints each model's shape, the CNF size, the univClosed
+check, the analyser verdict and the checker's answer; it runs in 1.7 s.

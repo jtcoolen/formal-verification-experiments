@@ -248,4 +248,183 @@ def PSafe : Protocol := { P with compromised := [] }
 -- message exchange.)
 end KeyDisclosure
 
+
+/-! ### Examples 4 and 5: Needham-Schroeder public key and the Lowe attack -/
+
+namespace NS
+
+open Protocol in
+/-- The original Needham-Schroeder public-key protocol (Lowe's notation):
+
+  1. A -> B : {Na, A}_pubB
+  2. B -> A : {Nb, Na}_pubA
+  3. A -> B : {Nb}_pubB
+
+The roles are written for the attack scenario: session 0 is A (agent 0) initiating with the
+intruder I (agent 2), and session 1 is B (agent 1) accepting an initiation that the intruder
+sends while pretending to be A.  Roles name their agents literally, because the DSL
+instantiates sessions rather than parameterising roles.  The declared secret is B's fresh
+nonce Nb (the store slot 1 of session 1). -/
+def P : Protocol :=
+  { roles :=
+      [ { acts :=
+            [Action.fresh 0 0,
+             Action.send 2 (Expr.encA (Expr.pair (Expr.var 0) (Expr.agent 0)) 2),
+             Action.recv 2 1,
+             Action.check (Expr.snd (Expr.decA (Expr.var 1) 0)) (Expr.var 0),
+             Action.send 2 (Expr.encA (Expr.fst (Expr.decA (Expr.var 1) 0)) 2)] },
+        { acts :=
+            [Action.recv 0 0,
+             Action.fresh 1 1,
+             Action.send 0 (Expr.encA (Expr.pair (Expr.var 1)
+                                (Expr.fst (Expr.decA (Expr.var 0) 1))) 0),
+             Action.recv 0 2,
+             Action.check (Expr.decA (Expr.var 2) 1) (Expr.var 1)] } ],
+    sessions := [{ role := 0, self := 0, peer := 2 }, { role := 1, self := 1, peer := 0 }],
+    agents := [0, 1, 2],
+    nonceDomain := [100000, 101001],
+    compromised := [2],
+    secrets := [Secret.store 1 1],
+    auths := [] }
+
+/-- The nonces the two sessions generate. -/
+def na : Term := Term.nonce 100000
+/-- The responder's fresh nonce: the secret whose loss the certificate exhibits. -/
+def nb : Term := Term.nonce 101001
+
+/-- Message 1 as A sends it to I. -/
+def mA : Term := Term.encA (Term.pair na (Term.agent 0)) 2
+/-- Message 1 rebuilt by I for B - the replay that B cannot distinguish. -/
+def mB : Term := Term.encA (Term.pair na (Term.agent 0)) 1
+/-- Message 2 as B sends it, believed to be addressed to A. -/
+def m2 : Term := Term.encA (Term.pair nb na) 0
+/-- Message 3 as A sends it to I. -/
+def m3 : Term := Term.encA nb 2
+/-- Message 3 rebuilt by I for B. -/
+def m3b : Term := Term.encA nb 1
+
+/-- **Lowe's attack on the original Needham-Schroeder protocol** (specification 9.5), as a
+list of events.  The intruder runs a session with A, decrypts everything addressed to itself
+(its private key is in the initial knowledge because compromised = [2]), and uses A as an
+oracle to produce the third message B expects.  A's own check passes because the nonce in
+message 2 really is A's nonce - the protocol has no way for A to learn who actually answered. -/
+def trace : List Ev :=
+  [Ev.act 0 (Term.agent 0) 100000,        -- A: Na := fresh
+   Ev.act 0 (Term.agent 0) 0,             -- A -> I : {Na,A}_pubI     (published)
+   Ev.ded (Term.pair na (Term.agent 0)),  -- I : decrypt with priv I
+   Ev.ded na,                             -- I : project Na
+   Ev.ded mB,                             -- I : build {Na,A}_pubB
+   Ev.act 1 mB 0,                         -- I -> B : {Na,A}_pubB     (replayed)
+   Ev.act 1 (Term.agent 1) 101001,        -- B: Nb := fresh
+   Ev.act 1 (Term.agent 1) 0,             -- B -> A : {Nb,Na}_pubA    (published)
+   Ev.act 0 m2 0,                         -- I -> A : {Nb,Na}_pubA    (forwarded)
+   Ev.act 0 (Term.agent 0) 0,             -- A : check snd(dec) = Na     (passes!)
+   Ev.act 0 (Term.agent 0) 0,             -- A -> I : {Nb}_pubI       (published)
+   Ev.ded nb,                             -- I : decrypt {Nb}_pubI    ==> B's nonce leaks
+   Ev.ded m3b,                            -- I : build {Nb}_pubB
+   Ev.act 1 m3b 0]                        -- I -> B : {Nb}_pubB       (B commits to a peer
+                                          -- it never spoke to)
+
+/-- **Independently checkable attack trace** (specification 7 and 9): the kernel evaluates the
+certificate checker over the simulated run - every transition is re-derived from
+ProtSat.Operational and the leak of B's nonce is re-found by the checker itself. -/
+theorem checked : checkCertificate P (certOfTrace P trace) = true := by decide
+
+/-- Hence the trace is a genuine attack on Needham-Schroeder (specification 8C). -/
+theorem attack : Attack P trace := attack_of_checked P trace checked
+
+-- The attack also breaks non-injective agreement: B commits with no matching claim from A.
+-- (The certificate checker's authentication test reports it; see authBreakBool.)
+
+
+/-- The bounds for the SAT analysis of this protocol.  The full attack needs the intruder to
+construct two fresh ciphertexts, so the universe must be closed under one constructor round;
+at those bounds the reference solver's search is far too large to run here, which is why the
+attack is exhibited by certificate.  The demo prints the CNF size. -/
+def B : Bounds := { steps := 14, rounds := 1 }
+
+#eval (nVarsAll (shapeOf P B))
+
+end NS
+
+/-! ### Example 6: the Needham-Schroeder-Lowe correction -/
+
+namespace NSL
+
+open Protocol in
+/-- Lowe's corrected protocol: the responder adds its own identity to the second message
+
+  1. A -> B : {Na, A}_pubB
+  2. B -> A : {Nb, Na, B}_pubA
+  3. A -> B : {Nb}_pubB
+
+and the initiator checks that the identity in the reply is the peer it started with.  The
+model below is the same attack scenario as ProtSat.Examples.NS.P: A's session is with I (2),
+so A expects the responder to identify itself as 2. -/
+def P : Protocol :=
+  { roles :=
+      [ { acts :=
+            [Action.fresh 0 0,
+             Action.send 2 (Expr.encA (Expr.pair (Expr.var 0) (Expr.agent 0)) 2),
+             Action.recv 2 1,
+             Action.check (Expr.snd (Expr.snd (Expr.decA (Expr.var 1) 0))) (Expr.agent 2),
+             Action.send 2 (Expr.encA (Expr.fst (Expr.decA (Expr.var 1) 0)) 2)] },
+        { acts :=
+            [Action.recv 0 0,
+             Action.fresh 1 1,
+             Action.send 0 (Expr.encA (Expr.pair (Expr.var 1)
+                                (Expr.pair (Expr.fst (Expr.decA (Expr.var 0) 1)) (Expr.agent 1))) 0),
+             Action.recv 0 2,
+             Action.check (Expr.decA (Expr.var 2) 1) (Expr.var 1)] } ],
+    sessions := [{ role := 0, self := 0, peer := 2 }, { role := 1, self := 1, peer := 0 }],
+    agents := [0, 1, 2],
+    nonceDomain := [100000, 101001],
+    compromised := [2],
+    secrets := [Secret.store 1 1],
+    auths := [] }
+
+/-- The same attack script, with the second message carrying B's identity. -/
+def m2 : Term := Term.encA (Term.pair NS.nb (Term.pair NS.na (Term.agent 1))) 0
+
+def trace : List Ev :=
+  [Ev.act 0 (Term.agent 0) 100000,
+   Ev.act 0 (Term.agent 0) 0,
+   Ev.ded (Term.pair NS.na (Term.agent 0)),
+   Ev.ded NS.na,
+   Ev.ded NS.mB,
+   Ev.act 1 NS.mB 0,
+   Ev.act 1 (Term.agent 1) 101001,
+   Ev.act 1 (Term.agent 1) 0,
+   Ev.act 0 m2 0,
+   Ev.act 0 (Term.agent 0) 0,          -- A's identity check: the reply says B, A wanted I
+   Ev.act 0 (Term.agent 0) 0,
+   Ev.ded NS.nb,
+   Ev.ded NS.m3b,
+   Ev.act 1 NS.m3b 0]
+
+/-- **Executable result: the checker rejects the attack on the corrected protocol.**  The
+certificate is refused because A's identity check is not enabled - the step is not a
+transition of ProtSat.Operational at all.  (The demo prints which step fails.) -/
+theorem rejected : checkCertificate P (certOfTrace P trace) = false := by decide
+
+/-- The configuration reached after running a prefix of the trace. -/
+def runTo (tr : List Ev) : Cfg :=
+  (certStepsFrom P (initCfg P) tr).getLast?.map (fun s => s.after) |>.getD (initCfg P)
+
+/-- **Precisely where Lowe's fix stops the attack:** the first nine steps are valid
+transitions of the corrected protocol and the tenth - A's identity check - is not enabled,
+because the reply identifies the responder as B (1) while A believes it is talking to I (2).
+-/
+theorem breaks_at_the_check :
+    relDecide P (runTo (trace.take 9)) ((trace.drop 9).head?.getD Ev.idle)
+      (runTo (trace.take 10)) = false := by
+  decide
+
+/-- and the nine steps before it are accepted. -/
+theorem prefix_ok :
+    checkSteps P (initCfg P) (certStepsFrom P (initCfg P) (trace.take 9)) = true := by
+  decide
+
+end NSL
+
 end ProtSat.Examples
