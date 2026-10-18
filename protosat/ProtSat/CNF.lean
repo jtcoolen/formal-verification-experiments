@@ -490,4 +490,163 @@ theorem sat_andNDef {a : Assignment} {aux : BVar} {ls : List Lit} :
             cases h : l.eval a <;> simp_all
           rw [Lit.flip_eval, this, Bool.not_false]
 
+/-! ### A linear-size at-most-one encoding
+
+The one-hot groups of ProtSat.Encode range over the whole message universe, so the pairwise
+encoding above produces quadratically many clauses per group and the generated CNF becomes
+unusable on any realistic protocol.  The encoding below is the standard sequential counter:
+three clauses and one auxiliary variable per position.  It is a genuine Tseitin-style
+extension: the auxiliary variables are defined by the clauses, and ProtSat.OneHot only ever
+needs the direction "the clauses hold => at most one of the group is true". -/
+
+/-- Sequential at-most-one clauses for the variables vs, with auxiliary flag variables given
+by s : Nat -> BVar.  The intended reading of s j is "one of vs[0], ..., vs[j] is true", and
+for every j with j + 1 < vs.length the clauses are
+
+  (-vs[j]   v  s_j)      an entry forces its own flag,
+  (-vs[j+1] v -s_j)      the next entry refutes the flag,
+  (-s_j     v  s_{j+1})  flags are monotone (present when there is a next flag).
+
+If two entries vs[i] and vs[j] with i < j were both true, the first would force s_i, the
+chain would force s_{j-1}, and the second would refute it. -/
+def atMostOneSeq : List BVar -> (Nat -> BVar) -> List Clause
+  | x :: y :: [], s => [[neg x, pos (s 0)], [neg y, neg (s 0)]]
+  | x :: y :: (w :: rest), s =>
+      [neg x, pos (s 0)] :: [neg y, neg (s 0)] :: [neg (s 0), pos (s 1)]
+        :: atMostOneSeq (y :: w :: rest) (fun j => s (j + 1))
+  | _, _ => []
+
+@[simp] theorem atMostOneSeq_nil (s : Nat -> BVar) : atMostOneSeq [] s = [] := rfl
+@[simp] theorem atMostOneSeq_single (x : BVar) (s : Nat -> BVar) : atMostOneSeq [x] s = [] := rfl
+@[simp] theorem atMostOneSeq_two (x y : BVar) (s : Nat -> BVar) :
+    atMostOneSeq [x, y] s = [[neg x, pos (s 0)], [neg y, neg (s 0)]] := rfl
+@[simp] theorem atMostOneSeq_three (x y w : BVar) (rest : List BVar) (s : Nat -> BVar) :
+    atMostOneSeq (x :: y :: w :: rest) s =
+      [neg x, pos (s 0)] :: [neg y, neg (s 0)] :: [neg (s 0), pos (s 1)]
+        :: atMostOneSeq (y :: w :: rest) (fun j => s (j + 1)) := rfl
+
+/-- The clauses of the tail are clauses of the whole list. -/
+theorem mem_atMostOneSeq_tail (x y w : BVar) (rest : List BVar) (s : Nat -> BVar)
+    {cl : Clause} (h : cl ∈ atMostOneSeq (y :: w :: rest) (fun j => s (j + 1))) :
+    cl ∈ atMostOneSeq (x :: y :: w :: rest) s := by
+  rw [atMostOneSeq_three]
+  simp only [List.mem_append, List.mem_cons, List.not_mem_nil]
+  exact Or.inr (Or.inr (Or.inr h))
+
+/-- A Boolean cannot be both true and false. -/
+theorem bool_ne {b : Bool} (h₁ : b = true) (h₂ : b = false) : False := by
+  cases h : b <;> simp_all
+
+/-- A satisfied two-literal clause with a false first literal has a true second one. -/
+theorem clause2_mp {a : Assignment} {l₁ l₂ : Lit} (h : Clause.eval a [l₁, l₂] = true)
+    (h₁ : l₁.eval a = false) : l₂.eval a = true := by
+  have h2 : l₁.eval a = true ∨ l₂.eval a = true := by
+    simpa [Clause.eval, List.any_cons, List.any_nil] using h
+  rcases h2 with h2 | h2
+  · exact False.elim (bool_ne h2 h₁)
+  · exact h2
+
+/-- A literal is false exactly when its variable has the opposite value. -/
+theorem lit_neg_false (a : Assignment) (v : BVar) (hv : a v = true) : (neg v).eval a = false := by
+  simp [neg_eval, hv]
+
+/-- The strengthened invariant used by the correctness proof: at most one variable of the
+list is true, the first variable implies the first flag, and every later variable refutes
+it. -/
+def AmoInv (a : Assignment) (vs : List BVar) (s : Nat -> BVar) : Prop :=
+  (∀ x ∈ vs, ∀ y ∈ vs, a x = true -> a y = true -> x = y) ∧
+  (match vs with
+   | x :: y :: rest =>
+       (a x = true -> a (s 0) = true) ∧ (∀ z ∈ y :: rest, a z = true -> a (s 0) = false)
+   | _ => True)
+
+/-- **The sequential encoding really says at-most-one** (its soundness). -/
+theorem atMostOneSeq_correct : ∀ (vs : List BVar) (s : Nat -> BVar) (a : Assignment),
+    (∀ cl ∈ atMostOneSeq vs s, Clause.eval a cl = true) -> AmoInv a vs s := by
+  intro vs
+  induction vs with
+  | nil =>
+      intro s a _
+      refine ⟨fun x hx => absurd hx (by simp), trivial⟩
+  | cons x rest ih =>
+      intro s a h
+      cases rest with
+      | nil =>
+          refine ⟨fun p hp q hq hpa hqa => ?_, trivial⟩
+          rw [List.mem_cons] at hp hq
+          rcases hp with rfl | hp
+          · rcases hq with rfl | hq
+            · rfl
+            · exact absurd hq (by simp_all)
+          · exact absurd hp (by simp_all)
+      | cons y rest' =>
+          cases rest' with
+          | nil =>
+              -- vs = [x, y]: the two clauses relate x, y and the flag s 0
+              have hc1 : Clause.eval a [neg x, pos (s 0)] = true :=
+                h _ (by rw [atMostOneSeq_two]; simp)
+              have hc2 : Clause.eval a [neg y, neg (s 0)] = true :=
+                h _ (by rw [atMostOneSeq_two]; simp [List.mem_cons])
+              have hx1 : a x = true -> a (s 0) = true := fun hx =>
+                clause2_mp hc1 (lit_neg_false a x hx)
+              have hy1 : a y = true -> a (s 0) = false := fun hy => by
+                simpa [neg_eval] using clause2_mp hc2 (lit_neg_false a y hy)
+              have htail0 : ∀ z ∈ [y], a z = true -> a (s 0) = false := by
+                intro z hz hza
+                have hzy : z = y := by simpa using hz
+                rw [hzy] at hza
+                exact hy1 hza
+              refine ⟨fun p hp q hq hpa hqa => ?_, ⟨hx1, htail0⟩⟩
+              · rw [List.mem_cons] at hp hq
+                rcases hp with hpeq | hp
+                · rcases hq with hqeq | hq
+                  · exact hpeq.trans hqeq.symm
+                  · exact False.elim (bool_ne (hx1 (hpeq ▸ hpa)) (htail0 q hq hqa))
+                · rcases hq with hqeq | hq
+                  · exact False.elim (bool_ne (hx1 (hqeq ▸ hqa)) (htail0 p hp hpa))
+                  · exact (List.mem_singleton.mp hp).trans (List.mem_singleton.mp hq).symm
+
+          | cons w rest'' =>
+              have hsub : ∀ cl ∈ atMostOneSeq (y :: w :: rest'') (fun j => s (j + 1)),
+                  Clause.eval a cl = true := fun cl hcl =>
+                h cl (mem_atMostOneSeq_tail x y w rest'' s hcl)
+              obtain ⟨hamo, hflag⟩ := ih (fun j => s (j + 1)) a hsub
+              obtain ⟨hyf, hzr⟩ := hflag
+              have hc1 : Clause.eval a [neg x, pos (s 0)] = true :=
+                h _ (by rw [atMostOneSeq_three]; simp)
+              have hc2 : Clause.eval a [neg y, neg (s 0)] = true :=
+                h _ (by rw [atMostOneSeq_three]; simp [List.mem_cons])
+              have hc3 : Clause.eval a [neg (s 0), pos (s 1)] = true :=
+                h _ (by rw [atMostOneSeq_three]; simp [List.mem_cons])
+              have hx1 : a x = true -> a (s 0) = true := fun hx =>
+                clause2_mp hc1 (lit_neg_false a x hx)
+              have hy0 : a y = true -> a (s 0) = false := fun hy => by
+                simpa [neg_eval] using clause2_mp hc2 (lit_neg_false a y hy)
+              have hs01 : a (s 0) = true -> a (s 1) = true := fun h0 => by
+                simpa using clause2_mp hc3 (lit_neg_false a (s 0) h0)
+              have htail0 : ∀ z ∈ y :: w :: rest'', a z = true -> a (s 0) = false := by
+                intro z hz hza
+                rcases List.mem_cons.mp hz with hzeq | hz
+                · rw [hzeq] at hza
+                  exact hy0 hza
+                · cases h : a (s 0) with
+                  | true => exact False.elim (bool_ne (hs01 h) (hzr z hz hza))
+                  | false => rfl
+              refine ⟨fun p hp q hq hpa hqa => ?_, ⟨hx1, htail0⟩⟩
+              · rw [List.mem_cons] at hp hq
+                rcases hp with hpeq | hp
+                · rcases hq with hqeq | hq
+                  · exact hpeq.trans hqeq.symm
+                  · exact False.elim (bool_ne (hx1 (hpeq ▸ hpa)) (htail0 q hq hqa))
+                · rcases hq with hqeq | hq
+                  · exact False.elim (bool_ne (hx1 (hqeq ▸ hqa)) (htail0 p hp hpa))
+                  · exact hamo p hp q hq hpa hqa
+
+/-- **At-most-one** is the consequence the one-hot groups need: no two variables of the list
+are true at the same time. -/
+theorem atMostOneSeq_amo {vs : List BVar} {s : Nat -> BVar} {a : Assignment}
+    (h : ∀ cl ∈ atMostOneSeq vs s, Clause.eval a cl = true) :
+    ∀ x ∈ vs, ∀ y ∈ vs, a x = true -> a y = true -> x = y :=
+    (atMostOneSeq_correct vs s a h).1
+
 end ProtSat

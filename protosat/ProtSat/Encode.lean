@@ -375,8 +375,51 @@ def bsFr (sh : Shape) : Nat := bsDl sh + szDl sh
 def bsXe (sh : Shape) : Nat := bsFr sh + szFr sh
 def bsTotal (sh : Shape) : Nat := bsXe sh + szXe sh
 
-/-- The total number of variables used by the shape. -/
+/-- The total number of variables used by the shape's main blocks. -/
 def nVars (sh : Shape) : Nat := bsTotal sh
+
+/-! ### Auxiliary flag variables for the sequential at-most-one encoding
+
+Each one-hot group needs as many auxiliary flags as it has members (one fewer, but a full
+stride keeps the arithmetic uniform).  The blocks live after the main groups and before the
+publisher and leak auxiliaries of ProtSat.Clauses, so that every variable of the encoding
+belongs to exactly one named block. -/
+
+/-- Sizes of the six auxiliary blocks: one stride per group, one slot per flag. -/
+def szApc (sh : Shape) : Nat := (sh.steps + 1) * shS sh * shPc sh
+def szAst (sh : Shape) : Nat := (sh.steps + 1) * shS sh * shV sh * shVal sh
+def szAxe (sh : Shape) : Nat := (sh.steps + 1) * shS sh * shE sh * shVal sh
+def szAev (sh : Shape) : Nat := (sh.steps + 1) * shEv sh
+def szAdl (sh : Shape) : Nat := sh.steps * shS sh * shVal sh
+def szAfr (sh : Shape) : Nat := sh.steps * shS sh * shD sh
+
+/-- Bases of the six auxiliary blocks. -/
+def bsApc (sh : Shape) : Nat := bsTotal sh
+def bsAst (sh : Shape) : Nat := bsApc sh + szApc sh
+def bsAxe (sh : Shape) : Nat := bsAst sh + szAst sh
+def bsAev (sh : Shape) : Nat := bsAxe sh + szAxe sh
+def bsAdl (sh : Shape) : Nat := bsAev sh + szAev sh
+def bsAfr (sh : Shape) : Nat := bsAdl sh + szAdl sh
+/-- The first variable after every auxiliary block. -/
+def bsAfterAux (sh : Shape) : Nat := bsAfr sh + szAfr sh
+
+/-- The main blocks come before the auxiliary blocks. -/
+theorem bsTotal_le_bsAfterAux (sh : Shape) : bsTotal sh ≤ bsAfterAux sh := by
+  unfold bsAfterAux bsAfr bsAdl bsAev bsAxe bsAst bsApc
+  omega
+
+/-- The flag variables of the six families.  In each case the group indexed by the leading
+arguments owns the slots numbered 0 .. K-1 of its stride, where K is the group's size; the
+sequential encoding uses the first K-1 of them. -/
+def apc (sh : Shape) (i q j : Nat) : BVar :=
+  bsApc sh + (i * shS sh + q) * shPc sh + j
+def ast (sh : Shape) (i q x j : Nat) : BVar :=
+  bsAst sh + ((i * shS sh + q) * shV sh + x) * shVal sh + j
+def axe (sh : Shape) (i q e j : Nat) : BVar :=
+  bsAxe sh + ((i * shS sh + q) * shE sh + e) * shVal sh + j
+def aev (sh : Shape) (i j : Nat) : BVar := bsAev sh + i * shEv sh + j
+def adl (sh : Shape) (i q j : Nat) : BVar := bsAdl sh + (i * shS sh + q) * shVal sh + j
+def afr (sh : Shape) (i q j : Nat) : BVar := bsAfr sh + (i * shS sh + q) * shD sh + j
 
 /-! ### Index functions -/
 
@@ -445,9 +488,10 @@ theorem vxe_inj {sh : Shape} {i q e u u' : Nat} (hu : u < shVal sh) (hu' : u' < 
 /-- Build the one-hot group of a positional code: the domain is the range of the stride,
 and the variable map is injective because the positional code is. -/
 def ohOf (f : Nat -> Nat) (K : Nat) (hK : 0 < K)
-    (f_inj : ∀ x y, x < K -> y < K -> f x = f y -> x = y) : Oh Nat :=
+    (f_inj : ∀ x y, x < K -> y < K -> f x = f y -> x = y) (aux : Nat -> Nat) : Oh Nat :=
   { vals := List.range K,
     varOf := f,
+    auxOf := aux,
     varInj := fun x hx y hy h => f_inj x y (List.mem_range.mp hx) (List.mem_range.mp hy) h,
     nonempty := by
       intro h
@@ -459,29 +503,33 @@ def ohOf (f : Nat -> Nat) (K : Nat) (hK : 0 < K)
 /-- The program-counter group of session q at step i. -/
 def pcOh (sh : Shape) (i q : Nat) : Oh Nat :=
   ohOf (fun c => vpc sh i q c) (shPc sh) (shPc_pos sh) (fun x y hx hy h => vpc_inj hx hy h)
+    (fun j => apc sh i q j)
 
 /-- The store group of session q's variable x at step i. -/
 def stOh (sh : Shape) (i q x : Nat) : Oh Nat :=
   ohOf (fun u => vst sh i q x u) (shVal sh) (shVal_pos sh)
-    (fun a b ha hb h => vst_inj ha hb h)
+    (fun a b ha hb h => vst_inj ha hb h) (fun j => ast sh i q x j)
 
 /-- The event group at step i: idle, one alternative per session, one per universe
 message (the attacker's deduction choice). -/
 def evOh (sh : Shape) (i : Nat) : Oh Nat :=
   ohOf (fun k => vev sh i k) (shEv sh) (shEv_pos sh) (fun x y hx hy h => vev_inj hx hy h)
+    (fun j => aev sh i j)
 
 /-- The delivered-message group at step i for session q. -/
 def dlOh (sh : Shape) (i q : Nat) : Oh Nat :=
   ohOf (fun u => vdl sh i q u) (shVal sh) (shVal_pos sh) (fun x y hx hy h => vdl_inj hx hy h)
+    (fun j => adl sh i q j)
 
 /-- The fresh-nonce group at step i for session q. -/
 def frOh (sh : Shape) (i q : Nat) : Oh Nat :=
   ohOf (fun d => vfr sh i q d) (shD sh) (shD_pos sh) (fun x y hx hy h => vfr_inj hx hy h)
+    (fun j => afr sh i q j)
 
 /-- The evaluation group at step i, session q, table entry e. -/
 def xeOh (sh : Shape) (i q e : Nat) : Oh Nat :=
   ohOf (fun u => vxe sh i q e u) (shVal sh) (shVal_pos sh)
-    (fun a b ha hb h => vxe_inj ha hb h)
+    (fun a b ha hb h => vxe_inj ha hb h) (fun j => axe sh i q e j)
 
 /-! ### Values -/
 

@@ -12,3 +12,4 @@ import ProtSat.Clauses
 import ProtSat.Encoding
 import ProtSat.Complete
 import ProtSat.Certificate
+import ProtSat.Analyzer

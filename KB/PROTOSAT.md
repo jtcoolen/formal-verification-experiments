@@ -317,3 +317,80 @@ of an instantiated session, or a ded whose message is in U).
 * DPLL agent 35e59f37-... : re-tasked (it had stopped without editing DPLL.lean).
 * Certificate agent 16ce7ce0-... : running (ProtSat/Certificate.lean, spec 7/8C).
 * Deduce agent e28034d6-... : DONE, Deduce.lean integrated and building.
+
+---
+
+## Round 6 - DPLL rebuilt (8D/8E), 8C integrated, Analyzer written (8F)
+
+### Verified state
+* cd protosat && export ELAN_HOME=$PWD/../.elan && lake build ProtSat -> 'Build completed
+  successfully (925 jobs)', exit 0.
+* lake env lean Axioms.lean -> 1487 theorems audited, only propext / Classical.choice /
+  Quot.sound.  No sorry, admit, partial def or native_decide anywhere.
+
+### What was done
+1. ProtSat/DPLL.lean REWRITTEN FROM SCRATCH (the round-5 subagent had left it broken: 8
+   compile errors).  Design decisions that matter:
+   * unit propagation is 'propagateGo : Nat -> List Clause -> Option (decisions x clauses)'
+     with EXPLICIT FUEL, called as 'propagate cs := propagateGo cs.length cs'.  Structural
+     recursion, so the equations propagateGo_zero/succ are rfl and every lemma is a plain
+     induction on the fuel.  Well-founded recursion was tried first and rejected: Lean
+     generates no equation lemmas for it (no fn.eq_2), rfl fails on the defining equations,
+     and cases h : fn x then fails with 'Dependent elimination failed'.
+   * propagateGo_spec (back / fwd / agr) and propagateGo_vars (5 conjuncts: variable subset,
+     decided variables disjoint from the reduced set, decided variables occurred, decisions
+     consistent, no empty clause survives) are the whole content of propagation.
+   * propagate_noUnit: the fuel cs.length always saturates (each step deletes a clause,
+     assign_length_lt) - the saturation half of 8H.
+   * dpllAux cs vs asg recurses structurally on vs.  The invariants are NoAssigned cs asg
+     (no clause mentions a decided variable - this is what keeps the decision list
+     consistent, because a restriction deletes every literal of its variable) and
+     VarsIn cs vs.  A branch variable already decided by propagation is skipped.
+   * dpllAux_sound proves in one induction: output extends input, every total assignment
+     respecting the output satisfies the original set, output is consistent.
+     dpllAux_complete: output none => no model agrees with the decisions.
+   * dpll f = dpllAux f.clauses (eraseDups (litVars f.clauses)) []; dpll_sound (8D),
+     dpll_complete (8E), satisfiable_iff_dpll.
+   * Kernel-checked examples (decide): demoUnit, demoConflict, demoBranch (no unit clause,
+     unsat only by branching + conflict), demoBranchSat.
+2. ProtSat/Certificate.lean (8C) INTEGRATED - it existed but was never imported.
+   checkCertificate_sound, checkCertificate_authbreak, certificate_of_runs, 5 accepted and 3
+   rejected example certificates, all decide-checked.
+3. ProtSat/Complete.lean (8B groundwork) FIXED and integrated: vpb_inj_full / vau_inj_full
+   were broken (rw [Nat.add_assoc] twice only rewrites the LHS); fixed with
+   'simp only [Nat.add_assoc] at h' + repeated Nat.add_left_cancel.
+4. ProtSat/Analyzer.lean WRITTEN (spec 7 and 8F):
+   * univClosedBool + univClosedBool_iff (the universe hypothesis is decidable).
+   * stepsOf / certOf: the certificate of a satisfying assignment, built by recursion on the
+     step bound so it prepends (matching decEvsFrom's cons structure).  stepsOf_ev,
+     stepsOf_cfgs, stepsOf_ok (rel_agrees + relDecide_complete), certOf_checked.
+   * Verdict (boundsTooSmall | safe | attack c) and analyze P B.
+   * analyze_attack_sound (8F) and analyze_attack_bounded (trace length <= B.steps).
+   * 8G (safe => no bounded attack) still needs 8B and is NOT claimed.
+
+### Traps learned this round
+* Anonymous-constructor patterns are NOT accepted in 'cases h : e with | some ⟨a, b⟩ =>'
+  ('Alternative cons has not been provided'); use '| some pf =>' then 'obtain ⟨a, b⟩ := pf'.
+* 'cases h : fn x' when the goal mentions (fn x): Lean substitutes the constructor form into
+  the GOAL, so the equation h becomes useless ('expected none = none', 'Dependent elimination
+  failed').  Robust workaround: prove 'option_cases (o : Option α) : o = none ∨ ∃ a, o = some a'
+  by 'cases h : o' with Or.inl rfl / Or.inr ⟨a, rfl⟩, then 'rcases option_cases (fn x) with
+  hnone | ⟨r, hr⟩' and 'simp only [hr] at h' (simp, not rw, so the match iota-reduces).
+* Term-mode 'match e with' on a non-variable scrutinee does NOT abstract e in the expected
+  type; findUnit_cases had to be done with cases + Or.inl rfl.
+* Inside one tactic sequence all tactics must share a column: after replacing a cases
+  alternative by bullets, the old deeper-indented body gives 'unexpected identifier; expected
+  command'.
+* 'rw [propagateGo_zero, if_neg h0] at h': the equation lemma must be in the SAME rw list.
+  if_pos/if_neg still work but are deprecated (ite_eq_left / ite_eq_right).
+* List.not_mem_nil does not have the shape you expect; for 'p ∈ []' write
+  'absurd hp (by intro h; cases h)'.
+* List.exists_mem_of_ne_nil takes the list explicitly in 4.34 - easier to 'cases l'.
+* Destructuring a 5-binder Pi (∀ p ∈ l, ∀ q ∈ l, p.1 = q.1 → p.2 = q.2) with a 4-binder fun
+  gives bizarre 'expected BVar × Bool but got Prop' errors.  Count the binders.
+* 'x == x = true' is NOT rfl for a derived BEq on a structure with variables: use
+  'beq_iff_eq.mpr rfl'.
+* Option.map_eq_some' does not exist in Mathlib v4.34.1; prove option_map_some yourself
+  (Option.some.inj in the some branch).
+* A docstring before #eval is a parse error ('expected lemma'); use a line comment.
+* 'decide' on (dpll f).isSome works: every definition is structural and computable.

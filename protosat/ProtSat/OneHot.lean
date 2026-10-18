@@ -97,27 +97,42 @@ theorem decodeGo_some : ∀ (vals : List α) (varOf : α -> BVar) (a : Assignmen
 /-! ### One-hot groups -/
 
 /-- A one-hot group over a finite domain α: a list of values, each mapped to its own
-Boolean variable, with distinct values getting distinct variables, and the list
-nonempty (so that the at-least-one clause is satisfiable). -/
+Boolean variable, with distinct values getting distinct variables, the list nonempty (so
+that the at-least-one clause is satisfiable), and a supply of auxiliary flag variables for
+the sequential at-most-one encoding (ProtSat.atMostOneSeq).
+
+The auxiliary variables are part of the group precisely because the encoding is Tseitin:
+they are existentially quantified, they carry no meaning of their own beyond the clauses,
+and the soundness statement (clauses => a unique selected element) does not need them to
+be fresh.  For the completeness direction (section 8B) the canonical assignment does have
+to set them, and there the blocks must be disjoint - which is why each group carries its
+own auxOf rather than sharing one global pool. -/
 structure Oh (α : Type) where
   vals : List α
   varOf : α -> BVar
   varInj : ∀ x ∈ vals, ∀ y ∈ vals, varOf x = varOf y -> x = y
   nonempty : vals ≠ []
+  /-- The flag variable of the prefix ending at position j. -/
+  auxOf : Nat -> BVar
 
-/-- The one-hot clauses of a group: exactly one of its variables is true. -/
-def Oh.clauses (o : Oh α) : CNF := exactlyOne (o.vals.map o.varOf)
+/-- The one-hot clauses of a group: at least one of its variables is true, and the
+sequential counter forbids two of them from being true at once. -/
+def Oh.clauses (o : Oh α) : CNF :=
+  ⟨(atLeastOne (o.vals.map o.varOf)).clauses
+    ++ atMostOneSeq (o.vals.map o.varOf) o.auxOf⟩
 
 /-- **The one-hot characterisation.**  A satisfying assignment selects a unique element
 of the domain. -/
 theorem Oh.clauses_unique {o : Oh α} {a : Assignment} (h : Sat a (o.clauses)) :
     ∃! x, x ∈ o.vals ∧ a (o.varOf x) = true := by
-  rw [Oh.clauses, sat_exactlyOne] at h
-  obtain ⟨v, hv, hu⟩ := h
-  obtain ⟨x, hx, rfl⟩ := List.mem_map.mp hv.1
-  refine ⟨x, ⟨hx, hv.2⟩, fun y hy => ?_⟩
-  have := hu (o.varOf y) ⟨List.mem_map.mpr ⟨y, hy.1, rfl⟩, hy.2⟩
-  exact o.varInj y hy.1 x hx this
+  obtain ⟨v, hv, ha⟩ := sat_atLeastOne.mp (fun c hc => h c (List.mem_append_left _ hc))
+  obtain ⟨x, hx, heq⟩ := List.mem_map.mp hv
+  subst heq
+  refine ⟨x, ⟨hx, ha⟩, fun y hy => ?_⟩
+  have hamo := atMostOneSeq_amo (fun cl hcl => h cl (List.mem_append_right _ hcl))
+  exact o.varInj y hy.1 x hx
+    (hamo (o.varOf y) (List.mem_map.mpr ⟨y, hy.1, rfl⟩)
+      (o.varOf x) (List.mem_map.mpr ⟨x, hx, rfl⟩) hy.2 ha)
 
 /-- Decode the element selected by an assignment. -/
 def Oh.decode (o : Oh α) (a : Assignment) : Option α :=

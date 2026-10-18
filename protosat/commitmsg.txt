@@ -1,0 +1,17 @@
+ProtSat: replace the quadratic one-hot at-most-one encoding with a linear sequential counter
+
+The pairwise atMostOne made every one-hot group cost O(|U|^2) clauses: the toy protocol
+already generated 6M clauses and the smallest realistic instance 227k (7 min to solve).
+The sequential counter (3 clauses + 1 auxiliary variable per position) keeps the encoding
+Tseitin and compositional while making it linear.
+
+- CNF.lean: atMostOneSeq + bool_ne/clause2_mp + AmoInv + atMostOneSeq_correct + atMostOneSeq_amo
+- OneHot.lean: Oh gains auxOf (per-group auxiliary flags); Oh.clauses = atLeastOne ++ atMostOneSeq;
+  Oh.clauses_unique reproved through the new AMO lemma (statement unchanged)
+- Encode.lean: six auxiliary blocks (bsApc..bsAfr, apc..afr) and ohOf takes the aux map
+- Clauses.lean: the publisher block now starts after the auxiliary blocks (vpb, bsAu)
+- Complete.lean: range/injectivity lemmas adapted to the new layout
+
+IMPORTANT: ProtSat/Encoding.lean (the 3559-line 8A development) needed NO changes and still
+builds: its proofs only use Oh.decode_some / Oh.decode_of_true / sat_*Oh, whose statements are
+unchanged.  lake build green (925 jobs).

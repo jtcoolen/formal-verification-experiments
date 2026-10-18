@@ -553,7 +553,7 @@ def instPublisher (sh : Shape) (i n u : Nat) : List Lit :=
 counter c and the value it sends is u".  The support clauses need a *conjunction* per
 publisher, and a conjunction can only appear inside a clause through a definition. -/
 def vpb (sh : Shape) (i q c u : Nat) : BVar :=
-  bsTotal sh + ((i * shS sh + q) * shPc sh + c) * shVal sh + u
+  bsAfterAux sh + ((i * shS sh + q) * shPc sh + c) * shVal sh + u
 
 /-- The size of the publisher-auxiliary block. -/
 def szPb (sh : Shape) : Nat := sh.steps * shS sh * shPc sh * shVal sh
@@ -623,7 +623,7 @@ def freshClauses (sh : Shape) (P : Protocol) : CNF :=
 /-- Auxiliary variables for the conjunctions of the violation condition: one per
 (step, session, variable, value) quadruple, defining "session q holds message u and the
 attacker knows it". -/
-def bsAu (sh : Shape) : Nat := bsTotal sh + szPb sh
+def bsAu (sh : Shape) : Nat := bsAfterAux sh + szPb sh
 
 /-- The size of the auxiliary block. -/
 def szAu (sh : Shape) : Nat := (sh.steps + 1) * shS sh * shV sh * shVal sh
