@@ -1128,4 +1128,235 @@ end Charac
 
 
 
+/-! ### Characterisation of the auxiliary flag and conjunction families -/
+
+section CharacAux
+variable (sh : Shape) (P : Protocol) (cfg : Nat -> Cfg) (ev : Nat -> Ev)
+
+/-- The flag-block characterisations: the flag of position j is true exactly when the chosen
+index is at or before j, which is the meaning ProtSat.atMostOneSeq gives its auxiliaries. -/
+theorem asgApc_val (hi : i ≤ sh.steps) (hq : q < shS sh) (hj : j < shPc sh) :
+    asgApc sh P cfg ev (apc sh i q j) = decide (rdPc sh P cfg ev i q <= j) := by
+  have hiff : (asgApc sh P cfg ev (apc sh i q j) = true) <-> rdPc sh P cfg ev i q <= j := by
+    constructor
+    · intro h
+      rw [asgApc] at h
+      rw [List.any_eq_true] at h
+      obtain ⟨i', hi', h2⟩ := h
+      rw [List.any_eq_true] at h2
+      obtain ⟨q', hq', h3⟩ := h2
+      rw [List.any_eq_true] at h3
+      obtain ⟨j', hj', h4⟩ := h3
+      rw [Bool.and_eq_true] at h4
+      have h0 := of_decide_eq_true h4.left
+      unfold apc at h0
+      rw [Nat.add_assoc, Nat.add_assoc] at h0
+      obtain ⟨hA, hj2⟩ := lin_inj2 (shPc_pos sh) (by omega : j < shPc sh)
+        (List.mem_range.mp hj') (Nat.add_left_cancel h0)
+      obtain ⟨rfl, rfl⟩ := lin_inj2 (shS_pos sh) hq (List.mem_range.mp hq') hA
+      subst hj2
+      exact of_decide_eq_true h4.right
+    · intro h
+      rw [asgApc]
+      refine List.any_eq_true.mpr ⟨i, List.mem_range.mpr (Nat.lt_succ_of_le hi), ?_⟩
+      refine List.any_eq_true.mpr ⟨q, List.mem_range.mpr hq, ?_⟩
+      refine List.any_eq_true.mpr ⟨j, List.mem_range.mpr hj, ?_⟩
+      simp [h]
+  by_cases hd : rdPc sh P cfg ev i q <= j
+  · rw [decide_eq_true hd]
+    exact hiff.mpr hd
+  · rw [decide_eq_false hd]
+    cases h2 : asgApc sh P cfg ev (apc sh i q j)
+    · rfl
+    · exact absurd (hiff.mp h2) hd
+
+theorem asgAst_val (hi : i ≤ sh.steps) (hq : q < shS sh) (hx : x < shV sh) (hj : j < shVal sh) :
+    asgAst sh P cfg ev (ast sh i q x j) = decide (rdSt sh P cfg ev i q x <= j) := by
+  have hiff : (asgAst sh P cfg ev (ast sh i q x j) = true) <-> rdSt sh P cfg ev i q x <= j := by
+    constructor
+    · intro h
+      rw [asgAst] at h
+      rw [List.any_eq_true] at h
+      obtain ⟨i', hi', h2⟩ := h
+      rw [List.any_eq_true] at h2
+      obtain ⟨q', hq', h3⟩ := h2
+      rw [List.any_eq_true] at h3
+      obtain ⟨x', hx', h4⟩ := h3
+      rw [List.any_eq_true] at h4
+      obtain ⟨j', hj', h5⟩ := h4
+      rw [Bool.and_eq_true] at h5
+      have h0 := of_decide_eq_true h5.left
+      unfold ast at h0
+      rw [Nat.add_assoc, Nat.add_assoc] at h0
+      obtain ⟨hA, hj2⟩ := lin_inj2 (shVal_pos sh) (by omega : j < shVal sh)
+        (List.mem_range.mp hj') (Nat.add_left_cancel h0)
+      obtain ⟨h1, h2', h3'⟩ := lin_inj3 (shS_pos sh) (shV_pos sh) hq (List.mem_range.mp hq') hx
+        (List.mem_range.mp hx') hA
+      subst h1; subst h2'; subst h3'
+      subst hj2
+      exact of_decide_eq_true h5.right
+    · intro h
+      rw [asgAst]
+      refine List.any_eq_true.mpr ⟨i, List.mem_range.mpr (Nat.lt_succ_of_le hi), ?_⟩
+      refine List.any_eq_true.mpr ⟨q, List.mem_range.mpr hq, ?_⟩
+      refine List.any_eq_true.mpr ⟨x, List.mem_range.mpr hx, ?_⟩
+      refine List.any_eq_true.mpr ⟨j, List.mem_range.mpr hj, ?_⟩
+      simp [h]
+  by_cases hd : rdSt sh P cfg ev i q x <= j
+  · rw [decide_eq_true hd]
+    exact hiff.mpr hd
+  · rw [decide_eq_false hd]
+    cases h2 : asgAst sh P cfg ev (ast sh i q x j)
+    · rfl
+    · exact absurd (hiff.mp h2) hd
+
+theorem asgAxe_val (hi : i ≤ sh.steps) (hq : q < shS sh) (he : e < shE sh) (hj : j < shVal sh) :
+    asgAxe sh P cfg ev (axe sh i q e j) = decide (rdXe sh P cfg ev i q e <= j) := by
+  have hiff : (asgAxe sh P cfg ev (axe sh i q e j) = true) <-> rdXe sh P cfg ev i q e <= j := by
+    constructor
+    · intro h
+      rw [asgAxe] at h
+      rw [List.any_eq_true] at h
+      obtain ⟨i', hi', h2⟩ := h
+      rw [List.any_eq_true] at h2
+      obtain ⟨q', hq', h3⟩ := h2
+      rw [List.any_eq_true] at h3
+      obtain ⟨e', he', h4⟩ := h3
+      rw [List.any_eq_true] at h4
+      obtain ⟨j', hj', h5⟩ := h4
+      rw [Bool.and_eq_true] at h5
+      have h0 := of_decide_eq_true h5.left
+      unfold axe at h0
+      rw [Nat.add_assoc, Nat.add_assoc] at h0
+      obtain ⟨hA, hj2⟩ := lin_inj2 (shVal_pos sh) (by omega : j < shVal sh)
+        (List.mem_range.mp hj') (Nat.add_left_cancel h0)
+      obtain ⟨h1, h2', h3'⟩ := lin_inj3 (shS_pos sh) (shE_pos sh) hq (List.mem_range.mp hq') he
+        (List.mem_range.mp he') hA
+      subst h1; subst h2'; subst h3'
+      subst hj2
+      exact of_decide_eq_true h5.right
+    · intro h
+      rw [asgAxe]
+      refine List.any_eq_true.mpr ⟨i, List.mem_range.mpr (Nat.lt_succ_of_le hi), ?_⟩
+      refine List.any_eq_true.mpr ⟨q, List.mem_range.mpr hq, ?_⟩
+      refine List.any_eq_true.mpr ⟨e, List.mem_range.mpr he, ?_⟩
+      refine List.any_eq_true.mpr ⟨j, List.mem_range.mpr hj, ?_⟩
+      simp [h]
+  by_cases hd : rdXe sh P cfg ev i q e <= j
+  · rw [decide_eq_true hd]
+    exact hiff.mpr hd
+  · rw [decide_eq_false hd]
+    cases h2 : asgAxe sh P cfg ev (axe sh i q e j)
+    · rfl
+    · exact absurd (hiff.mp h2) hd
+
+theorem asgAev_val (hi : i < sh.steps) (hj : j < shEv sh) :
+    asgAev sh P cfg ev (aev sh i j) = decide (rdEv sh P cfg ev i <= j) := by
+  have hiff : (asgAev sh P cfg ev (aev sh i j) = true) <-> rdEv sh P cfg ev i <= j := by
+    constructor
+    · intro h
+      rw [asgAev] at h
+      rw [List.any_eq_true] at h
+      obtain ⟨i', hi', h2⟩ := h
+      rw [List.any_eq_true] at h2
+      obtain ⟨j', hj', h3⟩ := h2
+      rw [Bool.and_eq_true] at h3
+      -- aev is bsAev sh + i * shEv sh + j: right-associate so the block base is a single
+      -- syntactic summand, cancel it, and invert the two-level code with lin_inj2.
+      have h0 := of_decide_eq_true h3.left
+      unfold aev at h0
+      simp only [Nat.add_assoc] at h0
+      obtain ⟨rfl, rfl⟩ := lin_inj2 (shEv_pos sh) hj (List.mem_range.mp hj')
+        (Nat.add_left_cancel h0)
+      exact of_decide_eq_true h3.right
+    · intro h
+      rw [asgAev]
+      refine List.any_eq_true.mpr ⟨i, List.mem_range.mpr hi, ?_⟩
+      refine List.any_eq_true.mpr ⟨j, List.mem_range.mpr hj, ?_⟩
+      simp [h]
+  by_cases hd : rdEv sh P cfg ev i <= j
+  · rw [decide_eq_true hd]
+    exact hiff.mpr hd
+  · rw [decide_eq_false hd]
+    cases h2 : asgAev sh P cfg ev (aev sh i j)
+    · rfl
+    · exact absurd (hiff.mp h2) hd
+
+theorem asgAdl_val (hi : i < sh.steps) (hq : q < shS sh) (hj : j < shVal sh) :
+    asgAdl sh P cfg ev (adl sh i q j) = decide (rdDl sh P cfg ev i q <= j) := by
+  have hiff : (asgAdl sh P cfg ev (adl sh i q j) = true) <-> rdDl sh P cfg ev i q <= j := by
+    constructor
+    · intro h
+      rw [asgAdl] at h
+      rw [List.any_eq_true] at h
+      obtain ⟨i', hi', h2⟩ := h
+      rw [List.any_eq_true] at h2
+      obtain ⟨q', hq', h3⟩ := h2
+      rw [List.any_eq_true] at h3
+      obtain ⟨j', hj', h4⟩ := h3
+      rw [Bool.and_eq_true] at h4
+      have h0 := of_decide_eq_true h4.left
+      -- adl sh i q j = bsAdl sh + (i * shS sh + q) * shVal sh + j: the inner stride is the
+      -- value-block stride shVal, NOT the program-counter stride.
+      unfold adl at h0
+      rw [Nat.add_assoc, Nat.add_assoc] at h0
+      obtain ⟨hA, hj2⟩ := lin_inj2 (shVal_pos sh) hj (List.mem_range.mp hj')
+        (Nat.add_left_cancel h0)
+      obtain ⟨rfl, rfl⟩ := lin_inj2 (shS_pos sh) hq (List.mem_range.mp hq') hA
+      subst hj2
+      exact of_decide_eq_true h4.right
+    · intro h
+      rw [asgAdl]
+      refine List.any_eq_true.mpr ⟨i, List.mem_range.mpr hi, ?_⟩
+      refine List.any_eq_true.mpr ⟨q, List.mem_range.mpr hq, ?_⟩
+      refine List.any_eq_true.mpr ⟨j, List.mem_range.mpr hj, ?_⟩
+      simp [h]
+  by_cases hd : rdDl sh P cfg ev i q <= j
+  · rw [decide_eq_true hd]
+    exact hiff.mpr hd
+  · rw [decide_eq_false hd]
+    cases h2 : asgAdl sh P cfg ev (adl sh i q j)
+    · rfl
+    · exact absurd (hiff.mp h2) hd
+
+theorem asgAfr_val (hi : i < sh.steps) (hq : q < shS sh) (hj : j < shD sh) :
+    asgAfr sh P cfg ev (afr sh i q j) = decide (rdFr sh P cfg ev i q <= j) := by
+  have hiff : (asgAfr sh P cfg ev (afr sh i q j) = true) <-> rdFr sh P cfg ev i q <= j := by
+    constructor
+    · intro h
+      rw [asgAfr] at h
+      rw [List.any_eq_true] at h
+      obtain ⟨i', hi', h2⟩ := h
+      rw [List.any_eq_true] at h2
+      obtain ⟨q', hq', h3⟩ := h2
+      rw [List.any_eq_true] at h3
+      obtain ⟨j', hj', h4⟩ := h3
+      rw [Bool.and_eq_true] at h4
+      have h0 := of_decide_eq_true h4.left
+      -- afr sh i q j = bsAfr sh + (i * shS sh + q) * shD sh + j: the inner stride is the
+      -- nonce-domain size shD.
+      unfold afr at h0
+      rw [Nat.add_assoc, Nat.add_assoc] at h0
+      obtain ⟨hA, hj2⟩ := lin_inj2 (shD_pos sh) hj (List.mem_range.mp hj')
+        (Nat.add_left_cancel h0)
+      obtain ⟨rfl, rfl⟩ := lin_inj2 (shS_pos sh) hq (List.mem_range.mp hq') hA
+      subst hj2
+      exact of_decide_eq_true h4.right
+    · intro h
+      rw [asgAfr]
+      refine List.any_eq_true.mpr ⟨i, List.mem_range.mpr hi, ?_⟩
+      refine List.any_eq_true.mpr ⟨q, List.mem_range.mpr hq, ?_⟩
+      refine List.any_eq_true.mpr ⟨j, List.mem_range.mpr hj, ?_⟩
+      simp [h]
+  by_cases hd : rdFr sh P cfg ev i q <= j
+  · rw [decide_eq_true hd]
+    exact hiff.mpr hd
+  · rw [decide_eq_false hd]
+    cases h2 : asgAfr sh P cfg ev (afr sh i q j)
+    · rfl
+    · exact absurd (hiff.mp h2) hd
+
+end CharacAux
+
+
 end ProtSat.Complete
