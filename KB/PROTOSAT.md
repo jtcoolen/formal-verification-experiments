@@ -577,3 +577,22 @@ analyzer should instead CHECK it by decide, like univClosed.
   (pos (vpc sh (i+1) q c)) ?_' with the bullet on its own line.
   Note hact/h2 must be equation hypotheses (rcases bool_eq_cases ... with h|h), NOT by_cases
   (which gives a ¬ hypothesis that simp cannot rewrite with).
+
+### Round 7c - where sat_frame stands (scratch/frame_draft.lean)
+The draft proves the knowledge clause and reduces each 3-literal frame clause to a literal
+evaluation.  The failing step is mechanical: after
+  rcases bool_eq_cases (assignOf sh P cfg ev (vpc sh i q c)) with h2 | h2
+the FIRST bullet contains
+  have h9 : pcOf (cfg (i + 1)) q = c := by rw [hpc']; ...of_decide_eq_true...
+  have hv : assignOf sh P cfg ev (vpc sh (i + 1) q c) = true := by
+    rw [assignOf_pc sh P cfg ev (Nat.succ_le_of_lt hi) hq (by simpa using hc)]
+    exact decide_eq_true h9
+and Lean reports a leftover goal 'Lit.eval (assignOf sh P cfg ev) (pos (vpc sh (i+1) q c)) =
+true' at the NEXT tactic, i.e. one of these two 'have' blocks is not closed.  Most likely
+'show rdPc ... = pcOf ... from rfl' style defeq steps are the culprit: replace them by
+'have h9 : rdPc sh P cfg ev (i+1) q = pcOf (cfg (i+1)) q := rfl' and rewrite with h9, and
+close hv with 'rw [assignOf_pc ...]; exact decide_eq_true h9' where h9 : rdPc sh P cfg ev
+(i+1) q = c (NOT pcOf ... = c).  Try also 'refine decide_eq_true ?_; ...' to avoid the
+defeq display confusion, and remember that a failing 'have ... := by' makes every following
+tactic in the bullet target the leftover goal - that is why the error messages look absurd.
+Everything else (groups 1 and 2) is done and committed.

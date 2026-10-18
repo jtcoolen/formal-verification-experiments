@@ -64,17 +64,10 @@ theorem sat_frame (hok : RunOK sh P cfg ev)
           have hv : assignOf sh P cfg ev (vpc sh (i + 1) q c) = true := by
             rw [assignOf_pc sh P cfg ev (Nat.succ_le_of_lt hi) hq (by simpa using hc)]
             exact decide_eq_true h9
-          have e1 : (pos (evAct sh i q)).eval (assignOf sh P cfg ev) = false := by
-            rw [pos_eval]
-            exact hact
-          have e2 : (neg (vpc sh i q c)).eval (assignOf sh P cfg ev) = false := by
-            rw [neg_eval]
-            rw [h2]
-          have e3 : (pos (vpc sh (i + 1) q c)).eval (assignOf sh P cfg ev) = true := by
-            rw [pos_eval]
-            exact hv
-          exact clause3_right (assignOf sh P cfg ev) (pos (evAct sh i q)) (neg (vpc sh i q c))
-            (pos (vpc sh (i + 1) q c)) e3
+          refine clause3_right (assignOf sh P cfg ev) (pos (evAct sh i q)) (neg (vpc sh i q c))
+            (pos (vpc sh (i + 1) q c)) ?_
+          rw [pos_eval]
+          exact hv
         · have e1 : (pos (evAct sh i q)).eval (assignOf sh P cfg ev) = false := by
             rw [pos_eval]
             exact hact
@@ -112,17 +105,10 @@ theorem sat_frame (hok : RunOK sh P cfg ev)
             rw [assignOf_st sh P cfg ev (Nat.succ_le_of_lt hi) hq (by simpa using hx)
               (by simpa using hu)]
             exact decide_eq_true h9
-          have e1 : (pos (evAct sh i q)).eval (assignOf sh P cfg ev) = false := by
-            rw [pos_eval]
-            exact hact
-          have e2 : (neg (vst sh i q x u)).eval (assignOf sh P cfg ev) = false := by
-            rw [neg_eval]
-            rw [h2]
-          have e3 : (pos (vst sh (i + 1) q x u)).eval (assignOf sh P cfg ev) = true := by
-            rw [pos_eval]
-            exact hv
-          exact clause3_right (assignOf sh P cfg ev) (pos (evAct sh i q)) (neg (vst sh i q x u))
-            (pos (vst sh (i + 1) q x u)) e3
+          refine clause3_right (assignOf sh P cfg ev) (pos (evAct sh i q)) (neg (vst sh i q x u))
+            (pos (vst sh (i + 1) q x u)) ?_
+          rw [pos_eval]
+          exact hv
         · have e1 : (pos (evAct sh i q)).eval (assignOf sh P cfg ev) = false := by
             rw [pos_eval]
             exact hact
