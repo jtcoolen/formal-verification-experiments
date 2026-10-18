@@ -777,6 +777,14 @@ because a restriction deletes every literal of the variable it decides. -/
 def NoAssigned (cs : List Clause) (asg : List (BVar × Bool)) : Prop :=
   ∀ v ∈ litVars cs, ∀ p ∈ asg, p.1 ≠ v
 
+/-- A variable that does not occur in the clause set: branching on it would duplicate the
+whole search tree for no reason, so the solver skips it. -/
+theorem not_mem_of_skip {cs : List Clause} {v : BVar}
+    (h : Bool.not (decide (v ∈ litVars cs)) = true) : v ∉ litVars cs := by
+  intro hu
+  have h2 : decide (v ∈ litVars cs) = true := by simp [hu]
+  simp_all
+
 /-- **Every variable of the clause set is available as a branching variable.**  This is what
 makes UNSAT results meaningful: when the solver has branched on all of vs and still has an
 unsatisfied clause left, that clause can only be the empty clause. -/
@@ -821,7 +829,8 @@ def dpllAux : List Clause -> List BVar -> List (BVar × Bool) -> Option (List (B
       match propagate cs with
       | none => none
       | some (forced, cs') =>
-          if v ∈ decVars (forced ++ asg) then dpllAux cs' rest (forced ++ asg)
+          if (v ∈ decVars (forced ++ asg)) || !decide (v ∈ litVars cs') then
+            dpllAux cs' rest (forced ++ asg)
           else match dpllAux (assign v true cs') rest ((v, true) :: forced ++ asg) with
                | some r => some r
                | none => dpllAux (assign v false cs') rest ((v, false) :: forced ++ asg)
@@ -836,7 +845,8 @@ theorem dpllAux_cons (cs : List Clause) (v : BVar) (rest : List BVar)
     dpllAux cs (v :: rest) asg = match propagate cs with
       | none => none
       | some (forced, cs') =>
-          if v ∈ decVars (forced ++ asg) then dpllAux cs' rest (forced ++ asg)
+          if (v ∈ decVars (forced ++ asg)) || !decide (v ∈ litVars cs') then
+            dpllAux cs' rest (forced ++ asg)
           else match dpllAux (assign v true cs') rest ((v, true) :: forced ++ asg) with
                | some r => some r
                | none => dpllAux (assign v false cs') rest ((v, false) :: forced ++ asg) := rfl
@@ -906,27 +916,38 @@ theorem dpllAux_sound : ∀ (vs : List BVar) (cs : List Clause)
           have hvars1 : VarsIn cs' (v :: rest) := by
             intro u hu
             exact hvars u (vsub u hu)
-          by_cases hv : v ∈ decVars (forced ++ asg)
+          by_cases hv : (v ∈ decVars (forced ++ asg)) || !decide (v ∈ litVars cs')
           · -- v was already decided by propagation: no clause of cs' mentions it, so the
             -- branch is skipped and nothing is lost.
             rw [if_pos hv] at h
-            obtain ⟨b, hb⟩ := mem_decVars.mp hv
-            have hvars' : VarsIn cs' rest := by
-              intro u hu
-              have hu' : u ∈ v :: rest := hvars1 u hu
-              rcases List.mem_cons.mp hu' with hueq | hu'
-              · exact absurd hueq.symm (hno1 u hu (v, b) hb)
-              · exact hu'
-            obtain ⟨hext, hback, hcons'⟩ := ih cs' (forced ++ asg) asg' hno1 hvars' hcons1 h
+            rw [Bool.or_eq_true] at hv
+            have hvn2 : v ∉ litVars cs' := by
+              rcases hv with h | h
+              · obtain ⟨b, hb⟩ := mem_decVars.mp (of_decide_eq_true h)
+                intro hu
+                exact absurd rfl (hno1 v hu (v, b) hb)
+              · exact not_mem_of_skip h
+            obtain ⟨hext, hback, hcons'⟩ := ih cs' (forced ++ asg) asg' hno1
+              (by
+                intro u hu
+                have hu' : u ∈ v :: rest := hvars1 u hu
+                rcases List.mem_cons.mp hu' with hueq | hu'
+                · exact absurd (hueq ▸ hu) hvn2
+                · exact hu') hcons1 h
             refine ⟨(by intro p hp; exact hext p (List.mem_append.mpr (Or.inr hp))), ?_, hcons'⟩
             · intro a ha
               refine propagate_back hp a (hback a ha) ?_
               intro p hp'
               exact ha p (hext p (List.mem_append.mpr (Or.inl hp')))
           · rw [if_neg hv] at h
+            have hv' : ¬ (v ∈ decVars (forced ++ asg)) := by
+              intro hh
+              apply hv
+              rw [Bool.or_eq_true]
+              exact Or.inl (decide_eq_true_eq.mpr hh)
             have hvn : ∀ q ∈ forced ++ asg, q.1 ≠ v := by
               intro q hq he
-              apply hv
+              apply hv'
               rw [decVars, List.mem_map]
               exact ⟨q, hq, he⟩
             have hno2 (bb : Bool) : NoAssigned (assign v bb cs') ((v, bb) :: forced ++ asg) := by
@@ -1042,20 +1063,31 @@ theorem dpllAux_complete : ∀ (vs : List BVar) (cs : List Clause) (asg : List (
             · exact propagate_agr hp a ha p hpf
             · exact hagree p hpa
           have hcs' : SatList a cs' := propagate_fwd hp a ha
-          by_cases hv : v ∈ decVars (forced ++ asg)
+          by_cases hv : (v ∈ decVars (forced ++ asg)) || !decide (v ∈ litVars cs')
           · rw [if_pos hv] at h
-            obtain ⟨b, hb⟩ := mem_decVars.mp hv
+            rw [Bool.or_eq_true] at hv
+            have hvn2 : v ∉ litVars cs' := by
+              rcases hv with h | h
+              · obtain ⟨b, hb⟩ := mem_decVars.mp (of_decide_eq_true h)
+                intro hu
+                exact absurd rfl (hno1 v hu (v, b) hb)
+              · exact not_mem_of_skip h
             have hvars' : VarsIn cs' rest := by
               intro u hu
               have hu' : u ∈ v :: rest := hvars1 u hu
               rcases List.mem_cons.mp hu' with hueq | hu'
-              · exact absurd hueq.symm (hno1 u hu (v, b) hb)
+              · exact absurd (hueq ▸ hu) hvn2
               · exact hu'
             exact ih cs' (forced ++ asg) h hno1 hvars' a hcs' hagr
           · rw [if_neg hv] at h
+            have hv' : ¬ (v ∈ decVars (forced ++ asg)) := by
+              intro hh
+              apply hv
+              rw [Bool.or_eq_true]
+              exact Or.inl (decide_eq_true_eq.mpr hh)
             have hvn : ∀ q ∈ forced ++ asg, q.1 ≠ v := by
               intro q hq he
-              apply hv
+              apply hv'
               rw [decVars, List.mem_map]
               exact ⟨q, hq, he⟩
             have hno2 (bb : Bool) : NoAssigned (assign v bb cs') ((v, bb) :: forced ++ asg) := by

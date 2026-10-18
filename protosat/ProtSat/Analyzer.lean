@@ -50,29 +50,18 @@ open Protocol
 
 /-! ### Deciding the universe hypothesis -/
 
-/-- The executable form of ProtSat.Encode.univClosed: the three closure conditions are
-quantified over the finite lists allExprs P and vals sh.U, so they are Boolean tests.  The
-analyser runs this first: if the universe is not closed under the operations the protocol
-performs, the bounds are too small to state the question and no verdict is meaningful. -/
+/-- The executable form of ProtSat.Encode.univClosed: the condition is quantified over the
+finite list allExprs P, so it is a Boolean test.  The analyser runs it first: if the universe
+does not even contain the messages the protocol denotes with closed expressions, the bounds
+are too small to state the question and no verdict is meaningful. -/
 def univClosedBool (sh : Shape) (P : Protocol) : Bool :=
-  (allExprs P).all fun e =>
-    ((vals sh.U).all fun v => admissible sh (Expr.stepEval1 e v)) &&
-      ((vals sh.U).all fun v =>
-          (vals sh.U).all fun w => admissible sh (Expr.stepEval2 e v w)) &&
-        admissible sh (Expr.constVal e)
+  (allExprs P).all fun e => admissible sh (Expr.constVal e)
 
 /-- The Boolean test agrees with the Prop it decides. -/
 theorem univClosedBool_iff (sh : Shape) (P : Protocol) :
     univClosedBool sh P = true <-> univClosed sh P := by
   classical
-  rw [univClosedBool, univClosed]
-  simp only [List.all_eq_true, Bool.and_eq_true]
-  constructor
-  · intro h
-    refine ⟨fun e he v hv => (h e he).1.1 v hv, fun e he v hv w hw => (h e he).1.2 v hv w hw,
-      fun e he => (h e he).2⟩
-  · rintro ⟨h1, h2, h3⟩ e he
-    exact ⟨⟨h1 e he, h2 e he⟩, h3 e he⟩
+  simp only [univClosedBool, univClosed, List.all_eq_true]
 
 /-! ### Building a certificate out of a satisfying assignment -/
 

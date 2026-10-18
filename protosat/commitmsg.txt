@@ -1,17 +1,23 @@
-ProtSat: replace the quadratic one-hot at-most-one encoding with a linear sequential counter
+ProtSat CRITICAL FIX: univClosed was unsatisfiable for any protocol that builds messages
 
-The pairwise atMostOne made every one-hot group cost O(|U|^2) clauses: the toy protocol
-already generated 6M clauses and the smallest realistic instance 227k (7 min to solve).
-The sequential counter (3 clauses + 1 auxiliary variable per position) keeps the encoding
-Tseitin and compositional while making it linear.
+univClosed demanded that the finite universe be closed under the protocol's own constructors:
+for every e in allExprs and every v,w in vals U, stepEval e v w must lie in U.  For e = pair
+that asks pair x y in U for ALL x,y in U - impossible for a finite nonempty U - so 8A was
+vacuous for exactly the protocols that matter (Needham-Schroeder, Lowe, any key exchange).
 
-- CNF.lean: atMostOneSeq + bool_ne/clause2_mp + AmoInv + atMostOneSeq_correct + atMostOneSeq_amo
-- OneHot.lean: Oh gains auxOf (per-group auxiliary flags); Oh.clauses = atLeastOne ++ atMostOneSeq;
-  Oh.clauses_unique reproved through the new AMO lemma (statement unchanged)
-- Encode.lean: six auxiliary blocks (bsApc..bsAfr, apc..afr) and ohOf takes the aux map
-- Clauses.lean: the publisher block now starts after the auxiliary blocks (vpb, bsAu)
-- Complete.lean: range/injectivity lemmas adapted to the new layout
+Fix: the encoding now uses the standard bounded-model-checking under-approximation.
+- Encode.lean: uIdx maps every out-of-universe value to the UNSET index (new lemma
+  valAt_uIdx_filter); an action whose value the bounds do not name is disabled instead of
+  being mis-modelled.
+- Clauses.lean: univClosed is now "every closed protocol expression denotes a universe
+  message" - satisfiable, decidable, and exactly what the leaf gates need.
+- Encoding.lean: xe_unary / xe_binary state the gate through the filter; decXe_eq becomes the
+  one-directional correspondence 8A actually needs (decoded value some t => the real
+  evaluation is some t), proved by induction with the new filter_some lemma; the four use
+  sites (send / assign / check x2) updated.
+- Analyzer.lean: univClosedBool simplified to match.
 
-IMPORTANT: ProtSat/Encoding.lean (the 3559-line 8A development) needed NO changes and still
-builds: its proofs only use Oh.decode_some / Oh.decode_of_true / sat_*Oh, whose statements are
-unchanged.  lake build green (925 jobs).
+Verified: lake build green (925 jobs).  End-to-end: a 1-session protocol sending <A,K(A,A)> in
+the clear now has univClosedBool = true, and analyze P { steps := 2, rounds := 1 } computes an
+ATTACK with a 2-step certificate via the real DPLL over a 26,803-clause CNF (5,751 variables,
+4,692 decisions).

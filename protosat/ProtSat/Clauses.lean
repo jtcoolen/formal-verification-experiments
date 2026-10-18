@@ -67,16 +67,22 @@ theorem admissible_valAt_uIdx {sh : Shape} (v : Val) (h : admissible sh v = true
       exact valAt_uIdx_some sh ht
 
 /-- **The universe hypothesis** (specification section 4: the bounds must be large enough
-for the analysis to mean anything).  The universe is closed under the message operations
-that the protocol's expressions perform, and it contains the value of every closed
-expression of the protocol.  This is a decidable property of P and B; the analyser checks it
-before trusting its answer, and reports that the bounds are too small when it fails.  All
-the encoding theorems below assume it. -/
+for the analysis to mean anything): every closed expression of the protocol denotes a
+message the universe contains.
+
+That is the whole of the hypothesis, and it is a real one.  No finite universe is closed
+under pairing, so the encoding never pretends to represent a message it has no name for:
+ProtSat.Encode.uIdx maps every out-of-universe value to the unset index, which disables the
+action that would have computed it.  The analysis is therefore an under-approximation of the
+protocol's behaviour - exactly as in bounded model checking - and specification 8B states
+the completeness theorem relative to runs that stay inside the universe
+(ProtSat.Complete.WithinBounds).
+
+This is a decidable property of P and B; the analyser checks it before trusting its answer,
+and reports that the bounds are too small when it fails.  All the encoding theorems below
+assume it. -/
 def univClosed (sh : Shape) (P : Protocol) : Prop :=
-  (∀ e ∈ allExprs P, ∀ v ∈ vals sh.U, admissible sh (Expr.stepEval1 e v)) ∧
-  (∀ e ∈ allExprs P, ∀ v ∈ vals sh.U, ∀ w ∈ vals sh.U,
-      admissible sh (Expr.stepEval2 e v w)) ∧
-  (∀ e ∈ allExprs P, admissible sh (Expr.constVal e))
+  ∀ e ∈ allExprs P, admissible sh (Expr.constVal e)
 
 /-! ### Decoding a run from an assignment -/
 

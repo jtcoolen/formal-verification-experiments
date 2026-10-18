@@ -537,10 +537,15 @@ def xeOh (sh : Shape) (i q e : Nat) : Oh Nat :=
 range (the last index is reserved for "unset"). -/
 def valAt (sh : Shape) (u : Nat) : Val := rget sh.U u
 
-/-- The number of a value: a universe message uses its first position, unset is last. -/
+/-- The number of a value: a universe message uses its first position, and anything else -
+unset, or a message the bounds do not contain - gets the unset index.  A message outside the
+universe therefore has no name in the encoding: an action whose value leaves the universe is
+disabled rather than mis-modelled.  This is the standard bounded-universe
+under-approximation, and it is what makes ProtSat.Encode.univClosed a satisfiable
+hypothesis (a finite universe can never be closed under pairing). -/
 def uIdx (sh : Shape) : Val -> Nat
   | none => sh.U.length
-  | some t => ixOf t sh.U
+  | some t => if t ∈ sh.U then ixOf t sh.U else sh.U.length
 
 /-- valAt of the unset index is unset. -/
 @[simp] theorem valAt_uIdx_none (sh : Shape) : valAt sh (uIdx sh none) = none :=
@@ -548,8 +553,26 @@ def uIdx (sh : Shape) : Val -> Nat
 
 /-- valAt inverts uIdx on universe messages. -/
 theorem valAt_uIdx_some (sh : Shape) {t : Term} (ht : t ∈ sh.U) :
-    valAt sh (uIdx sh (some t)) = some t :=
-  rget_ixOf sh.U t ht
+    valAt sh (uIdx sh (some t)) = some t := by
+  show valAt sh (if t ∈ sh.U then ixOf t sh.U else sh.U.length) = some t
+  rw [if_pos ht]
+  exact rget_ixOf sh.U t ht
+
+/-- **The defining property of uIdx.**  Reading back the index of a value gives the value
+when it belongs to the universe and nothing otherwise: the encoding can name exactly the
+messages the bounds contain. -/
+theorem valAt_uIdx_filter (sh : Shape) (v : Val) :
+    valAt sh (uIdx sh v) = v.filter (fun t => decide (t ∈ sh.U)) := by
+  cases v with
+  | none => show valAt sh (uIdx sh none) = none; exact valAt_uIdx_none sh
+  | some t =>
+      show valAt sh (if t ∈ sh.U then ixOf t sh.U else sh.U.length) =
+        (if decide (t ∈ sh.U) then some t else none)
+      by_cases ht : t ∈ sh.U
+      · rw [if_pos ht, if_pos (by simp [ht])]
+        exact rget_ixOf sh.U t ht
+      · rw [if_neg ht, if_neg (by simp [ht])]
+        exact valAt_uIdx_none sh
 
 /-- tIx reads back through valAt. -/
 theorem tIx_valAt {sh : Shape} {t : Term} {n : Nat} (h : tIx sh t = some n) :
@@ -579,43 +602,22 @@ theorem tIx_lt {sh : Shape} {t : Term} {n : Nat} (h : tIx sh t = some n) :
 /-- The index of a value is always within the stride: pos returns 0 for a message that is
 absent, so even a value outside the universe gets a legal (if meaningless) index. -/
 theorem uIdx_lt' (sh : Shape) (v : Val) : uIdx sh v < shVal sh := by
+  have hlen : sh.U.length < shVal sh := by show sh.U.length < sh.U.length + 1; omega
   cases v with
-  | none => simp [uIdx, shVal]
+  | none => show sh.U.length < shVal sh; exact hlen
   | some t =>
-      have hle : ∀ (l : List Term) (a : Term), ixOf a l ≤ l.length := by
-        intro l
-        induction l with
-        | nil => intro a; simp [ixOf]
-        | cons x xs ih =>
-            intro a
-            have hi := ih a
-            by_cases hxa : x == a
-            · simp [ixOf, hxa]
-            · simp only [ixOf, if_neg hxa, List.length_cons]
-              omega
-      have h1 := hle sh.U t
-      show ixOf t sh.U < sh.U.length + 1
-      omega
-
-/-- The index of a value is within the stride. -/
-theorem uIdx_lt (sh : Shape) (v : Val) (hv : v ∈ sh.U.map some ++ [none]) :
-    uIdx sh v < shVal sh := by
-  cases v with
-  | none => simp [uIdx, shVal]
-  | some t =>
-      simp only [List.mem_append, List.mem_singleton, List.mem_map] at hv
-      rcases hv with h | h
-      · obtain ⟨u, hu, hut⟩ := h
-        have hut' : u = t := Option.some.inj hut
-        have h1 : rget sh.U (ixOf t sh.U) = some t := hut' ▸ rget_ixOf sh.U u hu
-        have hlt : ixOf t sh.U < sh.U.length := by
-          by_contra e
-          have h2 : rget sh.U (ixOf t sh.U) = none := rget_oob_ge sh.U _ (by omega)
-          rw [h2] at h1; simp at h1
-        simp only [uIdx]
-        have : shVal sh = sh.U.length + 1 := rfl
+      show (if t ∈ sh.U then ixOf t sh.U else sh.U.length) < shVal sh
+      by_cases ht : t ∈ sh.U
+      · rw [if_pos ht]
+        have h1 : ixOf t sh.U ≤ sh.U.length := ixOf_le sh.U t
         omega
-      · exact absurd h (by simp)
+      · rw [if_neg ht]
+        exact hlen
+
+/-- The index of a value is within the stride: now immediate, because an out-of-universe
+message also maps to the unset index. -/
+theorem uIdx_lt (sh : Shape) (v : Val) (hv : v ∈ sh.U.map some ++ [none]) :
+    uIdx sh v < shVal sh := uIdx_lt' sh v
 
 /-! ### Event alternatives -/
 
@@ -658,4 +660,3 @@ def decodeCfg (sh : Shape) (a : Assignment) (i : Nat) : Cfg :=
       { pc := decodePc sh a i q, store := decodeStore sh a i q },
     kn := decodeKn sh a i }
 
-end ProtSat.Encode

@@ -143,7 +143,8 @@ theorem valAt_inj {u v : Nat} (hu : u < (shapeOf P B).U.length)
 theorem uIdx_lt_of_mem {t : Term} (ht : t ∈ (shapeOf P B).U) :
     uIdx (shapeOf P B) (some t) < (shapeOf P B).U.length := by
   have h1 : rget (shapeOf P B).U (ixOf t (shapeOf P B).U) = some t := rget_ixOf _ _ ht
-  show ixOf t (shapeOf P B).U < (shapeOf P B).U.length
+  show (if t ∈ (shapeOf P B).U then ixOf t (shapeOf P B).U else (shapeOf P B).U.length) < _
+  rw [if_pos ht]
   by_contra e
   have h2 : rget (shapeOf P B).U (ixOf t (shapeOf P B).U) = none :=
     rget_oob_ge _ _ (by omega)
@@ -1234,14 +1235,30 @@ theorem decodeXe_lt {i q : Nat} {e : Expr} (he : e ∈ allExprs P) (hi : i ≤ B
   exact ⟨v, hv, List.mem_range.mp ((decodeGo_some _ _ _ _ hv).1),
     (decodeGo_some _ _ _ _ hv).2⟩
 
+/-- Reading a filtered value: if the filter keeps something, the original was that value. -/
+theorem filter_some {v : Option Term} {p : Term -> Bool} (h : v.filter p = some t) :
+    v = some t := by
+  cases v with
+  | none => cases h
+  | some a =>
+      have h1 : (if p a then some a else none) = some t := by simpa [Option.filter] using h
+      by_cases hp : p a
+      · rw [if_pos hp] at h1
+        exact Option.some.inj h1 ▸ rfl
+      · rw [if_neg hp] at h1
+        cases h1
+
 /-- **Unary Tseitin gate.**  The value decoded for a unary expression is one evaluation step
-applied to the value decoded for its child. -/
+applied to the value decoded for its child - provided the result is a message of the
+universe; a result the bounds do not name decodes to nothing, which is what disables the
+action that would have computed it. -/
 theorem xe_unary {e c : Expr} (he : e ∈ allExprs P) (hc : c ∈ allExprs P)
     (hchild : Expr.child1 e = some c)
     (hU : univClosed (shapeOf P B) P) (h : Sat a (encode P B))
     (hi : i ≤ B.steps) (hq : q < shS (shapeOf P B)) :
     decXe (shapeOf P B) P a i q e =
-      Expr.stepEval1 e (decXe (shapeOf P B) P a i q c) := by
+      (Expr.stepEval1 e (decXe (shapeOf P B) P a i q c)).filter
+        (fun t => decide (t ∈ (shapeOf P B).U)) := by
   obtain ⟨v, hv, hvlt, hvv⟩ := decodeXe_lt hc hi hq h
   have hixc : eIdx P c < shE (shapeOf P B) := eIdx_lt hc
   have hixe : eIdx P e < shE (shapeOf P B) := eIdx_lt he
@@ -1258,11 +1275,9 @@ theorem xe_unary {e c : Expr} (he : e ∈ allExprs P) (hc : c ∈ allExprs P)
     Oh.decode_of_true (sat_xeOh hi hq hixe h)
       (List.mem_range.mpr (uIdx_lt' (shapeOf P B) _)) h2
   have hval : valAt (shapeOf P B) (f1 (shapeOf P B) e v) =
-      Expr.stepEval1 e (valAt (shapeOf P B) v) := by
-    show valAt (shapeOf P B) (uIdx (shapeOf P B) (Expr.stepEval1 e (valAt (shapeOf P B) v))) = _
-    refine valAt_uIdx_adm ?_
-    exact hU.1 e he (valAt (shapeOf P B) v)
-      (((admissible_iff_vals (sh := shapeOf P B) (v := valAt (shapeOf P B) v)).mp (admissible_valAt hvlt)))
+      (Expr.stepEval1 e (valAt (shapeOf P B) v)).filter
+        (fun t => decide (t ∈ (shapeOf P B).U)) :=
+    valAt_uIdx_filter (shapeOf P B) _
   have hc' : decXe (shapeOf P B) P a i q c = valAt (shapeOf P B) v := by
     unfold decXe decVal
     rw [hv]
@@ -1277,8 +1292,9 @@ theorem xe_binary {e c₁ c₂ : Expr} (he : e ∈ allExprs P) (hc₁ : c₁ ∈
     (hU : univClosed (shapeOf P B) P) (h : Sat a (encode P B))
     (hi : i ≤ B.steps) (hq : q < shS (shapeOf P B)) :
     decXe (shapeOf P B) P a i q e =
-      Expr.stepEval2 e (decXe (shapeOf P B) P a i q c₁)
-        (decXe (shapeOf P B) P a i q c₂) := by
+      (Expr.stepEval2 e (decXe (shapeOf P B) P a i q c₁)
+        (decXe (shapeOf P B) P a i q c₂)).filter
+        (fun t => decide (t ∈ (shapeOf P B).U)) := by
   obtain ⟨v₁, hv₁, hvl₁, _⟩ := decodeXe_lt hc₁ hi hq h
   obtain ⟨v₂, hv₂, hvl₂, _⟩ := decodeXe_lt hc₂ hi hq h
   have hg : Sat a (fwd2ClausesOn [] (xeOh (shapeOf P B) i q (eIdx P c₁))
@@ -1297,14 +1313,9 @@ theorem xe_binary {e c₁ c₂ : Expr} (he : e ∈ allExprs P) (hc₁ : c₁ ∈
       some (f2 (shapeOf P B) e v₁ v₂) :=
     Oh.decode_of_true (sat_xeOh hi hq hixe h) (List.mem_range.mpr (uIdx_lt' (shapeOf P B) _)) h2
   have hval : valAt (shapeOf P B) (f2 (shapeOf P B) e v₁ v₂) =
-      Expr.stepEval2 e (valAt (shapeOf P B) v₁) (valAt (shapeOf P B) v₂) := by
-    show valAt (shapeOf P B) (uIdx (shapeOf P B)
-        (Expr.stepEval2 e (valAt (shapeOf P B) v₁) (valAt (shapeOf P B) v₂))) = _
-    refine valAt_uIdx_adm ?_
-    exact hU.2.1 e he (valAt (shapeOf P B) v₁)
-      (((admissible_iff_vals (sh := shapeOf P B) (v := valAt (shapeOf P B) v₁)).mp (admissible_valAt hvl₁)))
-      (valAt (shapeOf P B) v₂)
-      (((admissible_iff_vals (sh := shapeOf P B) (v := valAt (shapeOf P B) v₂)).mp (admissible_valAt hvl₂)))
+      (Expr.stepEval2 e (valAt (shapeOf P B) v₁) (valAt (shapeOf P B) v₂)).filter
+        (fun t => decide (t ∈ (shapeOf P B).U)) :=
+    valAt_uIdx_filter (shapeOf P B) _
   have h1' : decXe (shapeOf P B) P a i q c₁ = valAt (shapeOf P B) v₁ := by
     unfold decXe decVal; rw [hv₁]
   have h2' : decXe (shapeOf P B) P a i q c₂ = valAt (shapeOf P B) v₂ := by
@@ -1364,87 +1375,146 @@ theorem xe_konst {E : Expr} (he : E ∈ allExprs P) (h1 : Expr.child1 E = none)
   unfold decXe decVal
   rw [h3]
   refine valAt_uIdx_adm ?_
-  exact hU.2.2 E he
+  exact hU E he
 
-/-- **Evaluation correspondence (specification 8A).**  For every expression of the protocol,
-the value decoded from its Tseitin group is exactly the value of the expression in the
-decoded store.  This is the lemma that makes the SAT encoding of message construction and
-destruction trustworthy. -/
 theorem decXe_eq (hU : univClosed (shapeOf P B) P) (h : Sat a (encode P B))
     (hi : i ≤ B.steps) (hq : q < shS (shapeOf P B)) :
-    ∀ e : Expr, e ∈ allExprs P ->
-      decXe (shapeOf P B) P a i q e = Expr.eval e (decodeStore (shapeOf P B) a i q) := by
+    ∀ (e : Expr), e ∈ allExprs P -> ∀ t,
+      decXe (shapeOf P B) P a i q e = some t ->
+      Expr.eval e (decodeStore (shapeOf P B) a i q) = some t := by
   intro e
   induction e with
   | agent A =>
-      intro he
-      rw [xe_konst he rfl rfl
-        (by intro x; simp [Expr.var]) hU h hi hq]
-      simp [Expr.eval, Expr.constVal]
+      intro he t hdec
+      rw [xe_konst he rfl rfl (by intro x; simp [Expr.var]) hU h hi hq] at hdec
+      simpa [Expr.eval, Expr.constVal] using hdec
   | nonce N =>
-      intro he
-      rw [xe_konst he rfl rfl
-        (by intro x; simp [Expr.var]) hU h hi hq]
-      simp [Expr.eval, Expr.constVal]
+      intro he t hdec
+      rw [xe_konst he rfl rfl (by intro x; simp [Expr.var]) hU h hi hq] at hdec
+      simpa [Expr.eval, Expr.constVal] using hdec
   | shrk a b =>
-      intro he
-      rw [xe_konst he rfl rfl
-        (by intro x; simp [Expr.var]) hU h hi hq]
-      simp [Expr.eval, Expr.constVal]
+      intro he t hdec
+      rw [xe_konst he rfl rfl (by intro x; simp [Expr.var]) hU h hi hq] at hdec
+      simpa [Expr.eval, Expr.constVal] using hdec
   | pubk a =>
-      intro he
-      rw [xe_konst he rfl rfl
-        (by intro x; simp [Expr.var]) hU h hi hq]
-      simp [Expr.eval, Expr.constVal]
+      intro he t hdec
+      rw [xe_konst he rfl rfl (by intro x; simp [Expr.var]) hU h hi hq] at hdec
+      simpa [Expr.eval, Expr.constVal] using hdec
   | privk a =>
-      intro he
-      rw [xe_konst he rfl rfl
-        (by intro x; simp [Expr.var]) hU h hi hq]
-      simp [Expr.eval, Expr.constVal]
+      intro he t hdec
+      rw [xe_konst he rfl rfl (by intro x; simp [Expr.var]) hU h hi hq] at hdec
+      simpa [Expr.eval, Expr.constVal] using hdec
   | var x =>
-      intro he
-      rw [xe_var he (var_lt_shV he (by simp [Expr.vars])) h hi hq]
-      exact (readVar_decodeStore (var_lt_shV he (by simp [Expr.vars]))).symm
-  | pair a b iha ihb =>
-      intro he
+      intro he t hdec
+      have hxv : x < shV (shapeOf P B) := var_lt_shV he (by simp [Expr.vars])
+      show readVar x (decodeStore (shapeOf P B) a i q) = some t
+      rw [readVar_decodeStore hxv, ← (xe_var he hxv h hi hq)]
+      exact hdec
+  | pair ca cb iha ihb =>
+      intro he t hdec
       obtain ⟨hca, hcb⟩ := mem_allExprs_child2 he rfl
-      rw [Expr.eval_child2 rfl,
-        xe_binary he hca hcb rfl hU h hi hq, iha hca, ihb hcb]
-  | encS a b iha ihb =>
-      intro he
+      rw [xe_binary he hca hcb rfl hU h hi hq] at hdec
+      have hres : Expr.stepEval2 (Expr.pair ca cb) (decXe (shapeOf P B) P a i q ca)
+          (decXe (shapeOf P B) P a i q cb) = some t := filter_some hdec
+      cases hxa : decXe (shapeOf P B) P a i q ca with
+      | none => rw [hxa] at hres; simp [Expr.stepEval2] at hres
+      | some u =>
+          cases hxb : decXe (shapeOf P B) P a i q cb with
+          | none => rw [hxb] at hres; simp [Expr.stepEval2] at hres
+          | some v =>
+              rw [hxa, hxb] at hres
+              rw [Expr.eval_child2 rfl, iha hca u hxa, ihb hcb v hxb]
+              exact hres
+  | encS ca cb iha ihb =>
+      intro he t hdec
       obtain ⟨hca, hcb⟩ := mem_allExprs_child2 he rfl
-      rw [Expr.eval_child2 rfl,
-        xe_binary he hca hcb rfl hU h hi hq, iha hca, ihb hcb]
-  | decS a b iha ihb =>
-      intro he
+      rw [xe_binary he hca hcb rfl hU h hi hq] at hdec
+      have hres : Expr.stepEval2 (Expr.encS ca cb) (decXe (shapeOf P B) P a i q ca)
+          (decXe (shapeOf P B) P a i q cb) = some t := filter_some hdec
+      cases hxa : decXe (shapeOf P B) P a i q ca with
+      | none => rw [hxa] at hres; simp [Expr.stepEval2] at hres
+      | some u =>
+          cases hxb : decXe (shapeOf P B) P a i q cb with
+          | none => rw [hxb] at hres; simp [Expr.stepEval2] at hres
+          | some v =>
+              rw [hxa, hxb] at hres
+              rw [Expr.eval_child2 rfl, iha hca u hxa, ihb hcb v hxb]
+              exact hres
+  | decS ca cb iha ihb =>
+      intro he t hdec
       obtain ⟨hca, hcb⟩ := mem_allExprs_child2 he rfl
-      rw [Expr.eval_child2 rfl,
-        xe_binary he hca hcb rfl hU h hi hq, iha hca, ihb hcb]
-  | encA a _ iha =>
-      intro he
-      have hca : a ∈ allExprs P := mem_allExprs_child1 he rfl
-      rw [Expr.eval_child1 rfl,
-        xe_unary he hca rfl hU h hi hq, iha hca]
-  | hash a iha =>
-      intro he
-      have hca : a ∈ allExprs P := mem_allExprs_child1 he rfl
-      rw [Expr.eval_child1 rfl,
-        xe_unary he hca rfl hU h hi hq, iha hca]
-  | fst a iha =>
-      intro he
-      have hca : a ∈ allExprs P := mem_allExprs_child1 he rfl
-      rw [Expr.eval_child1 rfl,
-        xe_unary he hca rfl hU h hi hq, iha hca]
-  | snd a iha =>
-      intro he
-      have hca : a ∈ allExprs P := mem_allExprs_child1 he rfl
-      rw [Expr.eval_child1 rfl,
-        xe_unary he hca rfl hU h hi hq, iha hca]
-  | decA a _ iha =>
-      intro he
-      have hca : a ∈ allExprs P := mem_allExprs_child1 he rfl
-      rw [Expr.eval_child1 rfl,
-        xe_unary he hca rfl hU h hi hq, iha hca]
+      rw [xe_binary he hca hcb rfl hU h hi hq] at hdec
+      have hres : Expr.stepEval2 (Expr.decS ca cb) (decXe (shapeOf P B) P a i q ca)
+          (decXe (shapeOf P B) P a i q cb) = some t := filter_some hdec
+      cases hxa : decXe (shapeOf P B) P a i q ca with
+      | none => rw [hxa] at hres; simp [Expr.stepEval2] at hres
+      | some u =>
+          cases hxb : decXe (shapeOf P B) P a i q cb with
+          | none => rw [hxb] at hres; simp [Expr.stepEval2] at hres
+          | some v =>
+              rw [hxa, hxb] at hres
+              rw [Expr.eval_child2 rfl, iha hca u hxa, ihb hcb v hxb]
+              exact hres
+  | encA ca ag iha =>
+      intro he t hdec
+      have hca : ca ∈ allExprs P := mem_allExprs_child1 he rfl
+      rw [xe_unary he hca rfl hU h hi hq] at hdec
+      have hres : Expr.stepEval1 (Expr.encA ca ag) (decXe (shapeOf P B) P a i q ca) = some t :=
+        filter_some hdec
+      cases hxa : decXe (shapeOf P B) P a i q ca with
+      | none => rw [hxa] at hres; simp [Expr.stepEval1] at hres
+      | some u =>
+          rw [hxa] at hres
+          rw [Expr.eval_child1 rfl, iha hca u hxa]
+          exact hres
+  | hash ca iha =>
+      intro he t hdec
+      have hca : ca ∈ allExprs P := mem_allExprs_child1 he rfl
+      rw [xe_unary he hca rfl hU h hi hq] at hdec
+      have hres : Expr.stepEval1 (Expr.hash ca) (decXe (shapeOf P B) P a i q ca) = some t :=
+        filter_some hdec
+      cases hxa : decXe (shapeOf P B) P a i q ca with
+      | none => rw [hxa] at hres; simp [Expr.stepEval1] at hres
+      | some u =>
+          rw [hxa] at hres
+          rw [Expr.eval_child1 rfl, iha hca u hxa]
+          exact hres
+  | fst ca iha =>
+      intro he t hdec
+      have hca : ca ∈ allExprs P := mem_allExprs_child1 he rfl
+      rw [xe_unary he hca rfl hU h hi hq] at hdec
+      have hres : Expr.stepEval1 (Expr.fst ca) (decXe (shapeOf P B) P a i q ca) = some t :=
+        filter_some hdec
+      cases hxa : decXe (shapeOf P B) P a i q ca with
+      | none => rw [hxa] at hres; simp [Expr.stepEval1] at hres
+      | some u =>
+          rw [hxa] at hres
+          rw [Expr.eval_child1 rfl, iha hca u hxa]
+          exact hres
+  | snd ca iha =>
+      intro he t hdec
+      have hca : ca ∈ allExprs P := mem_allExprs_child1 he rfl
+      rw [xe_unary he hca rfl hU h hi hq] at hdec
+      have hres : Expr.stepEval1 (Expr.snd ca) (decXe (shapeOf P B) P a i q ca) = some t :=
+        filter_some hdec
+      cases hxa : decXe (shapeOf P B) P a i q ca with
+      | none => rw [hxa] at hres; simp [Expr.stepEval1] at hres
+      | some u =>
+          rw [hxa] at hres
+          rw [Expr.eval_child1 rfl, iha hca u hxa]
+          exact hres
+  | decA ca ag iha =>
+      intro he t hdec
+      have hca : ca ∈ allExprs P := mem_allExprs_child1 he rfl
+      rw [xe_unary he hca rfl hU h hi hq] at hdec
+      have hres : Expr.stepEval1 (Expr.decA ca ag) (decXe (shapeOf P B) P a i q ca) = some t :=
+        filter_some hdec
+      cases hxa : decXe (shapeOf P B) P a i q ca with
+      | none => rw [hxa] at hres; simp [Expr.stepEval1] at hres
+      | some u =>
+          rw [hxa] at hres
+          rw [Expr.eval_child1 rfl, iha hca u hxa]
+          exact hres
 
 /-! ### Deduction instances are genuine rule applications -/
 
@@ -2908,11 +2978,8 @@ theorem rel_agrees (hU : univClosed (shapeOf P B) P) (h : Sat a (encode P B))
             show readVar x (storeOf C q) = readVar x (decodeStore (shapeOf P B) a i q)
             rw [hag.2.1 q x hnS hxv, readVar_decodeStore hxv]
           have heval : Expr.eval e (storeOf C q) = some t := by
-            have h3 : decXe (shapeOf P B) P a i q e =
-                Expr.eval e (decodeStore (shapeOf P B) a i q) :=
-              decXe_eq hU h (Nat.le_of_lt hi) hq e hmem
-            have h4 : Expr.eval e (decodeStore (shapeOf P B) a i q) = some t := by
-              rw [← h3, hdec']
+            have h4 : Expr.eval e (decodeStore (shapeOf P B) a i q) = some t :=
+              decXe_eq hU h (Nat.le_of_lt hi) hq e hmem t hdec'
             rw [← h4]
             exact Expr.eval_congr h2
           have hact2 : P.actionAt q (pcOf C q) = some (Action.send a' e) := by
@@ -3067,11 +3134,8 @@ theorem rel_agrees (hU : univClosed (shapeOf P B) P) (h : Sat a (encode P B))
             show readVar y (storeOf C q) = readVar y (decodeStore (shapeOf P B) a i q)
             rw [hag.2.1 q y hnS hyv, readVar_decodeStore hyv]
           have heval : Expr.eval e (storeOf C q) = some t := by
-            have h3 : decXe (shapeOf P B) P a i q e =
-                Expr.eval e (decodeStore (shapeOf P B) a i q) :=
-              decXe_eq hU h (Nat.le_of_lt hi) hq e hmem
-            have h4 : Expr.eval e (decodeStore (shapeOf P B) a i q) = some t := by
-              rw [← h3, hdec']
+            have h4 : Expr.eval e (decodeStore (shapeOf P B) a i q) = some t :=
+              decXe_eq hU h (Nat.le_of_lt hi) hq e hmem t hdec'
             rw [← h4]
             exact Expr.eval_congr h2
           have hcl2 : actGuard (shapeOf P B) i q (decodePc (shapeOf P B) a i q) ++
@@ -3212,19 +3276,13 @@ theorem rel_agrees (hU : univClosed (shapeOf P B) P) (h : Sat a (encode P B))
             show readVar x (storeOf C q) = readVar x (decodeStore (shapeOf P B) a i q)
             rw [hag.2.1 q x hnS hxv, readVar_decodeStore hxv]
           have he₁ : Expr.eval e₁ (storeOf C q) = some t := by
-            have h3 : decXe (shapeOf P B) P a i q e₁ =
-                Expr.eval e₁ (decodeStore (shapeOf P B) a i q) :=
-              decXe_eq hU h (Nat.le_of_lt hi) hq e₁ hm₁
-            have h4 : Expr.eval e₁ (decodeStore (shapeOf P B) a i q) = some t := by
-              rw [← h3, hdec₁]
+            have h4 : Expr.eval e₁ (decodeStore (shapeOf P B) a i q) = some t :=
+              decXe_eq hU h (Nat.le_of_lt hi) hq e₁ hm₁ t hdec₁
             rw [← h4]
             exact Expr.eval_congr hc₁
           have he₂ : Expr.eval e₂ (storeOf C q) = some t := by
-            have h3 : decXe (shapeOf P B) P a i q e₂ =
-                Expr.eval e₂ (decodeStore (shapeOf P B) a i q) :=
-              decXe_eq hU h (Nat.le_of_lt hi) hq e₂ hm₂
-            have h4 : Expr.eval e₂ (decodeStore (shapeOf P B) a i q) = some t := by
-              rw [← h3, hdec₂]
+            have h4 : Expr.eval e₂ (decodeStore (shapeOf P B) a i q) = some t :=
+              decXe_eq hU h (Nat.le_of_lt hi) hq e₂ hm₂ t hdec₂
             rw [← h4]
             exact Expr.eval_congr hc₂
           have hlearn : decLearn (shapeOf P B) P a i = none :=

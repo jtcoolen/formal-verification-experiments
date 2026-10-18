@@ -13,10 +13,6 @@ def tinyP : Protocol :=
 
 def TB : Bounds := { steps := 2, rounds := 1 }
 
-#eval ((shapeOf tinyP TB).U.length, shVal (shapeOf tinyP TB), nInst (shapeOf tinyP TB), shEv (shapeOf tinyP TB))
+#eval ((shapeOf tinyP TB).U.length, shVal (shapeOf tinyP TB), nInst (shapeOf tinyP TB))
 #eval ((encode tinyP TB).clauses.length)
 #eval (DPLL.dpll (encode tinyP TB)).map (fun l => l.length)
-#eval match analyze tinyP TB with
-  | Verdict.boundsTooSmall => "boundsTooSmall"
-  | Verdict.safe => "SAFE"
-  | Verdict.attack c => ("ATTACK", c.steps.length)
