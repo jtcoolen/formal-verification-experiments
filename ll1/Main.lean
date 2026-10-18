@@ -219,6 +219,48 @@ def main : IO Unit := do
   IO.println "  already shares iterP P k), so only the densely queried loops were switched."
   IO.println ""
   IO.println line
+  IO.println "PHASE 5.3 - NO REACHABLE SELECTED LEFT-CORNER CYCLE"
+  IO.println line
+  IO.println "  SelectedLeftCorner x A B : A -> alpha B beta is SELECTed at the single lookahead x"
+  IO.println "                             with alpha erasable (Vermillion-style, lookahead-indexed)"
+  IO.println "  noSelectedLCCycle : Ll1 -> Occurs A -> not (SelectedLCPath x A A)"
+  IO.println "  proof: a FIRST-justified edge gives a stopping witness whose length is independent of"
+  IO.println "         the continuation, so a cycle forces c = J + c with 0 < J.  If every edge erases,"
+  IO.println "         A, the cycle tail and the FOLLOW continuation all erase, the stopping lengths"
+  IO.println "         satisfy c_n = J + c_(n+1): an infinite descent in Nat."
+  IO.println ("  UnreachableSelectedCycle: S -> a, U -> U b | eps has ll1Check = " ++
+    toString Examples.UnreachableSelectedCycle.G.ll1Check)
+  IO.println "                     (FOLLOW is reachability-aware), U does not occur, U carries a"
+  IO.println "                     selected cycle at b, and the subparser on U and b exhausts every"
+  IO.println "                     fuel - so the Occurs hypothesis cannot be dropped."
+  IO.println "  ToyReduced.toy_selected_acyclic : derived for the toy grammar from Ll1."
+  IO.println ""
+  IO.println line
+  IO.println "PHASE 5.4 - CHECKED GENERATION"
+  IO.println line
+  IO.println "  generate returns GenResult.ok genTable, or GenResult.conflict A x rhs1 rhs2"
+  IO.println "  generate_iff_Ll1  : (exists M, generate = ok M) <-> G.Ll1"
+  IO.println "  generate_conflict : a reported pair really is a Conflict (distinct productions"
+  IO.println "                    of A both selecting x)"
+  IO.println "  generate_not_ok   : ll1Check = false -> a conflict is reported"
+  IO.println "  Validation: bad (S -> a | a b) is rejected naming [a] and [a b] at a; good (S -> a | b)"
+  IO.println "            is accepted and hands out the generated table."
+  IO.println ""
+  IO.println line
+  IO.println "PHASE 5.5 - THE CLASSICAL CHARACTERIZATION"
+  IO.println line
+  IO.println "  ClassicalLL1 mentions only productions, leftmost derivations and lookahead."
+  IO.println "  ll1Check_iff_classicalLL1 : Reduced -> (ll1Check = true <-> ClassicalLL1)"
+  IO.println "  forward: select_of_derives turns the two leftmost derivations into two SELECT members"
+  IO.println "           with one lookahead (no Reduced needed)."
+  IO.println "  reverse: leftDerives_head_of_derives realizes an occurrence as a LEFTMOST"
+  IO.println "           configuration whose continuation still derives the original tail - that"
+  IO.println "           chain transports a FOLLOW witness; Reduced then completes both sides to"
+  IO.println "           terminal words with the shared lookahead, and the four SELECT"
+  IO.println "           combinations are the same argument."
+  IO.println "  ToyReduced.toy_classicalLL1 : the toy grammar satisfies ClassicalLL1, derived."
+
+  IO.println line
   IO.println "MAIN CORRESPONDENCE THEOREM (Phase 1)"
   IO.println line
   IO.println "  tree_iff_derives : (∃ ts, Valid G (node A ts) ∧ yield (node A ts) = ws)"

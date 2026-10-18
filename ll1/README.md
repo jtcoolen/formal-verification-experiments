@@ -24,6 +24,9 @@ lake env lean Axioms.lean # prints the axiom dependencies of every main theorem
 | 5.1 | exact-tree completeness, parser-output uniqueness, grammar unambiguity, the LL(1)-only end-to-end theorem | **done** |
 | 5.2 | LL(1) + reduced => no left recursion (counted head-expansion traces), with formal counterexamples | **done** |
 | 4.0b | memoized Boolean-list fixed-point backend, proved equal to `iterP`, wired into FOLLOW | **done** |
+| 5.3 | LL(1) => no **reachable selected** left-corner cycle (lookahead-indexed, Vermillion-style), with the unreachable counterexample | **done** |
+| 5.4 | checked generation: a table *or* a named conflicting pair of productions | **done** |
+| 5.5 | the classical LL(1) characterization for reduced grammars (`ll1Check = true <-> ClassicalLL1`) | **done** |
 | 6 | Quantum circuit DSL as a worked instance | **done**: token-kind grammar + hand table, payload grammar + generated table, AST, printer, canonical-tree inversion, parser-extractor round trip |
 
 ## Layout
@@ -47,6 +50,9 @@ ll1/
 │   ├── Follow.lean             # FOLLOW spec + computation + soundness/completeness
 │   ├── Generator.lean          # SELECT, LL(1) check, table generation, correctness,
 │   │                           #   end-to-end, exact-tree completeness, unambiguity
+│   ├── SelectedLC.lean       # LL(1) => no reachable selected left-corner cycle (Phase 5.3)
+│   ├── Generate.lean         # checked generation: table or named conflict (Phase 5.4)
+│   ├── Classical.lean        # the classical LL(1) characterization (Phase 5.5)
 │   ├── LeftRec.lean            # LL(1) + reduced => no left recursion (head-step counting)
 │   ├── Memo.lean               # memoized Boolean-list backend for the fixed points
 │   ├── MemoTest.lean           # validation of the memoized backend against Fixpoint.iterP
@@ -829,6 +835,144 @@ Grammar.noLeftRecursion_of_ll1             the theorem
 Grammar.noLeftRecursion_of_ll1Check        the decidable-check form
 ```
 
+## Phase 5.3 - reachable selected cycles are impossible (`SelectedLC.lean`)
+
+The operational core of Lasser, Casinghino, Fisher and Roux, *A Verified LL(1) Parser
+Generator* (ITP 2019) is a **lookahead-indexed** left-corner relation: an edge `A -> B` at
+lookahead `x` is a production `A -> alpha B beta` that the `x`-column of SELECT claims,
+with `alpha` erasable.  A cycle of such edges is exactly what makes recursive descent loop
+without consuming input.  This module proves the version of their no-cycle lemma that is
+true for this repository's conventions:
+
+```lean
+Grammar.noSelectedLCCycle : G.Ll1 -> G.Occurs A -> not (G.SelectedLCPath x A A)
+Grammar.reachableSelectedLCAcyclic : G.Ll1 -> forall x A, G.Occurs A -> not (G.SelectedLCPath x A A)
+```
+
+The reachability hypothesis is not decoration.  `Examples/UnreachableSelectedCycle.lean`
+kernel-checks the grammar `S -> a`, `U -> U b | epsilon`: the checker passes, `U` does not
+occur, `U` nevertheless carries a selected cycle at `b`, and `parseSym` on `U` and the input
+`b` returns `outOfFuel` at *every* fuel (`never_parses_b`).  Vermillion's FOLLOW equations
+cover all productions and would reject that grammar; this repository's `FollowSym` requires
+a reachable occurrence, so the global subparser theorem cannot be transferred unchanged.
+
+### Why no productivity hypothesis is needed here
+
+Phase 5.2 needed `Reduced` to turn a stopping position into a `FIRST` statement.  Two
+observations remove it:
+
+* `AtLookahead x ys` *already* gives `G.FirstList ys x` - the witness is the form itself
+  (`Grammar.FirstList.of_atLookahead_free`), so comparing stopping traces needs only `Ll1`
+  (`headSteps_stop_length_unique_free`; the Phase 5.2 form is now a corollary).
+* A selected edge carries its own productivity: `Select A (alpha B beta) x` means either
+  `x` is in `FIRST(alpha B beta)` - a stopping witness - or `alpha B beta` erases and
+  `x` is in `FOLLOW(A)`.  The two cases are `SelLCFirst` and `SelLCNErased`, and every
+  selected edge is one of them (`selLeftCorner_cases`).
+
+### The proof
+
+A path is split (`selPathF_or_selPathE`) into one with a FIRST-justified edge (`SelPathF`)
+and one whose edges all erase (`SelPathE`).
+
+* `SelPathF`: the FIRST edge gives a head-expansion trace to a form sitting at `x`
+  (`headSteps_stop_of_first`, proved by lifting head traces across a single derivation step
+  with `headSteps_lift_derives1` - the replacement for a diamond property, since no
+  arbitrary derivation is ever reordered).  Appending a continuation to that trace leaves
+  its length untouched, so the stopping length from `var A :: psi` is a constant `c` for
+  every `psi`.  Going once around the cycle costs `0 < J` expansions and lands on
+  `var A :: delta ++ psi`, whose stopping length is the same `c`; uniqueness gives
+  `c = J + c`.
+* `SelPathE`: every production on the cycle erases, so `A` erases, the cycle tail `delta`
+  erases, and `x in FOLLOW(A)` supplies a continuation `post` with `x in FIRST(post)`.
+  Now `var A :: delta^n ++ post` erases down to `post`, so it has a stopping witness of
+  some length `c_n`, and uniqueness gives `c_n = J + c_(n+1)`: an infinite descent in `Nat`.
+
+### Theorem inventory (Phase 5.3)
+
+```text
+Grammar.SelectedLeftCorner / SelectedLCPath    the review's relation, now in the library
+Grammar.SelLCFirst / SelLCNErased              the two shapes of a selected edge
+Grammar.SelPathF / SelPathE                    the path case split
+Grammar.FirstList.of_atLookahead_free          AtLookahead x ys -> FirstList ys x (no Reduced)
+headSteps_stop_length_unique_free              determinism of head expansion under Ll1 alone
+headSteps_lift_derives1 / headAt_of_derives    lifting a trace across one derivation step
+headSteps_stop_of_first                        FirstList xs x -> a trace stopping at x
+selectedLCPath_trace                           a path is a positive head-expansion trace
+selLCFirst_uniform_stop / selPathF_uniform_stop  the uniform stopping witness
+selPathE_erases                                target erases, tail erases, lookahead in FOLLOW
+noSelPathF_cycle / noSelPathE_cycle            the two counting contradictions
+Grammar.noSelectedLCCycle                      the theorem
+Examples.UnreachableSelectedCycle              why reachability is required
+```
+
+## Phase 5.4 - checked generation (`Generate.lean`)
+
+`genTable` is unconditional: it writes an entry for every pair that selects a production
+and silently keeps the first one when several do, so the LL(1) guarantee lives in the
+theorems' hypotheses rather than in the API.  `Grammar.generate` cannot hand out a bad
+table: it enumerates the conflict list over the finite carrier and returns either the
+table or two concrete distinct productions of one nonterminal claiming one lookahead.
+
+```lean
+Grammar.generate_eq_ok_iff : generate = ok genTable <-> ll1Check = true
+Grammar.generate_iff_Ll1   : (exists M, generate = ok M) <-> G.Ll1
+Grammar.generate_ok        : generate = ok M -> G.Ll1 and M.Sound G
+Grammar.generate_conflict  : generate = conflict A x r1 r2 -> G.Conflict A x
+Grammar.generate_not_ok    : ll1Check = false -> generate names a conflict
+```
+
+Production identity is the right-hand side throughout, matching the rest of the
+development.  Two validation grammars check both outcomes: `S -> a | ab` is rejected
+naming `[a]` and `[a b]` at the lookahead `a`, and a clean grammar yields the table.
+
+## Phase 5.5 - the classical characterization (`Classical.lean`)
+
+`Grammar.ClassicalLL1` is the textbook definition, stated with productions, leftmost
+derivations and lookahead only - no FIRST, FOLLOW, SELECT, table or parser:
+
+```lean
+G.Reduced -> (G.ll1Check = true <-> G.ClassicalLL1)
+```
+
+The forward direction needs no reduction hypothesis (the bridge lemma
+`select_of_derives` does it).  The converse needs three constructions:
+
+* **Leftmost realization of an occurrence** (`leftDerives_head_of_derives`): if the start
+  derives a form containing `var A`, some *leftmost* derivation reaches a configuration
+  headed by `var A` whose continuation still derives the original tail.  Keeping that
+  chain is what transports a FOLLOW witness to the realized continuation.  The weaker
+  statement with the tail unchanged is false even for reduced grammars:
+  `S -> A X`, `A -> a`, `X -> b` reaches `A b` but never leftmost.
+  The induction asks where the distinguished occurrence sits relative to the last redex
+  (`hole_locate`); when the redex *creates* the occurrence the hypothesis is applied to the
+  redex instead - legal because the distinguished nonterminal is universally quantified -
+  and `Reduced` finishes the terminal prefix.
+* **Completing witnesses** (`classical_word_first`, `classical_word_erased`): a FIRST
+  witness leaves a tail inside a reachable form, so `Reduced` makes it productive and the
+  production plus continuation completes to a terminal word whose lookahead is the one
+  chosen; an erasing production takes its lookahead from the continuation instead.
+* **The four SELECT combinations** (FIRST/FIRST, FIRST/FOLLOW, FOLLOW/FIRST,
+  FOLLOW/FOLLOW) then feed `ClassicalLL1` two leftmost derivations with one lookahead and
+  different productions - contradiction.
+
+A note on what is deliberately *not* here: the tempting diamond lemma "if `xs =* ys` and
+`xs` is matched by a forest then `ys` is matched by a forest with the same yield" is false
+for ambiguous grammars (`A -> a | b`), and `lookaheadOf w = x` is therefore obtained by
+constructing the word rather than by uniqueness of it.
+
+### Theorem inventory (Phase 5.5)
+
+```text
+Grammar.ClassicalLL1                     the derivation-level definition
+Grammar.classicalLL1_of_ll1 / of_ll1Check  the forward direction (no Reduced)
+leftDerives_of_derives                   derivation to a word -> leftmost derivation
+hole_locate / hole_locate_nil            locating a hole relative to a redex
+leftDerives_head_of_derives              occurrence -> leftmost configuration + chain
+classical_word_first / classical_word_erased  the two witness completions
+Grammar.ll1Check_iff_classicalLL1        the characterization
+Examples.ToyReduced.toy_classicalLL1     derived for the toy grammar
+```
+
 ## Limitations and next steps
 
 * `Table.Correct` is *not* proved equivalent to "the table was generated": the generator
@@ -919,8 +1063,23 @@ table — no hand-written table is needed.
   FIRST a carrier of only the symbol/lookahead pairs the grammar can reach, and cache the
   left-corner rows per source: all three are representation changes that the measurements
   say are worth doing, and none of them affects a proof.
-* `generated_language_iff_ll1` is existential in the fuel.  The rank-based infrastructure
-  bounds the fuel; a direct bound from the size of the supplied tree would make the
-  *executable* parser total without a fuel argument.
+* **The fuel bound is still open.**  `generated_language_iff_ll1` is existential in the fuel:
+  every word of the language is accepted at *some* fuel, and `parseForest_stable` (Phase 5.1
+  plus the new `fuel_stable`) now says that any outcome other than fuel exhaustion is the
+  outcome at every larger fuel.  What is missing is an executable `fuelFor G ws` that is
+  large enough for *every* input, valid or not, so that the parser becomes a total decision
+  procedure.  Phase 5.3 supplies the semantic ingredient (no reachable selected cycle, hence
+  no infinite non-consuming descent); the remaining work is to turn the parser's call tree
+  into a numeric depth bound - a rank on the *lookahead-indexed* selected relation, plus the
+  observation that every recursive call keeps a reachable context and that a call which does
+  not consume a token descends along such an edge.
+* `genTable` still exists alongside `generate`.  The unchecked table is what the theorems are
+  stated about, so it stays; `generate` is the API a caller should use, and
+  `generate_iff_Ll1` says the two agree exactly when the grammar is LL(1).
+* `ClassicalLL1` is proved equivalent to the check only for **reduced** grammars, matching
+  the textbook hypothesis.  Dropping or weakening `Reduced` is open: the review's
+  `S -> a; U -> a | ab` (unreachable FIRST conflict) and
+  `S -> aU | aV; U -> U; V -> V` (vacuous successful derivations) both show a hypothesis is
+  needed, but neither is the exact boundary.
 * Extend the DSL: numeral qubit identifiers would need the parser to match a *class* of
   tokens, which the Phase 2 parser deliberately does not do.
