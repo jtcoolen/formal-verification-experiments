@@ -449,3 +449,131 @@ of an instantiated session, or a ded whose message is in U).
 * NS roles must extract Na with fst/snd of the decrypted pair; getting it wrong shows up as
   relDecide = false at the forwarding step, so debug with
   'certOfTrace P tr |>.steps |>.mapIdx (fun i st => relDecide P prev st.ev st.after)'.
+
+---
+
+## Round 7 - 8B machinery: one-hot groups DONE, init/frame IN PROGRESS
+
+### Verified state
+* cd protosat && export ELAN_HOME=$PWD/../.elan && lake build ProtSat -> 'Build completed
+  successfully (927 jobs)', exit 0.  Complete.lean is now 2201 lines.
+* Commits this round: (1) fixed the three broken aux-flag injectivity proofs (adl/afr used the
+  wrong stride: adl's inner stride is shVal, afr's is shD; aev needs its OWN code aev =
+  bsAev + i*shEv + j, NOT vev); (2) the 8B machinery below.
+
+### What was added to ProtSat/Complete.lean (all compiling)
+1. RunOK extended from 6 to 8 components:
+   7. every protocol expression denotes a universe message (or none) in every session store of
+      the run (admissible sh (Expr.eval e (storeOf (cfg i) q)) = true for e ∈ allExprs P);
+   8. (cfg i).sess.length = sh.nS1.
+   Component 7 is REQUIRED for the Tseitin gates to be exact (uIdx can only name universe
+   values); without it a run that computes encS x y outside U is not representable.
+   Accessors runOK_knU/storeU/act/dedU/pc/var/expr/sessLen are proved with
+   'rcases h with ⟨h1,...,h8⟩' (dot-projection chains are off-by-one traps).
+2. Rel inversion lemmas: Rel.noAct (event does not act on q => pc/store/sess-length
+   preserved), Rel.act_pcOf, Rel.kn_mono, Rel.kn_step (shape of knowledge growth),
+   Rel.kn_new (a newly known message was deduced or sent), Rel.ded_oneStep.
+3. decide_congr, clause2_left/right, clause3_* (to be added), getD_rangeMap, ixOf_lt.
+4. atMostOneSeq_sat_from : THE key lemma for the sequential counter's completeness.  Offset
+   formulation: variables indexed i+o = k, flags decide (k <= j+o).  The offset o is
+   essential: the recursion drops the head, and for k = 0 the suffix has no selected index
+   while its flags are all true.
+5. Oh.sat_range : a group with vals = List.range K, exactly index k true and prefix flags,
+   satisfies o.clauses (atLeastOne via sat_atLeastOne + atMostOneSeq via the lemma above).
+6. univSub sh (subterm-closed universe) + subtermsL_pair1/2, encS1/2, encA1, hash1, tIx_some.
+7. dedInstsOf_complete (all 11 OneStep rules -> an enumerated instance), prem_ok0/1/2,
+   find?_some_of_exists, dedIx_spec, dedIx_exists.
+8. rdPc_lt / rdSt_lt / rdXe_lt / rdDl_lt / rdFr_lt / rdEv_lt (rdEv_lt needs the Rel hypothesis
+   of the step, because for a ded event rdEv uses dedIx which needs OneStep).
+9. assignOf_ge_bsTotal (collapses the 7 main cascade tests) + assignOf_apc/ast/axe/aev/adl/
+   afr/vpb/vau (branch + value combined) + decide_symm.
+10. sat_pcOh/sat_stOh/sat_xeOh/sat_evOh/sat_dlOh/sat_frOh + sat_flatMap_id + sat_oneHot.
+11. rdFr's out-of-range fallback changed from shD sh (OUT of range -> atLeastOne unsatisfiable)
+    to 0 (the freshness group is unconstrained when q does not act).
+
+### Lean traps learned this round (IMPORTANT, they cost hours)
+* 'cases h with | ctor a b =>' can only name the constructor's EXPLICIT arguments; index
+  arguments that get substituted are introduced INACCESSIBLE - name them with 'rename_i x y'.
+  Arity per Rel constructor when the event/successor are variables: rIdle 0, rDed 1 (the
+  hypothesis!), rFresh 3, rRecv/rAssign/rSend 2, rCheck/rSecret/rClaim/rCommit 3.
+* Structure-instance notation inside a 'have h : ({...} : T) ∈ l' or '⟨{...}, ...⟩' often fails
+  to parse/elaborate.  Workarounds: put it on ONE line with the ascription, or reduce the goal
+  first (unfold/rw/dsimp) so the instance can be '⟨_, memb, ..., rfl⟩'.
+* rw does NOT reduce 'match' terms (compiled to X.match_1 aux defs); 'dsimp only' and
+  'simp only [defname]' DO.  For dedInstsOf the working recipe is
+  'unfold dedInstsOf; rw [hU]; dsimp only' then 'rw [tIx_some hxU]; dsimp only'.
+* 'unfold f; rw [h]' leaves the match unreduced but the RESULT is still defeq: term-mode
+  'exact if_pos hq' after 'unfold rdFr; rw [h]' works where 'rw [if_pos ...]' does not.
+* List.mem_flatMap.mp at a hypothesis whose list is displayed as '(List.map f l).flatten'
+  fails; use 'simp only [defname, List.mem_flatMap, List.mem_range] at h' and then 'obtain'.
+* rcases on 'cl ∈ List.map f l' (a List.Mem with a non-cons list) fails with 'Dependent
+  elimination failed'; convert with List.mem_map first.  Note List.mem_map gives 'f a = b'
+  (function image on the LEFT), so 'obtain ⟨c, hc, rfl⟩' substitutes b := f c and the goal
+  then contains the unreduced 'if'.
+* 'Nat.lt_succ_of_lt h : n < m -> n < m+1' (NOT n+1 < m+1); use Nat.succ_lt_succ for that.
+* 'List.mem_range' after obtain: bounds may come out as '∈ range' or as '<'; 'by simpa using h'
+  normalises both.
+* ++ is LEFT associative in Lean 4 (infixl:65).  domainKeys/seeds/closeOne membership chains must
+  be built with the matching Or.inl/inr nesting.
+* omega does not unfold shS/shD/...: supply 'have hs : shS sh = sh.nS1 + 1 := rfl' first.
+* 'Bool.and_eq_true.mpr' does not exist; use 'rw [Bool.and_eq_true]' then a pair.
+* 'List.getD_eq_getElem' is in Mathlib.Data.List.GetD (must be imported); the robust identity is
+  'rw [List.getD_eq_getElem?_getD, List.getElem?_map, List.getElem?_range hi]' + rfl/simp.
+
+### Remaining for 8B (chunk 3 onwards) - the ten other clause groups
+Statement being aimed at (in ProtSat.Complete):
+  theorem encoding_complete {P B tr Cs} (hU : univClosed (shapeOf P B) P)
+    (hsub : univSub (shapeOf P B)) (hrun : Runs P (initCfg P) tr Cs)
+    (hlen : tr.length ≤ B.steps) (hleak : runsLeaks P Cs)
+    (hbnd : WithinBounds P B (cfgAt Cs) (evAt tr)) : Satisfiable (encode P B)
+with the assignment assignOf (shapeOf P B) P (cfgAt Cs) (evAt tr) and the pointwise Rel supplied
+by runs_rel (already proved in this file).
+Groups and the facts each needs:
+* oneHot: DONE (sat_oneHot).
+* init: sat_init - pcOf (initCfg P) q = 0, readVar x [] = none -> uIdx none = U.length,
+  knHolds sh cfg 0 u = initKnHolds sh P u.  IN PROGRESS (destructuring of the 3-way append).
+* frame: sat_frame - Rel.kn_mono + Rel.noAct + evActs (rdEv = 1+q <-> q acts).  IN PROGRESS.
+* eval: use fwdClausesOn_complete / fwd2ClausesOn_complete / Oh.decode_of_true; the gate
+  equations need component 7 of RunOK: rdXe sh P cfg ev i q (eIdx P E) =
+  uIdx sh (Expr.stepEval1 E (valAt sh (rdXe ... (eIdx P c)))) etc.  Also evalLeafGate's var
+  case: rdXe(var x) = rdSt x; constant case: eval_constVal.
+* step: case split on the Rel rule of step i; advClause via Rel.act_pcOf, keepClause via
+  readVar_succStore_other / storeOf_succSend_same / storeOf_succAdvance, actionClauses per
+  action kind (fresh: rdFr = ixOf d D + rget D (ixOf d D) = some d + storeOf_succStore_same;
+  send: rdXe = uIdx t + Rel.kn growth; recv: rdDl = uIdx m + m ∈ kn from rRecv; assign;
+  check: both sides equal).
+* ded: evDed i n with n = dedIx; premises known via dedInstOk; conclusion known at i+1.
+* pubAux: andNDef via sat_andNDef (aux = asgPb's conjunction, by construction).
+* knSupport: Rel.kn_new + the publisher literals (sendPubLit via asgPb, instPublisher via
+  dedIx).
+* fresh: freshUseClauses - nonceUsed (cfg i) d = false gives 'not in any store' and 'not known'.
+* leakAux: andNDef with asgAu (by construction).
+* violation: runsLeaks gives a true literal (closedLeakLits: t ∈ kn -> vkn i u with u = uIdx t;
+  storeLeakLits: storeSecret + readVar = some t + t ∈ kn -> vau).
+Then: Satisfiable intro, and in Analyzer.lean the 8G theorem (SAFE => no bounded attack),
+8H termination statements, README + theorem inventory updates.
+NOTE: univSub (shapeOf P B) is currently a HYPOTHESIS of 8B.  Proving it (Bounded.univ is
+subterm-closed) is possible - the pieces are subtermClosureL_closed + a closeOne-preservation
+lemma - but the membership plumbing (left-nested ++ over a 5-fold append) fought back; the
+analyzer should instead CHECK it by decide, like univClosed.
+
+### Round 7b (same round, later) - sat_init DONE, sat_frame 90%
+* Complete.lean now also has: clause1/clause2_left/clause2_right/clause3_left/mid/right,
+  bool_eq_cases, sat_cnfOf3, rget_map, rdEv_act, rdEv_act_of_lt, evActs, assignOf_evAct,
+  init_pcOf_zero, init_readVar_none, **sat_init** (clause group 2, complete).
+* Build green (927 jobs); lake env lean Axioms.lean -> 1781 theorems, only propext /
+  Classical.choice / Quot.sound; lake exe protosatDemo still prints all six examples.
+* sat_frame draft is in scratch/frame_draft.lean (NOT yet in the library).  What is left:
+  the two 3-literal frame clauses (pc and store).  The knowledge clause is done.
+  The remaining obstacle is purely tactical: inside
+  'have e3 : (pos (vpc sh (i+1) q c)).eval (assignOf sh P cfg ev) = true := by ...'
+  the 'simp [pos_eval, hv]' / 'rw [pos_eval]; exact hv' both report failure, and the error
+  then cascades onto the following 'exact clause3_right ...' (the reported goal is the
+  leftover 'have' goal, which is why the messages look nonsense).
+  NEXT STEP: print the real goal with 'set_option pp.all true' + trace_goal inside the first
+  'have e1' block, or restructure to avoid nested 'have ... := by' in bullets:
+  prove the three literal evaluations as top-level 'have's BEFORE the rcases on hact/h2, or
+  use 'refine clause3_right (assignOf sh P cfg ev) (pos (evAct sh i q)) (neg (vpc sh i q c))
+  (pos (vpc sh (i+1) q c)) ?_' with the bullet on its own line.
+  Note hact/h2 must be equation hypotheses (rcases bool_eq_cases ... with h|h), NOT by_cases
+  (which gives a ¬ hypothesis that simp cannot rewrite with).

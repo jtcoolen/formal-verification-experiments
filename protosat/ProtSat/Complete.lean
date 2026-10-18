@@ -2198,4 +2198,173 @@ theorem sat_oneHot (hok : RunOK sh P cfg ev) (hsub : univSub sh)
     have hq' : q < shS sh := by simpa using hq
     exact (sat_frOh sh P cfg ev hok hi' hq') cl' h3
 
+variable (sh : Shape) (P : Protocol) (cfg : Nat -> Cfg) (ev : Nat -> Ev)
+
+/-- A three-literal clause is satisfied when any one of its literals is true. -/
+theorem clause3_left (a : Assignment) (l₁ l₂ l₃ : Lit) (h : l₁.eval a = true) :
+    Clause.eval a [l₁, l₂, l₃] = true := by
+  simp [Clause.eval, List.any_cons, List.any_nil, h]
+
+theorem clause3_mid (a : Assignment) (l₁ l₂ l₃ : Lit) (h : l₂.eval a = true) :
+    Clause.eval a [l₁, l₂, l₃] = true := by
+  simp [Clause.eval, List.any_cons, List.any_nil, h]
+
+theorem clause3_right (a : Assignment) (l₁ l₂ l₃ : Lit) (h : l₃.eval a = true) :
+    Clause.eval a [l₁, l₂, l₃] = true := by
+  simp [Clause.eval, List.any_cons, List.any_nil, h]
+
+/-- A one-literal clause is satisfied when its literal is true. -/
+theorem clause1 (a : Assignment) (l : Lit) (h : l.eval a = true) :
+    Clause.eval a [l] = true := by
+  simp [Clause.eval, List.any_cons, List.any_nil, h]
+
+/-- Splitting a membership in a three-fold concatenation. -/
+theorem sat_cnfOf3 {A B C : List Clause} {a : Assignment}
+    (hA : ∀ cl ∈ A, Clause.eval a cl = true) (hB : ∀ cl ∈ B, Clause.eval a cl = true)
+    (hC : ∀ cl ∈ C, Clause.eval a cl = true) :
+    ∀ cl ∈ A ++ B ++ C, Clause.eval a cl = true := by
+  intro cl hcl
+  rcases List.mem_append.mp hcl with h | h
+  · rcases List.mem_append.mp h with h | h
+    · exact hA cl h
+    · exact hB cl h
+  · exact hC cl h
+
+/-- Every Boolean is true or false, as an equation disjunction usable by rcases. -/
+theorem bool_eq_cases (b : Bool) : b = true ∨ b = false := by
+  cases b <;> simp
+
+/-! ### Relating the event reader to the events themselves -/
+
+/-- If the event at step i acts on session q, the recorded alternative is 1 + q. -/
+theorem rdEv_act (h : ev i = Ev.act q m d) : rdEv sh P cfg ev i = 1 + q := by
+  unfold rdEv
+  rw [h]
+
+/-- Converse: an event alternative of the form 1 + q with q a session index means the event
+acts on q. -/
+theorem rdEv_act_of_lt (hq : q < shS sh) (h : rdEv sh P cfg ev i = 1 + q) :
+    ∃ m d, ev i = Ev.act q m d := by
+  cases e : ev i with
+  | idle =>
+      have h1 : rdEv sh P cfg ev i = 0 := by unfold rdEv; rw [e]
+      omega
+  | ded t =>
+      have h1 : rdEv sh P cfg ev i = 1 + shS sh + dedIx sh ((cfg i).kn) (uIdx sh (some t)) := by
+        unfold rdEv
+        rw [e]
+      have h2 : shS sh ≤ q := by omega
+      omega
+  | act q' m' d' =>
+      have h1 : rdEv sh P cfg ev i = 1 + q' := by unfold rdEv; rw [e]
+      have : q' = q := by omega
+      subst this
+      exact ⟨m', d', rfl⟩
+
+/-- The event acts on q exactly when the recorded alternative is 1 + q. -/
+theorem evActs (hq : q < shS sh) :
+    (∃ m d, ev i = Ev.act q m d) ↔ rdEv sh P cfg ev i = 1 + q :=
+  ⟨fun ⟨m, d, h⟩ => rdEv_act sh P cfg ev h, rdEv_act_of_lt sh P cfg ev hq⟩
+
+/-- The characteristic assignment's value on the 'q acts' literal. -/
+theorem assignOf_evAct (hi : i < sh.steps) (hq : q < shS sh) :
+    assignOf sh P cfg ev (evAct sh i q) = decide (rdEv sh P cfg ev i = 1 + q) :=
+  assignOf_ev sh P cfg ev hi (by
+    have : shEv sh = 1 + shS sh + nInst sh := rfl
+    omega)
+
+/-! ### Clause group 2: the initial configuration -/
+
+theorem rget_map {α β : Type} (f : α → β) : ∀ (l : List α) (i : Nat),
+    rget (l.map f) i = (rget l i).map f := by
+  intro l
+  induction l with
+  | nil => intro i; rfl
+  | cons x xs ih => intro i; cases i <;> simp [rget, ih]
+
+theorem init_pcOf_zero (hcfg0 : cfg 0 = initCfg P) (q : Nat) : pcOf (cfg 0) q = 0 := by
+  rw [hcfg0]
+  unfold pcOf sessAt initCfg
+  rw [rget_map]
+  cases rget P.sessions q with
+  | none => rfl
+  | some s => rfl
+
+theorem init_readVar_none (hcfg0 : cfg 0 = initCfg P) (q x : Nat) :
+    readVar x (storeOf (cfg 0) q) = none := by
+  rw [hcfg0]
+  unfold storeOf sessAt initCfg readVar Expr.lookup
+  rw [rget_map]
+  cases rget P.sessions q with
+  | none => rfl
+  | some s => rfl
+
+/-- **Clause group 2 (initial state).**  Step 0 of the characteristic assignment is
+ProtSat.initCfg: every program counter is 0, every store slot is unset, and the attacker holds
+exactly the initial knowledge of ProtSat.Protocol.initKn. -/
+theorem sat_init (hok : RunOK sh P cfg ev) (hcfg0 : cfg 0 = initCfg P) :
+    Sat (assignOf sh P cfg ev) (initClauses sh P) := by
+  refine fun cl hcl => sat_cnfOf3 ?_ ?_ ?_ cl hcl
+  · intro cl hcl
+    simp only [eachSess, List.mem_flatMap, List.mem_range] at hcl
+    obtain ⟨q, hq, h2⟩ := hcl
+    rw [initPcClauses, List.mem_map] at h2
+    obtain ⟨c, hc, heq⟩ := h2
+    subst heq
+    split
+    · rename_i hc0
+      subst hc0
+      have hv : assignOf sh P cfg ev (vpc sh 0 q 0) = true := by
+        rw [assignOf_pc sh P cfg ev (Nat.zero_le _) (by simpa using hq) (by simpa using hc),
+          show rdPc sh P cfg ev 0 q = pcOf (cfg 0) q from rfl, init_pcOf_zero P cfg hcfg0 q]
+        exact decide_eq_true rfl
+      exact clause1 _ _ (by simp [pos_eval, hv])
+    · rename_i hc0
+      have hv : assignOf sh P cfg ev (vpc sh 0 q c) = false := by
+        rw [assignOf_pc sh P cfg ev (Nat.zero_le _) (by simpa using hq) (by simpa using hc),
+          show rdPc sh P cfg ev 0 q = pcOf (cfg 0) q from rfl, init_pcOf_zero P cfg hcfg0 q]
+        exact decide_eq_false (by intro h; omega)
+      exact clause1 _ _ (by simp [neg_eval, hv])
+  · intro cl hcl
+    simp only [eachSess, eachVar, List.mem_flatMap, List.mem_range] at hcl
+    obtain ⟨q, hq, x, hx, h2⟩ := hcl
+    rw [initStClauses, List.mem_map] at h2
+    obtain ⟨u, hu, heq⟩ := h2
+    subst heq
+    have hrd : rdSt sh P cfg ev 0 q x = sh.U.length := by
+      unfold rdSt
+      rw [init_readVar_none P cfg hcfg0 q x]
+      rfl
+    split
+    · rename_i hu0
+      subst hu0
+      have hv : assignOf sh P cfg ev (vst sh 0 q x sh.U.length) = true := by
+        rw [assignOf_st sh P cfg ev (Nat.zero_le _) (by simpa using hq) (by simpa using hx)
+            (by simpa using hu), hrd]
+        exact decide_eq_true rfl
+      exact clause1 _ _ (by simp [pos_eval, hv])
+    · rename_i hu0
+      have hv : assignOf sh P cfg ev (vst sh 0 q x u) = false := by
+        rw [assignOf_st sh P cfg ev (Nat.zero_le _) (by simpa using hq) (by simpa using hx)
+            (by simpa using hu), hrd]
+        exact decide_eq_false (fun he => hu0 he.symm)
+      exact clause1 _ _ (by simp [neg_eval, hv])
+  · intro cl hcl
+    rw [initKnClauses, List.mem_map] at hcl
+    obtain ⟨u, hu, heq⟩ := hcl
+    subst heq
+    have hkn : assignOf sh P cfg ev (vkn sh 0 u) = knHolds sh cfg 0 u :=
+      assignOf_kn sh P cfg ev (Nat.zero_le _) (Nat.lt_succ_of_lt (by simpa using hu))
+    have hkn0 : (cfg 0).kn = P.initKn := by rw [hcfg0]; rfl
+    have h2 : knHolds sh cfg 0 u = initKnHolds sh P u := by
+      unfold knHolds initKnHolds
+      rw [hkn0]
+      cases h : valAt sh u <;> rfl
+    split
+    · rename_i hh
+      exact clause1 _ _ (by simp [pos_eval, hkn, h2, hh])
+    · rename_i hh
+      exact clause1 _ _ (by simp [pos_eval, hkn, h2, hh])
+
+
 end ProtSat.Complete
