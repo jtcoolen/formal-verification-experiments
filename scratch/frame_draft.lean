@@ -61,21 +61,16 @@ theorem sat_frame (hok : RunOK sh P cfg ev)
               rw [← assignOf_pc sh P cfg ev (Nat.le_of_lt hi) hq (by simpa using hc)]
               exact h2
             exact of_decide_eq_true h2''
-          have hv : assignOf sh P cfg ev (vpc sh (i + 1) q c) = true := by
-            rw [assignOf_pc sh P cfg ev (Nat.succ_le_of_lt hi) hq (by simpa using hc)]
-            exact decide_eq_true h9
           refine clause3_right (assignOf sh P cfg ev) (pos (evAct sh i q)) (neg (vpc sh i q c))
             (pos (vpc sh (i + 1) q c)) ?_
-          rw [pos_eval]
-          exact hv
-        · have e1 : (pos (evAct sh i q)).eval (assignOf sh P cfg ev) = false := by
-            rw [pos_eval]
-            exact hact
-          have e2 : (neg (vpc sh i q c)).eval (assignOf sh P cfg ev) = true := by
-            rw [neg_eval]
-            rw [h2]
-          exact clause3_mid (assignOf sh P cfg ev) (pos (evAct sh i q)) (neg (vpc sh i q c))
-            (pos (vpc sh (i + 1) q c)) e2
+          rw [pos_eval, assignOf_pc sh P cfg ev (Nat.succ_le_of_lt hi) hq (by simpa using hc)]
+          show decide (pcOf (cfg (i + 1)) q = c) = true
+          rw [h9]
+          exact decide_eq_true rfl
+        · refine clause3_mid (assignOf sh P cfg ev) (pos (evAct sh i q)) (neg (vpc sh i q c))
+            (pos (vpc sh (i + 1) q c)) ?_
+          rw [neg_eval]
+          rw [h2]
     · obtain ⟨x, hx, h3⟩ := List.mem_flatMap.mp hst
       simp only [mapVal, List.mem_range] at h3
       rw [List.mem_map] at h3
@@ -101,19 +96,16 @@ theorem sat_frame (hok : RunOK sh P cfg ev)
                 (by simpa using hu)]
               exact h2
             exact of_decide_eq_true h2''
-          have hv : assignOf sh P cfg ev (vst sh (i + 1) q x u) = true := by
-            rw [assignOf_st sh P cfg ev (Nat.succ_le_of_lt hi) hq (by simpa using hx)
-              (by simpa using hu)]
-            exact decide_eq_true h9
           refine clause3_right (assignOf sh P cfg ev) (pos (evAct sh i q)) (neg (vst sh i q x u))
             (pos (vst sh (i + 1) q x u)) ?_
-          rw [pos_eval]
-          exact hv
-        · have e1 : (pos (evAct sh i q)).eval (assignOf sh P cfg ev) = false := by
-            rw [pos_eval]
-            exact hact
-          have e2 : (neg (vst sh i q x u)).eval (assignOf sh P cfg ev) = true := by
-            rw [neg_eval]
-            rw [h2]
-          exact clause3_mid (assignOf sh P cfg ev) (pos (evAct sh i q)) (neg (vst sh i q x u))
-            (pos (vst sh (i + 1) q x u)) e2
+          rw [pos_eval, assignOf_st sh P cfg ev (Nat.succ_le_of_lt hi) hq (by simpa using hx)
+            (by simpa using hu)]
+          show decide (uIdx sh (readVar x (storeOf (cfg (i + 1)) q)) = u) = true
+          rw [h9]
+          exact decide_eq_true rfl
+        · refine clause3_mid (assignOf sh P cfg ev) (pos (evAct sh i q)) (neg (vst sh i q x u))
+            (pos (vst sh (i + 1) q x u)) ?_
+          rw [neg_eval]
+          rw [h2]
+
+
