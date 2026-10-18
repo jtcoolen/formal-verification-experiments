@@ -10,3 +10,5 @@ import ProtSat.OneHot
 import ProtSat.Encode
 import ProtSat.Clauses
 import ProtSat.Encoding
+import ProtSat.Complete
+import ProtSat.Certificate

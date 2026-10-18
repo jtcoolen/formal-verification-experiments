@@ -1,0 +1,11 @@
+ProtSat 8D/8E COMPLETE: verified DPLL solver rewritten with structural recursion
+
+- fuelled unit propagation (propagateGo/propagate) with saturation lemma propagate_noUnit
+- dpllAux: branching + backtracking, structural recursion on the variable list
+- dpll_sound (8D): dpll f = some asg -> Sat (asgVal asg) f
+- dpll_complete (8E): dpll f = none -> Unsat f; plus satisfiable_iff_dpll
+- kernel-checked examples (decide): unit propagation, conflict, branching sat/unsat
+- ProtSat/Certificate.lean (8C independent checker) and ProtSat/Complete.lean (8B
+  groundwork: block-range and full injectivity lemmas) integrated into the library root
+
+lake build green (924 jobs); axiom audit clean (1487 theorems: propext, choice, Quot.sound)

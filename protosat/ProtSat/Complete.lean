@@ -421,8 +421,11 @@ theorem vpb_inj_full {sh : Shape} {i q c u i' q' c' u' : Nat} (hq : q < shS sh)
     (hu : u < shVal sh) (hu' : u' < shVal sh)
     (h : vpb sh i q c u = vpb sh i' q' c' u') : i = i' ∧ q = q' ∧ c = c' ∧ u = u' := by
   unfold vpb bsTotal at h
-  rw [Nat.add_assoc, Nat.add_assoc] at h
-  obtain ⟨h1, hu2⟩ := lin_inj2 (shVal_pos sh) hu hu' (Nat.add_left_cancel h)
+  -- both sides are now (bsXe + szXe) + A * shVal + u; right-associate so that the common
+  -- prefix is a single syntactic argument of +, then cancel it.
+  simp only [Nat.add_assoc] at h
+  obtain ⟨h1, hu2⟩ := lin_inj2 (shVal_pos sh) hu hu'
+    (Nat.add_left_cancel (Nat.add_left_cancel h))
   obtain ⟨h2, h3, h4⟩ := lin_inj3 (shS_pos sh) (shPc_pos sh) hq hq' hc hc' h1
   exact ⟨h2, h3, h4, hu2⟩
 
@@ -431,9 +434,10 @@ theorem vau_inj_full {sh : Shape} {i q x u i' q' x' u' : Nat} (hq : q < shS sh)
     (hq' : q' < shS sh) (hx : x < shV sh) (hx' : x' < shV sh)
     (hu : u < shVal sh) (hu' : u' < shVal sh)
     (h : vau sh i q x u = vau sh i' q' x' u') : i = i' ∧ q = q' ∧ x = x' ∧ u = u' := by
-  unfold vau bsAu at h
-  rw [Nat.add_assoc, Nat.add_assoc] at h
-  obtain ⟨h1, hu2⟩ := lin_inj2 (shVal_pos sh) hu hu' (Nat.add_left_cancel h)
+  unfold vau bsAu bsTotal at h
+  simp only [Nat.add_assoc] at h
+  obtain ⟨h1, hu2⟩ := lin_inj2 (shVal_pos sh) hu hu'
+    (Nat.add_left_cancel (Nat.add_left_cancel (Nat.add_left_cancel h)))
   obtain ⟨h2, h3, h4⟩ := lin_inj3 (shS_pos sh) (shV_pos sh) hq hq' hx hx' h1
   exact ⟨h2, h3, h4, hu2⟩
 
