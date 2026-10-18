@@ -171,6 +171,13 @@ theorem reachable_tail {G : Grammar T N} {s : Sym T N} {xs : List (Sym T N)}
   obtain ⟨pre, hpre⟩ := h
   exact ⟨pre ++ [s], by rw [List.append_assoc]; exact hpre⟩
 
+/-- Reachability is preserved by rewriting a *suffix*: the symbols to its left are untouched,
+so they join the prefix a parser has already committed to. -/
+theorem reachable_append {G : Grammar T N} {xs ys ys' : List (Sym T N)}
+    (h : G.Reachable (xs ++ ys)) (hder : Derives G ys ys') : G.Reachable (xs ++ ys') := by
+  obtain ⟨pre, hpre⟩ := h
+  exact ⟨pre, derives_trans hpre (derives_prefix (derives_prefix hder xs) pre)⟩
+
 end Grammar
 namespace Table
 

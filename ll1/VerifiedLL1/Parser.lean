@@ -68,6 +68,7 @@ error. -/
 inductive PRes (T : Type u) (N : Type v) (α : Type w) where
   | ok : α → List (LTok T) → PRes T N α
   | error : ParseError T N → PRes T N α
+  deriving Repr
 
 /-- Sequencing of parser results. -/
 def pbind (r : PRes T N α) (f : α → List (LTok T) → PRes T N β) : PRes T N β :=

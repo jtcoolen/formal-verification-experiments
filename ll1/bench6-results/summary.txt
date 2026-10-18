@@ -1,0 +1,9 @@
+grow8_nul_ref                  0.24
+grow8_ll1_ref                  0.62
+grow8_ll1_ship                 0.83
+grow12_nul_ref                 0.29
+grow12_ll1_ref                 1.44
+grow12_ll1_ship                1.86
+grow16_nul_ref                 0.29
+grow16_ll1_ref                 3.49
+grow16_ll1_ship                4.00

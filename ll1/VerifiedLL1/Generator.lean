@@ -5,6 +5,7 @@ license information.
 -/
 import VerifiedLL1.Follow
 import VerifiedLL1.Completeness
+import VerifiedLL1.Memo
 
 /-!
 # Phase 5 — the LL(1) parser generator
@@ -432,6 +433,203 @@ theorem Grammar.genTable_complete (G : Grammar T N) (hall : G.ll1Check = true) :
 
 end Completeness
 
+section ExactTreeCompleteness
+
+variable [DecidableEq T] [DecidableEq N] [FiniteEnum T] [FiniteEnum N]
+
+/-- **Selection forces the generated lookup.**  If the lookahead `x` selects the production
+`A -> rhs`, then the generated table answers `rhs` for `(A, x)`: the selected list is
+non-empty, its head is `rhs` by conflict-freeness, and `genTable_get` reads that head.
+This is the lookup fact that `genTable_complete` proves existentially, made exact. -/
+theorem Grammar.genTable_get_of_select (G : Grammar T N) (hall : G.Ll1)
+    {A : N} {rhs : List (Sym T N)} {x : LTok T}
+    (hp : (A, rhs) ∈ G.productions) (hs : G.Select A rhs x) :
+    G.genTable.get A x = some rhs := by
+  have hmem : rhs ∈ G.selectRhs A x := (Grammar.mem_selectRhs G A x rhs).mpr ⟨hp, hs⟩
+  cases hsel : G.selectRhs A x with
+  | nil => rw [hsel] at hmem; exact absurd hmem (by simp)
+  | cons rhs' _ =>
+      have huni : rhs' = rhs :=
+        Grammar.selectRhs_unique G hall A x rhs' rhs (by rw [hsel]; exact List.Mem.head _) hmem
+      rw [Grammar.genTable_get, hsel, huni]
+
+/-- **Exact-tree completeness of the generated parser.**  The generated parser does not
+merely find *some* tree with the right yield (Phase 3's `complete_of_match` may replace the
+tree): it reproduces the very forest that the matching proof supplies, for a suitable fuel.
+
+The proof is an induction on the matching forest itself, so no ranking of the grammar and
+no `Progressing` hypothesis are needed: the finite tree *is* the termination argument.  At
+a nonterminal the matching proof names the production that was used; `select_of_derives`
+says the remaining input selects it, `genTable_get_of_select` forces the table to offer it,
+and the two induction hypotheses are applied with the tail's yield added to the
+continuation (children) and with the original continuation (tail).  The two sub-parses are
+combined at the maximum of their fuels. -/
+theorem Grammar.generated_parseForest_of_match (G : Grammar T N) (hall : G.Ll1)
+    {syms : List (Sym T N)} {ts : List (Tree T N)} (hm : MatchList G syms ts) :
+    ∀ rest : List T,
+      G.Reachable (syms ++ toks rest) →
+      ∃ fuel,
+        Parser.parseForest G.genTable fuel syms
+          (ltoks (Tree.yieldForest ts) ++ ltoks rest ++ [LTok.eof]) =
+          PRes.ok ts (ltoks rest ++ [LTok.eof]) := by
+  induction hm with
+  | nil =>
+      intro rest _
+      exact ⟨1, parseForest_nil _⟩
+  | @tok rhs ts t h ih =>
+      intro rest hR
+      obtain ⟨ft, hrun⟩ := ih rest (Grammar.reachable_tail hR)
+      refine ⟨ft + 1, ?_⟩
+      have hinp : ltoks (Tree.yieldForest (Tree.leaf t :: ts)) ++ ltoks rest ++ [LTok.eof] =
+          LTok.tok t :: (ltoks (Tree.yieldForest ts) ++ ltoks rest ++ [LTok.eof]) := by
+        rw [Tree.yieldForest_cons, Tree.yield_leaf]
+        simp
+      rw [hinp, parseForest_cons]
+      have hs : Parser.parseSym G.genTable ft (Sym.tok t)
+          (LTok.tok t :: (ltoks (Tree.yieldForest ts) ++ ltoks rest ++ [LTok.eof])) =
+          PRes.ok (Tree.leaf t) (ltoks (Tree.yieldForest ts) ++ ltoks rest ++ [LTok.eof]) := by
+        rw [parseSym_terminal]
+        simp only [ite_eq_left_iff]
+        intro hne; exact absurd hne (by simp)
+      rw [hs]
+      simp only [pbind]
+      rw [hrun]
+  | @var rhs ts A ts' rhsA hp hchild hrest ihchild ihtail =>
+      intro rest hR
+      have hwf : Tree.yieldForest (Tree.node A ts' :: ts) =
+          Tree.yieldForest ts' ++ Tree.yieldForest ts := by
+        simp [Tree.yieldForest_cons, Tree.yield_node]
+      have htoks : (toks (Tree.yieldForest ts' ++ Tree.yieldForest ts ++ rest) :
+          List (Sym T N)) =
+          toks (Tree.yieldForest ts') ++ (toks (Tree.yieldForest ts) ++ toks rest) := by
+        simp [toks_append, List.append_assoc]
+      -- the production the matching proof used is selected by the real lookahead
+      have hder : Derives G (rhsA ++ (rhs ++ toks rest))
+          (toks (Tree.yieldForest ts' ++ Tree.yieldForest ts ++ rest)) := by
+        have h2 : Derives G (rhs ++ toks rest) (toks (Tree.yieldForest ts) ++ toks rest) :=
+          derives_append (matchList_derives hrest) (derives_refl (toks rest))
+        have h1 : Derives G (rhsA ++ (rhs ++ toks rest))
+            (toks (Tree.yieldForest ts') ++ (toks (Tree.yieldForest ts) ++ toks rest)) :=
+          derives_append (matchList_derives hchild) h2
+        rwa [htoks]
+      have hsel : G.Select A rhsA
+          (lookaheadOf (Tree.yieldForest ts' ++ Tree.yieldForest ts ++ rest)) :=
+        Grammar.select_of_derives hR hp _ hder
+      have hget : G.genTable.get A
+          (lookaheadOf (Tree.yieldForest ts' ++ Tree.yieldForest ts ++ rest)) = some rhsA :=
+        Grammar.genTable_get_of_select G hall hp hsel
+      -- the child forest is parsed with the tail's yield as continuation
+      have hstep : Derives G (Sym.var A :: (rhs ++ toks rest)) (rhsA ++ (rhs ++ toks rest)) :=
+        derives_ctx (derives_production A rhsA hp) [] (rhs ++ toks rest)
+      have htail : Derives G (rhs ++ toks rest) (toks (Tree.yieldForest ts ++ rest)) := by
+        have h1 := derives_append (matchList_derives hrest) (derives_refl (toks rest))
+        rw [← toks_append] at h1
+        exact h1
+      obtain ⟨fc, hrunC⟩ := ihchild (Tree.yieldForest ts ++ rest)
+        (Grammar.reachable_append (Grammar.reachable_of_derives hR hstep) htail)
+      obtain ⟨ft, hrunT⟩ := ihtail rest (Grammar.reachable_tail hR)
+      have hrunC' : Parser.parseForest G.genTable (max fc ft) rhsA
+          (ltoks (Tree.yieldForest ts' ++ Tree.yieldForest ts) ++ ltoks rest ++ [LTok.eof]) =
+          PRes.ok ts' (ltoks (Tree.yieldForest ts) ++ ltoks rest ++ [LTok.eof]) := by
+        simpa [ltoks_append, List.append_assoc] using
+          parseForest_mono hrunC (Nat.le_max_left fc ft)
+      have hrunT' : Parser.parseForest G.genTable (max fc ft + 1) rhs
+          (ltoks (Tree.yieldForest ts) ++ ltoks rest ++ [LTok.eof]) =
+          PRes.ok ts (ltoks rest ++ [LTok.eof]) :=
+        parseForest_mono hrunT (by omega : ft ≤ max fc ft + 1)
+      have hhd : List.headD
+          (ltoks (Tree.yieldForest ts' ++ Tree.yieldForest ts) ++ ltoks rest ++ [LTok.eof])
+          LTok.eof =
+          lookaheadOf (Tree.yieldForest ts' ++ Tree.yieldForest ts ++ rest) :=
+        headD_ltoks_append _ _
+      have hne : (ltoks (Tree.yieldForest ts' ++ Tree.yieldForest ts) ++ ltoks rest ++ [LTok.eof])
+          ≠ [] := ltoks_append_eof_ne_nil _ _
+      have hs : Parser.parseSym G.genTable (max fc ft + 1) (Sym.var A)
+          (ltoks (Tree.yieldForest ts' ++ Tree.yieldForest ts) ++ ltoks rest ++ [LTok.eof]) =
+          PRes.ok (Tree.node A ts') (ltoks (Tree.yieldForest ts) ++ ltoks rest ++ [LTok.eof]) := by
+        rw [parseSym_var_lookahead _ _ hhd hget hne (max fc ft)]
+        rw [hrunC']
+      refine ⟨max fc ft + 2, ?_⟩
+      rw [hwf, parseForest_cons, hs]
+      simp only [pbind]
+      rw [hrunT']
+
+/-- **The generated parser reconstructs a supplied valid tree exactly.**  Every valid parse
+tree of the start symbol is an output of the generated parser on its own yield: apply the
+forest theorem to the one-symbol symbol list `[var G.start]` and the empty continuation.
+Unlike Phase 3's `language_imp_accepts` this needs no `Progressing` hypothesis and no
+no-left-recursion check, because the finite tree bounds the recursion by itself. -/
+theorem Grammar.generated_parse_tree (G : Grammar T N) (hall : G.Ll1) {t : Tree T N}
+    (hv : Valid G t) (hr : t.root? = some G.start) :
+    ∃ fuel, Parser.parse G G.genTable fuel (ltoks (Tree.yield t) ++ [LTok.eof]) =
+      PRes.ok t [LTok.eof] := by
+  cases t with
+  | leaf a => exact absurd hr (by simp [Tree.root?])
+  | node A ts =>
+      have hA : A = G.start := Option.some.inj hr
+      subst hA
+      obtain ⟨rhs, hp, hm⟩ := hv
+      have hmatch : MatchList G [Sym.var G.start] [Tree.node G.start ts] :=
+        MatchList.var hp hm MatchList.nil
+      obtain ⟨fuel, hrun⟩ :=
+        Grammar.generated_parseForest_of_match G hall hmatch [] ⟨[], derives_refl _⟩
+      refine ⟨fuel, ?_⟩
+      have h1 : ltoks (Tree.yieldForest [Tree.node G.start ts]) ++ ltoks [] ++ [LTok.eof] =
+          ltoks (Tree.yield (Tree.node G.start ts)) ++ [LTok.eof] := by simp
+      have h2 : Parser.parseForest G.genTable fuel [Sym.var G.start]
+          (ltoks (Tree.yield (Tree.node G.start ts)) ++ [LTok.eof]) =
+          PRes.ok [Tree.node G.start ts] [LTok.eof] := by
+        rw [← h1]; exact hrun
+      have h : Parser.parse G G.genTable fuel
+          (ltoks (Tree.yield (Tree.node G.start ts)) ++ [LTok.eof]) =
+          PRes.ok (Tree.node G.start ts) [LTok.eof] := by
+        unfold Parser.parse
+        rw [h2]
+      exact h
+
+/-- **Grammar unambiguity.**  An LL(1) grammar has at most one valid parse tree with a
+given yield and the start symbol at the root: exact-tree completeness turns both trees into
+successful parser outputs on the same input, and a successful output is unique.
+
+The start-root condition cannot be dropped: an *unreachable* nonterminal may have two
+different nullable trees with the same (empty) yield without producing any SELECT
+conflict, because FOLLOW is empty there. -/
+theorem Grammar.parseTree_unique (G : Grammar T N) (hall : G.Ll1) {t₁ t₂ : Tree T N}
+    (h₁ : Valid G t₁) (h₂ : Valid G t₂) (r₁ : t₁.root? = some G.start)
+    (r₂ : t₂.root? = some G.start) (hy : Tree.yield t₁ = Tree.yield t₂) : t₁ = t₂ := by
+  obtain ⟨f₁, hrun₁⟩ := Grammar.generated_parse_tree G hall h₁ r₁
+  obtain ⟨f₂, hrun₂⟩ := Grammar.generated_parse_tree G hall h₂ r₂
+  obtain ⟨h1, _⟩ := parse_ok hrun₁
+  obtain ⟨h2, _⟩ := parse_ok hrun₂
+  rw [hy] at h1
+  obtain ⟨h, _⟩ := parseForest_success_unique h1 h2
+  exact (List.cons.inj h).1
+
+/-- **End-to-end characterisation from the LL(1) condition alone.**  The generated parser
+accepts exactly the language of the grammar, with no separate left-recursion check: the
+forward direction reconstructs a supplied tree (so it terminates by the finiteness of the
+tree), the backward direction is soundness of the generated table.  The fuel remains
+existential; the rank-based `generated_language_iff` above additionally bounds it. -/
+theorem Grammar.generated_language_iff_ll1 (G : Grammar T N) (hall : G.ll1Check = true)
+    (ws : List T) :
+    G.language ws ↔ ∃ fuel t,
+      Parser.parse G G.genTable fuel (ltoks ws ++ [LTok.eof]) = PRes.ok t [LTok.eof] := by
+  constructor
+  · intro h
+    obtain ⟨ts, hv, hy⟩ := Grammar.language_iff_tree G ws |>.mp h
+    obtain ⟨fuel, hrun⟩ :=
+      Grammar.generated_parse_tree G (Grammar.ll1Check_iff G |>.mp hall) hv
+        (by simp [Tree.root?])
+    refine ⟨fuel, Tree.node G.start ts, ?_⟩
+    rw [← hy]
+    exact hrun
+  · rintro ⟨_, _, hok⟩
+    have h : G.language (tokensOf (ltoks ws ++ [LTok.eof])) :=
+      parse_ok_imp_language (Grammar.genTable_sound G) hok
+    simpa [tokensOf_ltoks] using h
+
+end ExactTreeCompleteness
+
 section Correctness
 
 variable [DecidableEq T] [DecidableEq N] [FiniteEnum T] [FiniteEnum N]
@@ -554,12 +752,29 @@ characterisation of reachability, which avoids indexing a chain of steps. -/
 def Grammar.LcReach (G : Grammar T N) (A B : N) : Prop :=
   ∀ (S : N → Prop), S A → (∀ (C D : N), G.LeftCorner C D → S C → S D) → S B
 
-/-- The computed reachability: the limit of the closure iteration. -/
+/-- The computed reachability: the limit of the closure iteration, tabulated by the
+memoized backend.  The left-recursion check asks it at every pair of nonterminals, so the
+closure is re-queried densely and the tabulation pays for itself (README.md measures 3× on
+the scaled circuit family).  lcReach_eq_iterP is the bridge back to the iterP approximant
+that lcReach_ind and the closure lemmas are proved against. --/
 def Grammar.lcReach (G : Grammar T N) (A B : N) : Bool :=
-  Fixpoint.iterP (lcTCP G A) (G.occursRounds) B
+  Memo.iterMemo (FiniteEnum.elems (α := N)) (lcTCP G A) (G.occursRounds) B
+
+/-- **The bridge.**  The memoized left-corner closure is the iterP approximant. --/
+theorem Grammar.lcReach_eq_iterP (G : Grammar T N) (A B : N) :
+    G.lcReach A B = Fixpoint.iterP (lcTCP G A) G.occursRounds B :=
+  Memo.iterMemo_eq_iterP (FiniteEnum.elems (α := N)) (lcTCP G A) FiniteEnum.complete
+    G.occursRounds B
+
+/-- The two forms agree as functions, which is what the transformer consumes. --/
+theorem Grammar.lcReach_fun_eq (G : Grammar T N) (A : N) :
+    G.lcReach A = Fixpoint.iterP (lcTCP G A) G.occursRounds := by
+  funext B
+  exact G.lcReach_eq_iterP A B
 
 theorem Grammar.lcReach_closed (G : Grammar T N) (A B : N) :
     G.lcReach A B = true ↔ lcTCP G A (G.lcReach A) B = true := by
+  rw [G.lcReach_eq_iterP, G.lcReach_fun_eq]
   show Fixpoint.iterP (lcTCP G A) (G.occursRounds) B = true ↔
       lcTCP G A (Fixpoint.iterP (lcTCP G A) (G.occursRounds)) B = true
   exact Fixpoint.iterP_closed (FiniteEnum.elems (α := N)) (lcTCP G A)
@@ -621,7 +836,7 @@ theorem Grammar.lcReach_iff (G : Grammar T N) (A B : N) :
     G.lcReach A B = true ↔ G.LcReach A B := by
   constructor
   · intro h S hA hstep
-    exact lcReach_ind G A S hA hstep G.occursRounds B h
+    exact lcReach_ind G A S hA hstep G.occursRounds B ((G.lcReach_eq_iterP A B) ▸ h)
   · intro h
     exact h (fun X => G.lcReach A X = true) (lcReach_refl G A)
       (fun C D hc hcd => lcReach_step G hc hcd)

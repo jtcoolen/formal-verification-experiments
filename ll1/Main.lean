@@ -162,6 +162,63 @@ def main : IO Unit := do
   IO.println "  side condition of rule R2 at work; eof enters FOLLOW only via FOLLOW(start)."
   IO.println ""
   IO.println line
+  IO.println "PHASE 5 — LL(1) TABLE GENERATOR"
+  IO.println line
+  IO.println ("  generated table for the toy grammar: " ++ String.intercalate "; " Toy.genEntryStrs)
+  IO.println ""
+  IO.println "  select_iff       : computed SELECT = (FIRST(rhs) without eof) union (if rhs erases then FOLLOW(A))"
+  IO.println "  ll1Check_iff     : the decidable conflict check = the LL(1) condition"
+  IO.println "  genTable_correct : ll1Check => Sound + Adequate + Complete (Phase 2 predicate)"
+  IO.println "  genTable_progressing : no left recursion => Progressing (left-corner ranking)"
+  IO.println "  generated_language_iff : both => the generated parser accepts exactly the language"
+  IO.println "  generated_parseForest_of_match : the generated parser reproduces the SUPPLIED tree"
+  IO.println "  generated_language_iff_ll1 : LL(1) alone already gives accept-exactly-the-language"
+  IO.println "  parseTree_unique : two valid start trees with the same yield are identical (unambiguity)"
+  IO.println "  Loop.loop_not_ll1 : the looping Phase 3 grammar is REJECTED by the check"
+  IO.println ""
+  IO.println line
+  IO.println "PHASE 6 — QUANTUM CIRCUIT LANGUAGE"
+  IO.println line
+  IO.println "  Circuits:  h q0; cx q0 q1; s q1; m q0;  (qubit positions fixed by the grammar)"
+  IO.println "  QCircuits: qubit payloads as a nonterminal, so h q1; is a program"
+  IO.println ""
+  IO.println "  circ_ll1 / qc_ll1 : both grammars pass the LL(1) check (proved by decide)"
+  IO.println "  circ_end_to_end / qc_end_to_end : the generated parser accepts exactly the language"
+  IO.println "  QCircuits.round_trip : print -> parse -> extract is the identity on programs"
+  IO.println "  QCircuits.valid_prog_canonical : every valid tree IS a canonical progTree p"
+  IO.println "  QCircuits.parse_output_canonical : every parser output extracts to the printed program"
+  IO.println ("  printProg [hadamard q0, cnot q0 q1] = " ++ QCircuits.printProgStr [QCircuits.Instr.hadamard QCircuits.Qubit.zero, QCircuits.Instr.cnot QCircuits.Qubit.zero QCircuits.Qubit.one])
+  IO.println ""
+  IO.println line
+  IO.println "PHASE 5.2 — LL(1) + REDUCED => NO LEFT RECURSION"
+  IO.println line
+  IO.println "  Grammar.Reduced = (has a production => occurs) and (occurs => productive)"
+  IO.println "  noLeftRecursion_of_ll1 : Reduced => Ll1 => noLeftRecursion = true"
+  IO.println "  proof: counted head-expansion traces; headSteps_stop_length_unique is LL(1)"
+  IO.println "         transported through select_of_first; productivity makes a stopping form a"
+  IO.println "         lookahead form; a left-corner cycle would force c_n = j + c_(n+1), 0 < j."
+  IO.println "  LeftRecUnreachable : S -> s, U -> U, U -> eps  has ll1Check = true but"
+  IO.println "                     noLeftRecursion = false  (Reduced.1 is necessary)"
+  IO.println "  LeftRecUnproductive: S -> S                  has ll1Check = true but"
+  IO.println "                     noLeftRecursion = false  (Reduced.2 is necessary)"
+  IO.println "  ToyReduced.toy_no_left_recursion_from_ll1 : the Toy grammar's check, DERIVED"
+  IO.println ""
+  IO.println line
+  IO.println "PHASE 4.0b — MEMOIZED FIXED-POINT BACKEND (measured, not promised)"
+  IO.println line
+  IO.println "  Memo.iterMemo computes the same approximant as Fixpoint.iterP as a List Bool"
+  IO.println "  aligned with the carrier; iterMemo_eq_iterP needs no monotonicity, only that the"
+  IO.println "  carrier be exhaustive (duplicates are fine, and FiniteEnum promises no more)."
+  IO.println "  Grammar.follow and Grammar.lcReach now use it; follow_eq_iterP and"
+  IO.println "  lcReach_eq_iterP tie them to the iterP approximants the analysis proofs use, so no"
+  IO.println "  soundness or completeness proof had to be redone."
+  IO.println "  ll1Check wall-clock (decide + kernel check, ./bench5.sh):"
+  IO.println "    Circuits   1.93 s -> 1.07 s  (1.8x)      QCircuits  2.43 s -> 1.23 s  (2.0x)"
+  IO.println "    scaled k=8 10.13 s -> 3.02 s (3.4x)      scaled k=16 35.08 s -> 7.14 s (4.9x)"
+  IO.println "  Memoizing FIRST/NULLABLE/REACH too is *slower* (sparse queries; the whnf cache"
+  IO.println "  already shares iterP P k), so only the densely queried loops were switched."
+  IO.println ""
+  IO.println line
   IO.println "MAIN CORRESPONDENCE THEOREM (Phase 1)"
   IO.println line
   IO.println "  tree_iff_derives : (∃ ts, Valid G (node A ts) ∧ yield (node A ts) = ws)"

@@ -4,6 +4,7 @@ Licensed under the MIT License. See the file LICENSE in the project root for
 license information.
 -/
 import VerifiedLL1.Reach
+import VerifiedLL1.Memo
 
 /-!
 # Phase 4.3 — FOLLOW
@@ -147,15 +148,38 @@ theorem followP_mono (G : Grammar T N) (first : Sym T N → LTok T → Bool)
 def Grammar.followRounds (_G : Grammar T N) : Nat :=
   (FiniteEnum.elems (α := N × LTok T)).length
 
-/-- The computed FOLLOW relation, using the already computed FIRST, NULLABLE and REACH
-as fixed inputs. -/
+/-- **The computed FOLLOW relation**, using the already computed FIRST, NULLABLE and REACH
+as fixed inputs.
+
+FOLLOW is the analysis the memoized backend is worth switching to: the conflict check asks
+it at (nearly) every `(nonterminal, lookahead)` pair, so the approximant is re-queried
+densely, and one tabulated pass over the bit list beats re-unfolding the `iterP` chain at
+every pair.  `follow_eq_iterP` says it is *the same computation* as the `iterP` chain that
+the soundness and completeness proofs below reason about, so nothing is re-proved. -/
 def Grammar.follow (G : Grammar T N) (A : N) (x : LTok T) : Bool :=
-  Fixpoint.iterP (followP G G.first (firstNul G) G.occurs) (G.followRounds) (A, x)
+  Memo.iterMemo (FiniteEnum.elems (α := N × LTok T))
+    (followP G G.first (firstNul G) G.occurs) (G.followRounds) (A, x)
+
+/-- **The bridge.**  The memoized FOLLOW is the `iterP` approximant at the bound. -/
+theorem Grammar.follow_eq_iterP (G : Grammar T N) (A : N) (x : LTok T) :
+    G.follow A x =
+      Fixpoint.iterP (followP G G.first (firstNul G) G.occurs) (G.followRounds) (A, x) :=
+  Memo.iterMemo_eq_iterP (FiniteEnum.elems (α := N × LTok T))
+    (followP G G.first (firstNul G) G.occurs) FiniteEnum.complete (G.followRounds) (A, x)
+
+/-- The two forms agree as *functions*, which is what the transformer needs. -/
+theorem Grammar.follow_fun_eq (G : Grammar T N) :
+    (fun p : N × LTok T => G.follow p.1 p.2) =
+      Fixpoint.iterP (followP G G.first (firstNul G) G.occurs) (G.followRounds) := by
+  funext p
+  cases p with
+  | mk A x => exact G.follow_eq_iterP A x
 
 /-- The limit is closed under the rules. -/
 theorem follow_closed (G : Grammar T N) (A : N) (x : LTok T) :
     G.follow A x = true ↔
       followTest G G.first (firstNul G) G.occurs (fun p => G.follow p.1 p.2) (A, x) = true := by
+  rw [Grammar.follow_eq_iterP, Grammar.follow_fun_eq]
   show Fixpoint.iterP (followP G G.first (firstNul G) G.occurs) (G.followRounds) (A, x) = true ↔
       followP G G.first (firstNul G) G.occurs
         (Fixpoint.iterP (followP G G.first (firstNul G) G.occurs) (G.followRounds)) (A, x) = true
@@ -424,7 +448,8 @@ variable [DecidableEq T] [DecidableEq N] [FiniteEnum T] [FiniteEnum N]
 /-- **The characterisation.**  The computation decides FOLLOW. -/
 theorem follow_iff (G : Grammar T N) (A : N) (x : LTok T) :
     G.follow A x = true ↔ G.FollowSym A x :=
-  ⟨fun h => follow_sound G G.followRounds A x h, fun h => follow_complete G A x h⟩
+  ⟨fun h => follow_sound G G.followRounds A x ((Grammar.follow_eq_iterP G A x) ▸ h),
+    fun h => follow_complete G A x h⟩
 
 /-- **Correct end-of-input behaviour.**  `eof` is in `FOLLOW(A)` exactly when some
 sentential form has `A` followed by a suffix that erases. -/

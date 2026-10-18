@@ -1,0 +1,12 @@
+toy_ref                          0.35
+toy_ship                         0.30
+circ_ref                         1.93
+circ_ship                        1.07
+qcirc_ref                        2.43
+qcirc_ship                       1.23
+circ8_ref                       10.13
+circ8_ship                       3.02
+circ16_ref                      35.08
+circ16_ship                      7.14
+circ24_ref                     117.18
+circ24_ship                     11.79

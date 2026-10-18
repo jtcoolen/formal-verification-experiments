@@ -20,10 +20,12 @@ is monotone, and that its rules are sound and complete with respect to a
 A finite set is a list `carrier` enumerating the universe, together with a boolean
 predicate; the set itself is `carrier.filter p`.  Everything stays executable:
 membership is `p x`, union is `fun x => p x || q x`, and the iteration is structural
-recursion on a natural number.  The carrier is required to be duplicate-free and
-*exhaustive* (`FiniteEnum` supplies exactly that), which is what turns "the two
-approximants agree on the carrier" into "the two approximants are equal", the form
-needed to propagate stability forward.
+recursion on a natural number.  The carrier is required to be *exhaustive*
+(`FiniteEnum` supplies exactly that), which is what turns "the two approximants agree on the
+carrier" into "the two approximants are equal", the form needed to propagate stability
+forward.  Exhaustiveness is all that is needed: a carrier with **duplicate** entries is
+harmless here (a repeated key simply receives the same value twice), and `FiniteEnum` does
+not promise duplicate-freeness — `Memo.lean` relies on exactly this weaker contract.
 
 ## Termination
 

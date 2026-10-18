@@ -16,3 +16,7 @@ root = "Main"
 [[lean_exe]]
 name = "axioms"
 root = "Axioms"
+
+[[lean_lib]]
+name = "Bench"
+globs = ["Bench", "Bench.+"]

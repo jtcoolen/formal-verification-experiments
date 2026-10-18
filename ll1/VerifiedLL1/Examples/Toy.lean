@@ -422,7 +422,7 @@ theorem not_follow_u (x : LTok Tok) : G.follow u x = false := by
     exact not_occurs_u ⟨pre, post, hder⟩
   cases h : G.follow u x with
   | true => exact absurd h h2
-  | false => exact h
+  | false => rfl
 
 /-- `q' is always the last symbol of a sentential form of `G', so no token is in its
 `FOLLOW'.  Decided by the kernel on the finite iteration. -/
@@ -481,6 +481,11 @@ theorem toy_no_left_recursion : G.noLeftRecursion = true := by decide
 
 /-- The generated table. -/
 def genEntries : List (Var × (LTok Tok × List (Sym Tok Var))) := G.genTable.entries
+
+/-- The generated table, rendered compactly for the demo executable. -/
+def genEntryStrs : List String :=
+  genEntries.map fun e =>
+    varStr e.1 ++ " / " ++ ltokStr e.2.1 ++ " => " ++ String.intercalate " " (e.2.2.map symStr)
 
 #eval genEntries
 

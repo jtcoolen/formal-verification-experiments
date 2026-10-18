@@ -3,3 +3,8 @@
 *.olean
 *~
 .mathlibcache/
+# LL(1) benchmark scratch
+ll1/Bench/Tmp*.lean
+ll1/bench-results-*/
+ll1/bench*-results/*
+!ll1/bench*-results/summary.txt

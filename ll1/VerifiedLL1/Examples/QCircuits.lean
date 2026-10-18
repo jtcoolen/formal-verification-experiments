@@ -31,9 +31,21 @@ qubit  -> q0 | q1
   relation).
 * `language_printProg` — every printed program is in the language, so (end-to-end) the
   generated parser accepts it with a valid parse tree.
-* `printProg_toAST` — for every valid parse tree, extracting the AST and printing it gives
-  back exactly the yield of the tree.
-* `round_trip` — printing then parsing then extracting is the identity on programs.
+* **Canonical-tree inversion** (`valid_qubit_canonical`, `valid_instr_canonical`,
+  `valid_instrs_canonical`, `valid_prog_canonical`): a *valid* tree of the grammar is the
+  canonical tree `progTree p` of a unique program.  This inverts the tree structure by
+  inverting the productions; no parser is involved.
+* **Extraction of parser output** (`progOfTree_of_parse_success`, `parse_output_canonical`):
+  what the *generated parser* returns on a printed program extracts back to that program,
+  for **every** successful fuel.  This is extraction of real parser output rather than of an
+  arbitrary valid tree, and it rests on exact-tree completeness (`Generator.lean`) plus
+  uniqueness of successful parser outputs.
+* `progOfTree_total` — the extractor is total on valid program trees; `printProg_toAST` —
+  printing what it extracted gives back exactly the yield of the tree.
+* `parse_printProg` / `round_trip_extract` / `round_trip` — printing, parsing and extracting
+  is the identity on programs.
+* `Validation`: the empty program, every instruction form with every qubit payload in one
+  mixed sequence, explicit fuel values checked by `rfl`, and arbitrary successful fuel.
 -/
 
 namespace VerifiedLL1.Examples.QCircuits
@@ -178,6 +190,14 @@ def printInstr : Instr → List Tok
 
 /-- **The pretty-printer for programs.** -/
 def printProg : Program → List Tok := List.flatMap printInstr
+
+/-- Compact rendering of a token, for the demo executable (the enumerations derive `Repr`,
+not `ToString`). -/
+def tokStr : Tok → String
+  | h => "h" | cx => "cx" | s => "s" | m => "m" | q0 => "q0" | q1 => "q1" | semi => ";"
+
+/-- A printed program as one string. -/
+def printProgStr (p : Program) : String := String.intercalate " " (List.map tokStr (printProg p))
 
 def qubitOfTok : Tok → Option Qubit
   | q0 => some Qubit.zero
@@ -450,6 +470,265 @@ theorem progOf_progTree (p : Program) : progOfTree (progTree p) = some p := by
   simp [progTree, progOfTree, instrsOf_instrsTree]
 
 end Canonical
+
+section CanonicalInversion
+
+/-- Inversion of a one-symbol match at a terminal. -/
+theorem match_tok_inv {a : Tok} {t : Tree Tok Var} (h : MatchList Q [Sym.tok a] [t]) :
+    t = Tree.leaf a := by
+  obtain ⟨ts', heq, hrest⟩ := MatchList.eq_leaf_cons h
+  have hnil : ts' = [] := MatchList.eq_nil hrest
+  rw [hnil] at heq
+  exact (List.cons.inj heq).1
+
+/-- Inversion of a one-symbol match at a nonterminal: the tree is a node labelled \`A\` whose
+children match one of \`A\`'s right-hand sides, so the node is valid. -/
+theorem match_var_inv {A : Var} {t : Tree Tok Var} (h : MatchList Q [Sym.var A] [t]) :
+    ∃ ts rhs, (A, rhs) ∈ Q.productions ∧ MatchList Q rhs ts ∧ t = Tree.node A ts := by
+  obtain ⟨ts', rhs, r, heq, hp, hchild, hrest⟩ := MatchList.eq_node_cons h
+  have hnil : r = [] := MatchList.eq_nil hrest
+  rw [hnil] at heq
+  exact ⟨ts', rhs, hp, hchild, (List.cons.inj heq).1⟩
+
+/-- **Canonical form of a valid \`qubit\` tree.**  The two productions of \`qubit\` force
+precisely the two canonical qubit trees. -/
+theorem valid_qubit_canonical {cs : List (Tree Tok Var)} (hv : Valid Q (Tree.node Var.qubit cs)) :
+    ∃ q, Tree.node Var.qubit cs = qubitTree q := by
+  obtain ⟨rhs, hrhs, hm⟩ := hv
+  rcases qubit_prods rhs hrhs with heq | heq
+  · subst heq
+    obtain ⟨ts', heq', hrest⟩ := MatchList.eq_leaf_cons hm
+    rw [MatchList.eq_nil hrest] at heq'
+    subst heq'
+    exact ⟨Qubit.zero, rfl⟩
+  · subst heq
+    obtain ⟨ts', heq', hrest⟩ := MatchList.eq_leaf_cons hm
+    rw [MatchList.eq_nil hrest] at heq'
+    subst heq'
+    exact ⟨Qubit.one, rfl⟩
+
+/-- The four gate shapes are forced by their single productions: keyword, qubit payloads and
+terminator are all pinned down, and the qubit children are canonical. -/
+theorem valid_hgate_canonical {cs : List (Tree Tok Var)} (hv : Valid Q (Tree.node Var.hgate cs)) :
+    ∃ q, Tree.node Var.hgate cs = gateTree (Instr.hadamard q) := by
+  obtain ⟨rhs, hrhs, hm⟩ := hv
+  rw [hgate_prods rhs hrhs] at hm
+  obtain ⟨t1, r1, heq1, h1, hrest1⟩ := MatchList.cons_inv hm
+  obtain ⟨t2, r2, heq2, h2, hrest2⟩ := MatchList.cons_inv hrest1
+  obtain ⟨t3, r3, heq3, h3, hrest3⟩ := MatchList.cons_inv hrest2
+  rw [MatchList.eq_nil hrest3] at heq3
+  subst heq3
+  subst heq2
+  subst heq1
+  obtain ⟨ts', rhs2, hp2, hm2, ht2⟩ := match_var_inv h2
+  obtain ⟨q, hq⟩ := valid_qubit_canonical (Valid.mk hp2 hm2)
+  refine ⟨q, by rw [match_tok_inv h1, match_tok_inv h3, ht2, hq]; rfl⟩
+
+theorem valid_cxgate_canonical {cs : List (Tree Tok Var)} (hv : Valid Q (Tree.node Var.cxgate cs)) :
+    ∃ a b, Tree.node Var.cxgate cs = gateTree (Instr.cnot a b) := by
+  obtain ⟨rhs, hrhs, hm⟩ := hv
+  rw [cxgate_prods rhs hrhs] at hm
+  obtain ⟨t1, r1, heq1, h1, hrest1⟩ := MatchList.cons_inv hm
+  obtain ⟨t2, r2, heq2, h2, hrest2⟩ := MatchList.cons_inv hrest1
+  obtain ⟨t3, r3, heq3, h3, hrest3⟩ := MatchList.cons_inv hrest2
+  obtain ⟨t4, r4, heq4, h4, hrest4⟩ := MatchList.cons_inv hrest3
+  rw [MatchList.eq_nil hrest4] at heq4
+  subst heq4
+  subst heq3
+  subst heq2
+  subst heq1
+  obtain ⟨ts₁, rhsA, hpA, hmA, htA⟩ := match_var_inv h2
+  obtain ⟨ts₂, rhsB, hpB, hmB, htB⟩ := match_var_inv h3
+  obtain ⟨a, ha⟩ := valid_qubit_canonical (Valid.mk hpA hmA)
+  obtain ⟨b, hb⟩ := valid_qubit_canonical (Valid.mk hpB hmB)
+  refine ⟨a, b, by rw [match_tok_inv h1, match_tok_inv h4, htA, htB, ha, hb]; rfl⟩
+
+theorem valid_sgate_canonical {cs : List (Tree Tok Var)} (hv : Valid Q (Tree.node Var.sgate cs)) :
+    ∃ q, Tree.node Var.sgate cs = gateTree (Instr.phase q) := by
+  obtain ⟨rhs, hrhs, hm⟩ := hv
+  rw [sgate_prods rhs hrhs] at hm
+  obtain ⟨t1, r1, heq1, h1, hrest1⟩ := MatchList.cons_inv hm
+  obtain ⟨t2, r2, heq2, h2, hrest2⟩ := MatchList.cons_inv hrest1
+  obtain ⟨t3, r3, heq3, h3, hrest3⟩ := MatchList.cons_inv hrest2
+  rw [MatchList.eq_nil hrest3] at heq3
+  subst heq3
+  subst heq2
+  subst heq1
+  obtain ⟨ts', rhs2, hp2, hm2, ht2⟩ := match_var_inv h2
+  obtain ⟨q, hq⟩ := valid_qubit_canonical (Valid.mk hp2 hm2)
+  refine ⟨q, by rw [match_tok_inv h1, match_tok_inv h3, ht2, hq]; rfl⟩
+
+theorem valid_mgate_canonical {cs : List (Tree Tok Var)} (hv : Valid Q (Tree.node Var.mgate cs)) :
+    ∃ q, Tree.node Var.mgate cs = gateTree (Instr.measure q) := by
+  obtain ⟨rhs, hrhs, hm⟩ := hv
+  rw [mgate_prods rhs hrhs] at hm
+  obtain ⟨t1, r1, heq1, h1, hrest1⟩ := MatchList.cons_inv hm
+  obtain ⟨t2, r2, heq2, h2, hrest2⟩ := MatchList.cons_inv hrest1
+  obtain ⟨t3, r3, heq3, h3, hrest3⟩ := MatchList.cons_inv hrest2
+  rw [MatchList.eq_nil hrest3] at heq3
+  subst heq3
+  subst heq2
+  subst heq1
+  obtain ⟨ts', rhs2, hp2, hm2, ht2⟩ := match_var_inv h2
+  obtain ⟨q, hq⟩ := valid_qubit_canonical (Valid.mk hp2 hm2)
+  refine ⟨q, by rw [match_tok_inv h1, match_tok_inv h3, ht2, hq]; rfl⟩
+
+/-- **Canonical form of a valid \`instr\` tree.**  The four productions of \`instr\` select the
+corresponding gate lemma. -/
+theorem valid_instr_canonical {cs : List (Tree Tok Var)} (hv : Valid Q (Tree.node Var.instr cs)) :
+    ∃ i, Tree.node Var.instr cs = instrTree i := by
+  obtain ⟨rhs, hrhs, hm⟩ := hv
+  rcases instr_prods rhs hrhs with heq | heq | heq | heq
+  · rw [heq] at hm
+    obtain ⟨t, r, heq', h1, hrest⟩ := MatchList.cons_inv hm
+    rw [MatchList.eq_nil hrest] at heq'
+    subst heq'
+    obtain ⟨ts', rhs', hp', hm', ht'⟩ := match_var_inv h1
+    obtain ⟨q, hq⟩ := valid_hgate_canonical (Valid.mk hp' hm')
+    exact ⟨Instr.hadamard q, by rw [instrTree, ht', hq]⟩
+  · rw [heq] at hm
+    obtain ⟨t, r, heq', h1, hrest⟩ := MatchList.cons_inv hm
+    rw [MatchList.eq_nil hrest] at heq'
+    subst heq'
+    obtain ⟨ts', rhs', hp', hm', ht'⟩ := match_var_inv h1
+    obtain ⟨a, b, hab⟩ := valid_cxgate_canonical (Valid.mk hp' hm')
+    exact ⟨Instr.cnot a b, by rw [instrTree, ht', hab]⟩
+  · rw [heq] at hm
+    obtain ⟨t, r, heq', h1, hrest⟩ := MatchList.cons_inv hm
+    rw [MatchList.eq_nil hrest] at heq'
+    subst heq'
+    obtain ⟨ts', rhs', hp', hm', ht'⟩ := match_var_inv h1
+    obtain ⟨q, hq⟩ := valid_sgate_canonical (Valid.mk hp' hm')
+    exact ⟨Instr.phase q, by rw [instrTree, ht', hq]⟩
+  · rw [heq] at hm
+    obtain ⟨t, r, heq', h1, hrest⟩ := MatchList.cons_inv hm
+    rw [MatchList.eq_nil hrest] at heq'
+    subst heq'
+    obtain ⟨ts', rhs', hp', hm', ht'⟩ := match_var_inv h1
+    obtain ⟨q, hq⟩ := valid_mgate_canonical (Valid.mk hp' hm')
+    exact ⟨Instr.measure q, by rw [instrTree, ht', hq]⟩
+
+/-- **Canonical form of a valid \`instrs\` tree.**  The proof is an induction on the matching
+forest, phrased as a statement about *every* \`instrs\` node occurring in it: the epsilon
+production forces the empty list, and the sequence production forces an instruction child
+followed by a smaller \`instrs\` child, whose match is a sub-derivation of the same forest,
+so the induction hypothesis covers it.  No explicit recursion or size measure is needed. -/
+theorem match_instrs_canonical :
+    ∀ {syms : List (Sym Tok Var)} {ts : List (Tree Tok Var)}, MatchList Q syms ts →
+      ∀ {B : Var} {rs : List (Tree Tok Var)}, Tree.node B rs ∈ ts → B = Var.instrs →
+        ∃ p, Tree.node B rs = instrsTree p := by
+  intro syms ts hm
+  induction hm with
+  | nil => intro B rs hmem _; exact absurd hmem (by simp)
+  | tok h ih =>
+      intro B rs hmem hB
+      rw [List.mem_cons] at hmem
+      rcases hmem with hhead | htail
+      · exact absurd hhead (by simp)
+      · exact ih htail hB
+  | @var rhs ts A ts' rhsA hp hchild hrest ihchild ihtail =>
+      intro B rs hmem hB
+      rw [List.mem_cons] at hmem
+      rcases hmem with hhead | htail
+      · -- the node is the head of the forest
+        obtain ⟨hBA, hrs⟩ := Tree.node.inj hhead
+        subst hrs
+        subst hBA
+        subst hB
+        rcases instrs_prods rhsA hp with heq | heq
+        · -- the sequence production: an instruction and a smaller instruction sequence
+          rw [heq] at hchild
+          obtain ⟨i, r1, heq1, hi, hrest1⟩ := MatchList.cons_inv hchild
+          obtain ⟨t, r2, heq2, htmatch, hrest2⟩ := MatchList.cons_inv hrest1
+          rw [MatchList.eq_nil hrest2] at heq2
+          subst heq2
+          subst heq1
+          obtain ⟨ts'', rhs'', hp'', hm'', ht''⟩ := match_var_inv htmatch
+          obtain ⟨p', hp'⟩ := ihchild (by rw [← ht'']; simp) rfl
+          obtain ⟨u, rhs3, hp3, hm3, hu⟩ := match_var_inv hi
+          obtain ⟨i', hi'⟩ := valid_instr_canonical (Valid.mk hp3 hm3)
+          have hgoal : Tree.node Var.instrs [i, t] =
+              Tree.node Var.instrs [instrTree i', instrsTree p'] := by
+            rw [hu, hi', ht'', hp']
+          exact ⟨i' :: p', hgoal⟩
+        · -- the epsilon production
+          rw [heq] at hchild
+          cases hchild
+          exact ⟨[], rfl⟩
+      · -- the node is further down the forest
+        exact ihtail htail hB
+
+theorem valid_instrs_canonical {cs : List (Tree Tok Var)}
+    (hv : Valid Q (Tree.node Var.instrs cs)) : ∃ p, Tree.node Var.instrs cs = instrsTree p := by
+  obtain ⟨rhs, hrhs, hm⟩ := hv
+  have hmatch : MatchList Q [Sym.var Var.instrs] [Tree.node Var.instrs cs] :=
+    MatchList.var hrhs hm MatchList.nil
+  exact match_instrs_canonical hmatch (B := Var.instrs) (rs := cs)
+    (List.Mem.head _) rfl
+
+/-- **Canonical form of a valid program tree.** -/
+theorem valid_prog_canonical {t : Tree Tok Var} (hv : Valid Q t) (hr : t.root? = some Var.prog) :
+    ∃ p, t = progTree p := by
+  cases t with
+  | leaf a => exact absurd hr (by simp [Tree.root?])
+  | node A ts =>
+      have hA : A = Var.prog := Option.some.inj hr
+      subst hA
+      obtain ⟨rhs, hrhs, hm⟩ := hv
+      rw [prog_prods rhs hrhs] at hm
+      obtain ⟨i, r1, heq1, hi, hrest1⟩ := MatchList.cons_inv hm
+      rw [MatchList.eq_nil hrest1] at heq1
+      subst heq1
+      obtain ⟨ts', rhs', hp', hm', ht'⟩ := match_var_inv hi
+      obtain ⟨p, hp⟩ := valid_instrs_canonical (Valid.mk hp' hm')
+      exact ⟨p, by rw [progTree, ht', hp]⟩
+
+/-- **The extractor is total on valid program trees**, and the tree it reads back is the
+canonical one.  Uniqueness of the extracted program is injectivity of \`Option.some\`. -/
+theorem progOfTree_total {t : Tree Tok Var} (hv : Valid Q t) (hr : t.root? = some Var.prog) :
+    ∃ p, progOfTree t = some p ∧ t = progTree p := by
+  obtain ⟨p, hp⟩ := valid_prog_canonical hv hr
+  refine ⟨p, ?_, hp⟩
+  rw [hp, progOf_progTree]
+
+/-- **The printer inverts the extractor**: extracting the AST from a valid program tree and
+printing it gives back exactly the yield of the tree. -/
+theorem printProg_toAST {t : Tree Tok Var} {p : Program} (hv : Valid Q t)
+    (hr : t.root? = some Var.prog) (he : progOfTree t = some p) : printProg p = Tree.yield t := by
+  obtain ⟨p', hp'⟩ := valid_prog_canonical hv hr
+  rw [hp'] at he
+  have hpp : p' = p := Option.some.inj ((progOf_progTree p').symm.trans he)
+  rw [hp', hpp]
+  exact (yield_progTree p).symm
+
+/-- **The generated parser reproduces the canonical tree of a printed program** — the real
+parser, not an idealised one: exact-tree completeness applied to \`progTree p\`. -/
+theorem parse_printProg (p : Program) : ∃ fuel,
+    Parser.parse Q Q.genTable fuel (ltoks (printProg p) ++ [LTok.eof]) =
+      PRes.ok (progTree p) [LTok.eof] := by
+  obtain ⟨fuel, hrun⟩ := Grammar.generated_parse_tree Q (Grammar.ll1Check_iff Q |>.mp qc_ll1)
+    (valid_progTree p) (by simp [progTree, Tree.root?, Q])
+  exact ⟨fuel, by rw [yield_progTree] at hrun; exact hrun⟩
+
+/-- **Any successful fuel extracts the same program**: whatever fuel succeeds, the tree the
+parser returns extracts to the original program (uniqueness of successful outputs). -/
+theorem progOfTree_of_parse_success (p : Program) {fuel : Nat} {t : Tree Tok Var}
+    (h : Parser.parse Q Q.genTable fuel (ltoks (printProg p) ++ [LTok.eof]) =
+      PRes.ok t [LTok.eof]) : progOfTree t = some p := by
+  obtain ⟨fuel', hrun⟩ := parse_printProg p
+  have ht : t = progTree p := parse_success_unique h hrun
+  rw [ht, progOf_progTree]
+
+/-- **Parser-extractor round trip.**  Printing a program, parsing it with the generated
+parser and extracting the AST returns the program. -/
+theorem round_trip_extract (p : Program) : ∃ fuel t,
+    Parser.parse Q Q.genTable fuel (ltoks (printProg p) ++ [LTok.eof]) =
+      PRes.ok t [LTok.eof] ∧ progOfTree t = some p := by
+  obtain ⟨fuel, hrun⟩ := parse_printProg p
+  exact ⟨fuel, progTree p, hrun, progOf_progTree p⟩
+
+end CanonicalInversion
+
 section RoundTrip
 
 /-- Printing a program produces a word of the language: the canonical parse tree is a
@@ -473,8 +752,9 @@ theorem round_trip (p : Program) :
     progOfTree (progTree p) = some p ∧ Tree.yield (progTree p) = printProg p ∧
       ∃ fuel t, Parser.parse Q Q.genTable fuel (ltoks (printProg p) ++ [LTok.eof]) =
         PRes.ok t [LTok.eof] ∧ Valid Q t ∧ Tree.yield t = printProg p := by
-  refine ⟨progOf_progTree p, yield_progTree p, ?_⟩
-  exact Grammar.generated_accepts_tree Q qc_ll1 qc_no_left_recursion _ (language_printProg p)
+  obtain ⟨fuel, hrun⟩ := parse_printProg p
+  exact ⟨progOf_progTree p, yield_progTree p, fuel, progTree p, hrun,
+    valid_progTree p, yield_progTree p⟩
 
 /-- **Valid and invalid inputs** for the generated parser. -/
 def prog_hq1 : List Tok := [h, q1, semi]
@@ -500,5 +780,93 @@ theorem accepts_hcx : Q.language prog_hcx := by
 #eval Parser.parse Q Q.genTable 40 (ltoks prog_bad2 ++ [LTok.eof])
 
 end RoundTrip
+
+section Validation
+
+set_option maxRecDepth 200000
+
+/-- A program using every instruction form and both qubit payloads, in a mixed sequence. -/
+def prog_all : Program :=
+  [ Instr.hadamard Qubit.zero, Instr.hadamard Qubit.one
+  , Instr.cnot Qubit.zero Qubit.zero, Instr.cnot Qubit.zero Qubit.one
+  , Instr.cnot Qubit.one Qubit.zero, Instr.cnot Qubit.one Qubit.one
+  , Instr.phase Qubit.zero, Instr.phase Qubit.one
+  , Instr.measure Qubit.zero, Instr.measure Qubit.one ]
+
+/-- **The empty program** parses and extracts back to `[]`. -/
+theorem round_trip_empty : ∃ fuel t,
+    Parser.parse Q Q.genTable fuel [LTok.eof] = PRes.ok t [LTok.eof] ∧
+      progOfTree t = some [] := round_trip_extract []
+
+/-- **Every instruction form and every qubit combination**, in one mixed sequence, round
+trips through the generated parser. -/
+theorem round_trip_all_forms : ∃ fuel t,
+    Parser.parse Q Q.genTable fuel (ltoks (printProg prog_all) ++ [LTok.eof]) =
+      PRes.ok t [LTok.eof] ∧ progOfTree t = some prog_all := round_trip_extract prog_all
+
+/-- **Executable checks at explicit fuel values.**  The generated parser returns exactly the
+canonical tree of the program it parsed. -/
+theorem parse_hq1_fuel20 : Parser.parse Q Q.genTable 20 (ltoks prog_hq1 ++ [LTok.eof]) =
+    PRes.ok (progTree [Instr.hadamard Qubit.one]) [LTok.eof] := by rfl
+
+theorem parse_hcx_fuel60 : Parser.parse Q Q.genTable 60 (ltoks prog_hcx ++ [LTok.eof]) =
+    PRes.ok (progTree [Instr.hadamard Qubit.zero, Instr.cnot Qubit.zero Qubit.one])
+      [LTok.eof] := by rfl
+
+/-- **Arbitrary successful fuel.**  Whatever fuel succeeds — and whatever tree it returns —
+the extractor reads back the same program. -/
+theorem extract_hq1_any_fuel {fuel : Nat} {t : Tree Tok Var}
+    (h : Parser.parse Q Q.genTable fuel (ltoks prog_hq1 ++ [LTok.eof]) = PRes.ok t [LTok.eof]) :
+    progOfTree t = some [Instr.hadamard Qubit.one] :=
+  progOfTree_of_parse_success _ h
+
+theorem extract_hcx_any_fuel {fuel : Nat} {t : Tree Tok Var}
+    (h : Parser.parse Q Q.genTable fuel (ltoks prog_hcx ++ [LTok.eof]) = PRes.ok t [LTok.eof]) :
+    progOfTree t = some [Instr.hadamard Qubit.zero, Instr.cnot Qubit.zero Qubit.one] :=
+  progOfTree_of_parse_success _ h
+
+/-- **Epsilon trees are unique at the start symbol.**  The empty program is the only valid
+tree of yield [] rooted at prog: unambiguity applied to two empty-yield start trees. -/
+theorem unique_empty_tree {t : Tree Tok Var} (hv : Valid Q t) (hr : t.root? = some Var.prog)
+    (hy : Tree.yield t = []) : t = progTree [] := by
+  have hq : Q.start = Var.prog := rfl
+  have hr' : t.root? = some Q.start := by rw [hq]; exact hr
+  have hstart : Tree.root? (progTree []) = some Q.start := by
+    show Tree.root? (progTree []) = some Var.prog
+    simp [progTree, Tree.root?]
+  refine Grammar.parseTree_unique Q (Grammar.ll1Check_iff Q |>.mp qc_ll1) hv
+    (valid_progTree []) hr' hstart ?_
+  exact hy.trans (yield_progTree []).symm
+
+/-- **Two different fuels return the same tree.**  The concrete instance of output uniqueness
+that makes the extractor independent of the fuel the caller happened to pass. -/
+theorem same_tree_at_any_fuel {f₁ f₂ : Nat} {t₁ t₂ : Tree Tok Var}
+    (h₁ : Parser.parse Q Q.genTable f₁ (ltoks prog_hcx ++ [LTok.eof]) = PRes.ok t₁ [LTok.eof])
+    (h₂ : Parser.parse Q Q.genTable f₂ (ltoks prog_hcx ++ [LTok.eof]) = PRes.ok t₂ [LTok.eof]) :
+    t₁ = t₂ := parse_success_unique h₁ h₂
+
+/-- **Extraction of parser output**, as distinct from canonical-tree inversion: a tree that
+the generated parser itself accepts on a printed program is canonical, extracts, and
+extracts to the program that was printed. -/
+theorem parse_output_canonical (p : Program) {fuel : Nat} {t : Tree Tok Var}
+    (h : Parser.parse Q Q.genTable fuel (ltoks (printProg p) ++ [LTok.eof]) =
+      PRes.ok t [LTok.eof]) :
+    ∃ p', t = progTree p' ∧ progOfTree t = some p' ∧ p' = p := by
+  obtain ⟨hmatch, _⟩ := parse_ok h
+  obtain ⟨hmem, _⟩ := parseForest_sound (Grammar.genTable_sound Q) fuel
+      [Sym.var Q.start] (ltoks (printProg p) ++ [LTok.eof]) [t] [LTok.eof] hmatch
+  obtain ⟨ts', rhs, r, ht, hp, hchild, hrest⟩ := MatchList.eq_node_cons hmem
+  have hr' : r = [] := MatchList.eq_nil hrest
+  rw [hr'] at ht
+  obtain ⟨h1, _⟩ := List.cons.inj ht
+  subst h1
+  have hroot : (Tree.node Q.start ts').root? = some Q.start := by simp [Tree.root?]
+  obtain ⟨p', hp'⟩ := valid_prog_canonical (Valid.mk hp hchild) hroot
+  refine ⟨p', hp', by rw [hp', progOf_progTree], ?_⟩
+  have hsome : progOfTree (progTree p') = some p :=
+    progOfTree_of_parse_success p (by rw [← hp']; exact h)
+  exact Option.some.inj ((progOf_progTree p').symm.trans hsome)
+
+end Validation
 
 end VerifiedLL1.Examples.QCircuits

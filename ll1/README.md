@@ -21,7 +21,10 @@ lake env lean Axioms.lean # prints the axiom dependencies of every main theorem
 | 3 | Completeness, termination, rejection of non-members | **done** |
 | 4 | `NULLABLE` / `REACH` / `FIRST` / `FOLLOW` specifications + fixed-point computations, soundness/completeness/termination | **done** |
 | 5 | `SELECT` sets, LL(1) conflict check, table generation, end-to-end theorem | **done** |
-| 6 | Quantum circuit DSL as a worked instance | **done**: token-kind grammar + hand table, payload grammar + generated table, AST, printer, round trip |
+| 5.1 | exact-tree completeness, parser-output uniqueness, grammar unambiguity, the LL(1)-only end-to-end theorem | **done** |
+| 5.2 | LL(1) + reduced => no left recursion (counted head-expansion traces), with formal counterexamples | **done** |
+| 4.0b | memoized Boolean-list fixed-point backend, proved equal to `iterP`, wired into FOLLOW | **done** |
+| 6 | Quantum circuit DSL as a worked instance | **done**: token-kind grammar + hand table, payload grammar + generated table, AST, printer, canonical-tree inversion, parser-extractor round trip |
 
 ## Layout
 
@@ -42,13 +45,25 @@ ll1/
 │   ├── First.lean              # FIRST spec + computation + soundness/completeness
 │   ├── Reach.lean              # REACH: which nonterminals occur in a sentential form
 │   ├── Follow.lean             # FOLLOW spec + computation + soundness/completeness
-│   ├── Generator.lean          # SELECT, LL(1) check, table generation, correctness, end-to-end
+│   ├── Generator.lean          # SELECT, LL(1) check, table generation, correctness,
+│   │                           #   end-to-end, exact-tree completeness, unambiguity
+│   ├── LeftRec.lean            # LL(1) + reduced => no left recursion (head-step counting)
+│   ├── Memo.lean               # memoized Boolean-list backend for the fixed points
+│   ├── MemoTest.lean           # validation of the memoized backend against Fixpoint.iterP
 │   └── Examples/
 │       ├── Toy.lean            # ε-productions, acceptance *and* rejection proofs
 │       ├── Circuits.lean       # quantum circuit DSL, token kinds (Phase 6 language)
-│       ├── QCircuits.lean      # circuit DSL with qubit payloads: generated table, AST, printer
+│       ├── QCircuits.lean      # circuit DSL with qubit payloads: generated table, AST,
+│       │                       #   printer, canonical-tree inversion, round trip
+│       ├── LeftRecChecks.lean  # why Reduced is necessary; Toy derived from LL(1)
 │       ├── Continuation.lean   # why table correctness needs a reachability hypothesis
 │       └── Loop.lean           # a Correct table that loops: progress is necessary
+├── Bench/                      # benchmark families (not a default build target)
+│   ├── Grow.lean               # the growing family A0 -> eps, A(i+1) -> Ai Ai
+│   ├── MemoGrow.lean           # memoized pipelines over the same family
+│   ├── Circ.lean               # the scaled circuit family (k qubit tokens)
+│   └── Ref.lean                # the all-iterP reference pipeline
+├── bench*.sh                   # measurement drivers (see the performance section)
 ├── Main.lean                   # lake exe verifiedLL1Demo
 ├── Axioms.lean                 # axiom audit
 └── README.md
@@ -498,6 +513,100 @@ criterion: if `B ≠ start` and no right-hand side mentions `B`, then `B` occurs
 | `follow_eof_iff` | `eof ∈ FOLLOW(A)` iff `A` can be followed by an erasable suffix |
 | `occurs_stable`, `follow_stable` | the iterations are stable at their bounds |
 
+## Phase 4.0b / 4.0c — the memoized fixed-point backend, measured rather than promised
+
+`Memo.lean` adds a second implementation of the approximants: a `List Bool` aligned with a
+carrier list, a strict continuation-based tabulation worker that matches every produced
+`Bool` before accumulating it (so the kernel must materialise the list rather than leave a
+lazy `List.map` chain), a fuel-bounded forward loop that stops **exactly** when two
+consecutive bit lists are equal, and `iterMemo` for predicate-style lookup:
+
+```lean
+def lookup [BEq α] (carrier : List α) (bits : List Bool) (x : α) : Bool :=
+  bits.getD (carrier.idxOf x) false
+
+theorem iterMemo_eq_iterP [BEq α] [LawfulBEq α] (carrier : List α)
+    (P : (α → Bool) → α → Bool) (hall : ∀ x, x ∈ carrier) (n : Nat) (x : α) :
+    iterMemo carrier P n x = Fixpoint.iterP P n x
+```
+
+The bridge needs **no monotonicity hypothesis**: exhaustiveness of the carrier turns an
+equality of bit lists into an equality of the two approximants *everywhere*, which is exactly
+what justifies the early stop.  `MemoTest.lean` validates the backend against `iterP` at zero
+rounds, at an immediate fixed point, over carriers **with duplicates** (`FiniteEnum` promises
+exhaustiveness, not duplicate-freeness — `Fixpoint.lean`'s module comment claimed otherwise,
+and repeated keys really do receive identical tabulated values), over a nullable-style chain,
+and against a deliberately **nonmonotone** toggling transformer; it also exhibits a
+transformer for which `hall` is genuinely needed, so the hypothesis is not decoration.
+`MemoAnalyses.lean` states the memoized form of NULLABLE, REACH, FIRST, FOLLOW and the
+left-corner closure, each with a one-line bridge to the `iterP` approximant the semantic
+proofs are written against — so no analysis proof had to be re-done.
+
+### Where the memoized backend wins, and where it does not
+
+Times are wall-clock seconds for `lake env lean` on a file whose only content is
+`example : <statement> := by decide` — i.e. `decide`'s evaluation *plus* the kernel check of
+the declaration — with a 60 s limit per measurement.  `./bench5.sh` and `./bench6.sh`
+reproduce them; `Bench/Ref.lean` re-states the all-`iterP` pipeline and proves it equal to
+the shipped one, so both are measured inside one build.
+
+| grammar | check | all-`iterP` | shipped (memoized FOLLOW + lcReach) | speed-up |
+|---|---|---|---|---|
+| Toy | `ll1Check` | 0.35 | 0.30 | 1.2× |
+| `Examples/Circuits` | `ll1Check` | 1.93 | **1.07** | **1.8×** |
+| `Examples/QCircuits` | `ll1Check` | 2.43 | **1.23** | **2.0×** |
+| scaled circuit, k=8 | `ll1Check` | 10.13 | **3.02** | **3.4×** |
+| scaled circuit, k=12 | `ll1Check` | 22.24 | **5.13** | **4.3×** |
+| scaled circuit, k=16 | `ll1Check` | 35.08 | **7.14** | **4.9×** |
+| scaled circuit, k=16 | `noLeftRecursion` | 1.60 | **0.52** | **3.1×** |
+
+The scaled circuit family (`Bench/Circ.lean`) is the QCircuits grammar with k qubit tokens
+instead of two: the nonterminal alphabet stays at 8 while the lookahead alphabet grows, so the
+FOLLOW carrier has 8·(k+2) pairs and the FIRST carrier (2k+13)·2.  The improvement grows with
+the size of the grammar, which is the acceptance target: at the largest size where both
+implementations finish, the shipped code is about 5× faster.
+
+The specified growing family (`Bench/Grow.lean`: `A0 -> eps`, `A(i+1) -> Ai Ai`, started at the
+deepest nonterminal so every nonterminal is reachable) shows **no** improvement, and it is worth
+recording why:
+
+| depth | `nullable` | `ll1Check` (all-`iterP`) | `ll1Check` (shipped) |
+|---|---|---|---|
+| 8 | 0.24 | 0.62 | 0.83 |
+| 12 | 0.29 | 1.44 | 1.86 |
+| 16 | 0.29 | 3.49 | 4.00 |
+
+Tabulating a whole carrier every round pays only when the approximant is re-queried at nearly
+every carrier point.  The kernel's whnf cache already shares the closed terms `iterP P k`, so a
+demand-driven chain is cheap when few carrier points are visited — and in the growing family
+the FOLLOW transformer is both small and sparsely queried, so the tabulation costs a little
+more than it saves.  Memoizing *everything* is worse still: on the growing family at depth 16
+the fully memoized pipeline takes 4.11 s against 3.52 s, a single FOLLOW query 3.78 s against
+0.29 s, and QCircuits' FIRST over all 120 symbol/lookahead pairs went from 0.41 s to 2.82 s.
+The shipped configuration therefore memoizes the two loops that measurably benefit (FOLLOW and
+the left-corner closure) and keeps the memoized forms of NULLABLE, REACH and FIRST as
+proved-equal API.  The previous README claim that a list-fold iteration would make the `decide`
+proofs *near-instant* was wrong; the numbers above replace it.  Reproduce with `./bench5.sh`,
+`./bench6.sh`, `./bench7.sh`.
+
+### Theorem inventory (Phase 4.0b / 4.0c)
+
+```text
+Memo.lookup_map               exhaustive carrier => lookup of a tabulated function
+Memo.tabulate_map             the strict CPS worker equals carrier.map f (accumulator invariant)
+Memo.step_map                 one round = carrier.map (P (lookup carrier bits))
+Memo.eq_of_map_beq            bit-list equality => pointwise equality (needs hall)
+Memo.loop_map                 loop refinement from an arbitrary carrier.map f (no monotonicity)
+Memo.iterBits_eq_map_iterP    the bit list is the n-th approximant, bit for bit
+Memo.iterMemo_eq_iterP        the predicate lookup is Fixpoint.iterP P n
+Memo.iterMemo_closed / _stable / _increasing   closure and termination transferred from iterP
+Grammar.follow_eq_iterP       the shipped FOLLOW is the iterP approximant
+Grammar.nullable_eq_iterMemo  the four bridges for the analyses kept on iterP
+Grammar.occurs_eq_iterMemo
+Grammar.first_eq_iterMemo
+Grammar.lcReach_eq_iterMemo
+```
+
 ## Phase 5 — the LL(1) parser generator
 
 ### `Generator.lean`
@@ -553,6 +662,12 @@ criterion: if `B ≠ start` and no right-hand side mentions `B`, then `B` occurs
   decidable hypotheses above; `FiniteEnum` instances for both alphabets; and the
   reachability hypothesis inside `Table.Adequate`/`Complete` (see Phase 2).
 
+> **Update (Phase 5.1).**  `Grammar.generated_language_iff_ll1` derives the same
+> end-to-end characterisation from `ll1Check` **alone**: exact-tree completeness makes the
+> supplied parse tree the parser's output, so the no-left-recursion hypothesis is not
+> needed for acceptance at *some* fuel.  Phase 5.2 then proves that for a reduced grammar
+> the left-recursion check could not have failed anyway.
+
 ### Worked instances
 
 * `Examples/Toy.lean`: `toy_ll1` and `toy_no_left_recursion` are discharged by `decide`;
@@ -587,18 +702,149 @@ criterion: if `B ≠ start` and no right-hand side mentions `B`, then `B` occurs
 | `generated_language_iff` | **end-to-end**: LL(1) + no left recursion ⟹ accepts exactly the language |
 | `generated_accepts_tree` | the accepted tree is valid and yields the whole input |
 
+## Phase 5.1 — exact-tree completeness, unambiguity, and the LL(1)-only end-to-end theorem
+
+Phase 3's completeness theorem (`complete_of_match`) proves the parser returns *a* forest
+with the right yield; it may replace the tree it was given.  Phase 5's end-to-end theorem
+therefore needed *two* decidable hypotheses, `ll1Check` and `noLeftRecursion`, the second
+one only to make the parser terminate.  `Generator.lean` now proves the stronger statement,
+and everything below follows from it.
+
+* `Grammar.genTable_get_of_select` — the lookup fact `genTable_complete` proved
+  existentially, made exact: if `x` selects `A -> rhs` then `G.genTable.get A x = some rhs`.
+* **`Grammar.generated_parseForest_of_match`** (the central proof) — if `MatchList G syms ts`
+  and `syms ++ toks rest` is reachable, then for some fuel the generated parser returns
+  **exactly `ts`** and consumes exactly `yieldForest ts`.  The proof is an induction on the
+  matching forest itself: the finite tree *is* the termination argument, so no grammar rank,
+  no `Progressing` hypothesis and no left-recursion check are needed.  At a nonterminal the
+  matching proof names the production that was used, `select_of_derives` says the remaining
+  input selects it, `genTable_get_of_select` forces the table to offer it, and the two
+  induction hypotheses are combined at the maximum of their fuels.
+* `Grammar.generated_parse_tree` — the one-tree form: every valid tree rooted at `G.start`
+  is an output of the generated parser on its own yield.
+* `parseForest_success_unique` / `parse_success_unique` — two successful parses of the same
+  input agree on the forest *and* on the remaining input, whatever their fuel values (lift
+  both to `max f₁ f₂` with `parseForest_mono` and use constructor injectivity).
+* **`Grammar.parseTree_unique`** — *grammar unambiguity*: two valid parse trees with the
+  start symbol at the root and the same yield are identical.  The start-root hypothesis is
+  real, not decoration: an unreachable nonterminal can have two different nullable trees
+  with the same empty yield without creating any `SELECT` conflict, because `FOLLOW` is
+  empty there.
+* **`Grammar.generated_language_iff_ll1`** — the end-to-end characterisation from the LL(1)
+  condition **alone**: `G.language ws ↔ ∃ fuel t, parse G G.genTable fuel (ltoks ws ++ [eof])
+  = ok t [eof]`.  The two-hypothesis theorem `generated_language_iff` is kept (it additionally
+  bounds the fuel through the left-corner rank); the new one needs only `ll1Check`.
+
+### Theorem inventory (Phase 5.1)
+
+```text
+Grammar.reachable_append          Reachable (xs ++ ys) -> Derives ys ys' -> Reachable (xs ++ ys')
+parseForest_success_unique        two successes => same forest, same remainder
+parse_success_unique              two top-level successes => same tree
+Grammar.genTable_get_of_select    Select A rhs x -> genTable.get A x = some rhs
+Grammar.generated_parseForest_of_match   MatchList G syms ts => parser returns ts exactly
+Grammar.generated_parse_tree      Valid G t -> root t = start => parser returns t
+Grammar.parseTree_unique          unambiguity of an LL(1) grammar at its start symbol
+Grammar.generated_language_iff_ll1  language = accepted, from ll1Check alone
+```
+
+## Phase 5.2 — LL(1) plus reduced implies no left recursion
+
+`LeftRec.lean` proves the classical theorem that the textbook argument only sketches:
+
+```lean
+theorem Grammar.noLeftRecursion_of_ll1 (G : Grammar T N)
+    [DecidableEq T] [DecidableEq N] [FiniteEnum T] [FiniteEnum N]
+    (hred : G.Reduced) (hall : G.Ll1) : G.noLeftRecursion = true
+```
+
+with the structural hypotheses stated exactly:
+
+```lean
+def Grammar.Productive (G : Grammar T N) (A : N) : Prop := ∃ ws, Derives G [Sym.var A] (toks ws)
+def Grammar.Reduced (G : Grammar T N) : Prop :=
+  (∀ A, G.hasProduction A → G.Occurs A) ∧ (∀ A, G.Occurs A → G.Productive A)
+```
+
+`Reduced` allows unused alphabet constructors (the Toy grammar's unused variable is legal)
+while requiring every *occurring* nonterminal — including one mentioned only on a
+right-hand side — to generate some terminal word.
+
+**Why the naive proof fails.**  The textbook ranks a left corner `A =>+ B gamma` by `FIRST`
+and claims the rank drops.  It need not: a nullable edge whose tail also erases keeps every
+lookahead of `A` available at `B`, so no strict decrease exists in general.  Instead the
+proof *counts head expansions*:
+
+* `HeadSteps G xs ys k` — `ys` is obtained from `xs` by expanding the *head* nonterminal
+  exactly `k` times; the continuation is never touched.
+* `AtLookahead x ys` — the form `ys` really stops at lookahead `x`: its head is the token
+  `x`, or `ys = []` and `x = eof`.
+* `Grammar.select_of_first` — the bridge lemma `select_of_derives` generalised from a
+  terminal word to an arbitrary lookahead, via `FirstList.append_decomp` and
+  `derives_nil_append`.
+* **`headSteps_stop_length_unique`** — along a *reachable* form, the number of head
+  expansions needed to reach a stopping position is unique.  This is the LL(1) property
+  transported through `select_of_first`.  Productivity (the second half of `Reduced`) is
+  what makes a stopping position a *lookahead* position at all: the tail of the form a
+  trace stops in has to erase down to terminals, otherwise `FIRST` says nothing about it.
+* `headSteps_of_match`, `headSteps_of_leftCorner`, `headSteps_of_lcReach` — the witnesses:
+  a matching forest stops somewhere, a left corner is a positive-count trace, and a
+  left-corner cycle composes into `HeadSteps G [var A] (var A :: delta) j` with `0 < j`.
+* `Grammar.noLeftRecursion_aux` — the contradiction.  Iterating the cycle gives reachable
+  forms `A delta^n post` with unique stopping lengths `c_n = j + c_(n+1)`, and the yield
+  chosen for `A` makes the stopping lookahead independent of `n`; hence `c_0 >= n*j` for
+  every `n`, instantiated at `n := c_0 + 1`.
+
+**The hypotheses are necessary**, and `Examples/LeftRecChecks.lean` makes that a theorem
+rather than a remark:
+
+* `LeftRecUnreachable`: `S -> s`, `U -> U`, `U -> eps`.  `ll1Check = true` (by `decide`) but
+  `noLeftRecursion = false`, because `U` never occurs, so `FOLLOW(U)` is empty and neither
+  `U` production is selected by anything.  Here `Reduced.1` fails.
+* `LeftRecUnproductive`: `S -> S`.  Again `ll1Check = true`, `noLeftRecursion = false`;
+  `S` occurs (it is the start symbol) but derives no terminal word.  Here `Reduced.2` fails.
+* `ToyReduced`: the Toy grammar is proved `Reduced`, and its `noLeftRecursion = true` is
+  then *derived from* `Ll1` by the new theorem (agreeing with the existing `decide` proof).
+
+**Every shape of cycle is detected.**  `Examples/LeftRecCases.lean` checks the classical cases
+by `decide`: direct (`S -> S a | a`), indirect (`S -> A`, `A -> S x | z`), and reachable
+epsilon-only (`S -> U`, `U -> U | eps`) each give `noLeftRecursion = false` *and* — exactly as
+the theorem forces for a reduced grammar — `ll1Check = false`.  The nullable-prefix case
+(`S -> E B`, `E -> eps`, `B -> S`) is the instructive one: `noLeftRecursion = false` but
+`ll1Check = true`, because no token is ever produced, so nothing is selected and nothing
+conflicts; what fails is productivity, precisely the hypothesis `Reduced.2` supplies.
+
+### Theorem inventory (Phase 5.2)
+
+```text
+Grammar.Productive / Grammar.Reduced       the structural hypotheses
+Grammar.derives_toks_of_reachable          Reduced + Reachable xs => xs derives a terminal word
+HeadSteps.derives / .append_right / .trans the trace API
+Grammar.select_of_first                    FirstList (rhs ++ cont) x -> Select A rhs x
+Grammar.FirstList.of_atLookahead           Reduced + Reachable + AtLookahead -> FirstList
+headSteps_stop_length_unique               the determinism core (Ll1 + Reduced)
+headSteps_of_match / of_leftCorner / of_lcReach   the three witness lemmas
+Grammar.noLeftRecursion_aux                a cycle contradicts uniqueness
+Grammar.noLeftRecursion_of_ll1             the theorem
+Grammar.noLeftRecursion_of_ll1Check        the decidable-check form
+```
+
 ## Limitations and next steps
 
 * `Table.Correct` is *not* proved equivalent to "the table was generated": the generator
   produces *a* correct table, and `Examples/Continuation.lean` shows no table can satisfy
   the unrestricted variant of `Complete`.
-* `ll1Check G = true` does not by itself imply `noLeftRecursion G = true`; the end-to-end
-  theorem therefore takes both.  (For grammars in which every nonterminal is reachable and
-  productive the classical argument derives the second from the first; formalising that is
-  future work.)
-* The `decide` proofs of `circ_ll1` / `circ_no_left_recursion` cost seconds of kernel time
-  because `Fixpoint.iterP` does not memoise; a list-fold iteration would make them
-  near-instant.  This is a performance issue, not a soundness one.
+* `ll1Check G = true` does not by itself imply `noLeftRecursion G = true` *for an arbitrary
+  grammar* - and Phase 5.2 proves it cannot: `Examples/LeftRecChecks.lean` exhibits grammars
+  that pass the conflict check and fail the left-recursion check.  What *is* proved
+  (`Grammar.noLeftRecursion_of_ll1`) is the classical statement: for a **reduced** grammar
+  (every nonterminal with a production occurs, every occurring nonterminal is productive)
+  LL(1) implies no left recursion, so for grammars that are reduced the two hypotheses of
+  `generated_language_iff` collapse into one - and `generated_language_iff_ll1` shows the
+  end-to-end theorem only ever needed LL(1) in the first place.
+* The `decide` proofs of `circ_ll1` / `qc_ll1` cost seconds of kernel time.  Phase 4.0b
+  memoises the analysis that dominates that cost (see the performance section below); the
+  remaining cost is the size of the finite computation, not a soundness issue.
 ## Phase 6 — the quantum circuit language
 
 Two grammars, one with token kinds and one with qubit *payloads*.
@@ -631,6 +877,22 @@ table — no hand-written table is needed.
   `printProg p`, and extracts back to `p`.
 * `language_printProg p : Q.language (printProg p)` — printing produces a word of the
   language, hence (Phase 5) the generated parser accepts it.
+* **Canonical-tree inversion**: `valid_qubit_canonical`, `valid_instr_canonical`,
+  `valid_instrs_canonical`, `valid_prog_canonical` — a *valid* tree of this grammar is the
+  canonical tree of a unique program, proved by inverting the productions (the two qubit
+  productions force the two qubit trees; the gate productions force keyword, payload and
+  terminator children; `instrs` recurses through the matching forest, whose induction
+  hypothesis already covers the smaller `instrs` child).  No parser is involved.
+* **Extraction of parser output**: `progOfTree_total` (the extractor is total on valid
+  program trees), `printProg_toAST` (printing what it extracted gives back the yield of the
+  tree), `parse_printProg` (the *generated parser* returns `progTree p` on `printProg p`),
+  `progOfTree_of_parse_success` (**any** successful fuel returns a tree extracting to `p`)
+  and `parse_output_canonical` (every accepted tree is canonical *and* extracts to the
+  printed program).  These rest on exact-tree completeness and output uniqueness, not on the
+  left-recursion ranking.
+* **Validation**: `round_trip_empty`, `round_trip_all_forms` (every instruction form and
+  every qubit combination in one mixed sequence), and `parse_hq1_fuel20` /
+  `parse_hcx_fuel60` — concrete parses checked by `rfl` at explicit fuel values.
 * **`round_trip`**: for every program `p`, `progOfTree (progTree p) = some p`,
   `yield (progTree p) = printProg p`, and *the generated parser accepts the printed
   program* with a valid tree whose yield is exactly `printProg p` — i.e. print → parse →
@@ -641,21 +903,24 @@ table — no hand-written table is needed.
 
 ### What is *not* claimed
 
-* The extractor is proved to invert the *canonical* tree builder.  Proving that it is also
-  total on an *arbitrary* parser output tree (i.e. that every valid `prog` tree is the
-  canonical tree of the program it yields) needs a per-nonterminal shape analysis of valid
-  trees; the grammar makes that analysis finite (each nonterminal's right-hand sides are
-  enumerated by `decide`), and the pieces are straightforward but were not needed for
-  `round_trip`, so they are left as the natural next lemma.
+* Nothing is left unclaimed here any more: the extractor was previously proved to invert the
+  *canonical* tree builder only, and is now also proved total on an arbitrary valid tree
+  (`progOfTree_total`) and correct on *parser output* (`parse_output_canonical`,
+  `progOfTree_of_parse_success`).  The per-nonterminal shape analysis the old note deferred
+  is `valid_qubit_canonical` / `valid_*gate_canonical` / `valid_instr_canonical` /
+  `valid_instrs_canonical` / `valid_prog_canonical`.
 * Qubit identifiers are enumerated (`q0`, `q1`) rather than arbitrary numerals: a numeral
   payload would need the parser to match a *class* of tokens, which the Phase 2 parser
   deliberately does not do (it compares terminals for equality).
 
 ## Remaining work
 
-* Prove the extraction-totality lemma sketched above, and (with it) the uniqueness of
-  parse trees for generated tables.
-* Derive `noLeftRecursion` from `Ll1` for reachable, productive grammars, collapsing the
-  two hypotheses of the end-to-end theorem into one.
-* Memoise `Fixpoint.iterP` (iterate a list of booleans instead of a predicate) to make the
-  `decide` proofs on larger grammars fast.
+* Pre-index the production list (currently a linear scan inside every `selectTest`), give
+  FIRST a carrier of only the symbol/lookahead pairs the grammar can reach, and cache the
+  left-corner rows per source: all three are representation changes that the measurements
+  say are worth doing, and none of them affects a proof.
+* `generated_language_iff_ll1` is existential in the fuel.  The rank-based infrastructure
+  bounds the fuel; a direct bound from the size of the supplied tree would make the
+  *executable* parser total without a fuel argument.
+* Extend the DSL: numeral qubit identifiers would need the parser to match a *class* of
+  tokens, which the Phase 2 parser deliberately does not do.

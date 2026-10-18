@@ -1,0 +1,9 @@
+nullable_2                 0.26
+nullable_4                 0.26
+nullable_8                 0.26
+follow_2                   0.32
+follow_4                   0.31
+follow_8                   0.31
+ll1check_2                 2.80
+ll1check_4                 4.81
+ll1check_8                11.33

@@ -16,11 +16,17 @@ import VerifiedLL1.First
 import VerifiedLL1.Reach
 import VerifiedLL1.Follow
 import VerifiedLL1.Generator
+import VerifiedLL1.LeftRec
+import VerifiedLL1.Memo
+import VerifiedLL1.MemoAnalyses
+import VerifiedLL1.MemoTest
 import VerifiedLL1.Examples.Toy
 import VerifiedLL1.Examples.Circuits
 import VerifiedLL1.Examples.Loop
 import VerifiedLL1.Examples.Continuation
 import VerifiedLL1.Examples.QCircuits
+import VerifiedLL1.Examples.LeftRecChecks
+import VerifiedLL1.Examples.LeftRecCases
 
 /-!
 # A formally verified LL(1) parser generator in Lean 4
@@ -39,6 +45,9 @@ import VerifiedLL1.Examples.QCircuits
 * `VerifiedLL1.Reach`        - REACH: which nonterminals occur in a sentential form
 * `VerifiedLL1.Follow`       - FOLLOW: specification, computation, soundness, completeness
 * `VerifiedLL1.Generator`    - SELECT, the LL(1) check, table generation, correctness
+* `VerifiedLL1.LeftRec`      - LL(1) + reduced => no left recursion (counted head traces)
+* `VerifiedLL1.Memo`         - memoized Boolean-list backend for the fixed-point approximants
+* `VerifiedLL1.MemoTest`     - validation of the memoized backend against `Fixpoint.iterP`
 * `VerifiedLL1.Examples.Loop` - a correct table that loops: why progress is needed
 * `VerifiedLL1.Examples.Continuation` - why table correctness needs reachability
 * `VerifiedLL1.Examples.QCircuits` - the circuit DSL with qubit payloads, an AST, a printer

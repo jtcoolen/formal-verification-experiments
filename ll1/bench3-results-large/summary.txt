@@ -1,0 +1,4 @@
+ref_ll1check_12             22.24
+fol_ll1check_12              5.13
+ref_ll1check_16             40.26
+fol_ll1check_16              7.63

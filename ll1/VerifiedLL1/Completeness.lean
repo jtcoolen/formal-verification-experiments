@@ -233,6 +233,29 @@ theorem parseForest_mono (h : parseForest M fuel syms input = PRes.ok ts rest)
     (hle : fuel ≤ fuel') : parseForest M fuel' syms input = PRes.ok ts rest :=
   (monotone fuel).2 fuel' syms input ts rest h hle
 
+/-- **Successful outputs are unique across fuel values.**  Two successes of the same parser
+on the same input and symbol list agree on both the forest and the remaining input: lift
+both to the maximum fuel with `parseForest_mono` and compare the results. -/
+theorem parseForest_success_unique {f₁ f₂ : Nat} {syms : List (Sym T N)}
+    {input r₁ r₂ : List (LTok T)} {ts₁ ts₂ : List (Tree T N)}
+    (h₁ : parseForest M f₁ syms input = PRes.ok ts₁ r₁)
+    (h₂ : parseForest M f₂ syms input = PRes.ok ts₂ r₂) :
+    ts₁ = ts₂ ∧ r₁ = r₂ := by
+  have h₁' := parseForest_mono h₁ (Nat.le_max_left f₁ f₂)
+  have h₂' := parseForest_mono h₂ (Nat.le_max_right f₁ f₂)
+  obtain ⟨h1, h2⟩ := PRes.ok.inj (h₁'.symm.trans h₂')
+  exact ⟨h1, h2⟩
+
+/-- **Top-level uniqueness across fuel values.**  Whatever successful fuel the parser is
+given, the accepted tree is the same one. -/
+theorem parse_success_unique {f₁ f₂ : Nat} {input : List (LTok T)}
+    {t₁ t₂ : Tree T N} (h₁ : Parser.parse G M f₁ input = PRes.ok t₁ [LTok.eof])
+    (h₂ : Parser.parse G M f₂ input = PRes.ok t₂ [LTok.eof]) : t₁ = t₂ := by
+  obtain ⟨h1, _⟩ := parse_ok h₁
+  obtain ⟨h2, _⟩ := parse_ok h₂
+  obtain ⟨h, _⟩ := parseForest_success_unique h1 h2
+  exact (List.cons.inj h).1
+
 end Monotone
 
 section Completeness

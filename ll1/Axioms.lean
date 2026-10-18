@@ -154,6 +154,99 @@ axiom appearing below is a bug.
 #print axioms VerifiedLL1.Examples.QCircuits.accepts_hq1
 #print axioms VerifiedLL1.Examples.QCircuits.accepts_hcx
 
+
+-- Phase 5 addendum: exact-tree completeness, unambiguity, the Ll1-only language theorem
+#print axioms VerifiedLL1.Grammar.reachable_append
+#print axioms VerifiedLL1.parseForest_success_unique
+#print axioms VerifiedLL1.parse_success_unique
+#print axioms VerifiedLL1.Grammar.genTable_get_of_select
+#print axioms VerifiedLL1.Grammar.generated_parseForest_of_match
+#print axioms VerifiedLL1.Grammar.generated_parse_tree
+#print axioms VerifiedLL1.Grammar.parseTree_unique
+#print axioms VerifiedLL1.Grammar.generated_language_iff_ll1
+
+-- Phase 5.2: LL(1) + reduced => no left recursion
+#print axioms VerifiedLL1.Grammar.Productive
+#print axioms VerifiedLL1.Grammar.Reduced
+#print axioms VerifiedLL1.Grammar.derives_toks_of_reachable
+#print axioms VerifiedLL1.HeadSteps.derives
+#print axioms VerifiedLL1.HeadSteps.trans
+#print axioms VerifiedLL1.Grammar.select_of_first
+#print axioms VerifiedLL1.Grammar.FirstList.of_atLookahead
+#print axioms VerifiedLL1.headSteps_stop_length_unique
+#print axioms VerifiedLL1.headSteps_of_match
+#print axioms VerifiedLL1.headSteps_of_leftCorner
+#print axioms VerifiedLL1.headSteps_of_lcReach
+#print axioms VerifiedLL1.Grammar.noLeftRecursion_aux
+#print axioms VerifiedLL1.Grammar.noLeftRecursion_of_ll1
+#print axioms VerifiedLL1.Grammar.noLeftRecursion_of_ll1Check
+
+-- Phase 5.2: why the structural hypotheses are needed, and one real instantiation
+#print axioms VerifiedLL1.Examples.LeftRecUnreachable.ll1
+#print axioms VerifiedLL1.Examples.LeftRecUnreachable.leftrec
+#print axioms VerifiedLL1.Examples.LeftRecUnreachable.not_reduced
+#print axioms VerifiedLL1.Examples.LeftRecUnproductive.ll1
+#print axioms VerifiedLL1.Examples.LeftRecUnproductive.leftrec
+#print axioms VerifiedLL1.Examples.LeftRecUnproductive.not_reduced
+#print axioms VerifiedLL1.Examples.ToyReduced.toy_reduced
+#print axioms VerifiedLL1.Examples.ToyReduced.toy_no_left_recursion_from_ll1
+
+-- Phase 5.2: every shape of left-cycle is detected
+#print axioms VerifiedLL1.Examples.DirectLR.direct_lr
+#print axioms VerifiedLL1.Examples.DirectLR.direct_not_ll1
+#print axioms VerifiedLL1.Examples.IndirectLR.indirect_lr
+#print axioms VerifiedLL1.Examples.IndirectLR.indirect_not_ll1
+#print axioms VerifiedLL1.Examples.EpsCycleLR.eps_lr
+#print axioms VerifiedLL1.Examples.EpsCycleLR.eps_not_ll1
+#print axioms VerifiedLL1.Examples.NullPrefixLR.np_lr
+#print axioms VerifiedLL1.Examples.NullPrefixLR.np_ll1
+
+-- Phase 4.0b: the memoized Boolean-list backend
+#print axioms VerifiedLL1.Memo.lookup_map
+#print axioms VerifiedLL1.Memo.tabulate_map
+#print axioms VerifiedLL1.Memo.step_map
+#print axioms VerifiedLL1.Memo.eq_of_map_beq
+#print axioms VerifiedLL1.Memo.loop_map
+#print axioms VerifiedLL1.Memo.iterBits_eq_map_iterP
+#print axioms VerifiedLL1.Memo.iterMemo_eq_iterP
+#print axioms VerifiedLL1.Memo.iterMemo_closed
+#print axioms VerifiedLL1.Memo.iterMemo_stable
+#print axioms VerifiedLL1.MemoTest.nullable_eq_iterMemo
+#print axioms VerifiedLL1.MemoTest.occurs_eq_iterMemo
+#print axioms VerifiedLL1.MemoTest.first_eq_iterMemo
+#print axioms VerifiedLL1.MemoTest.follow_eq_iterMemo
+#print axioms VerifiedLL1.MemoTest.qll1Check_eq
+#print axioms VerifiedLL1.MemoTest.qll1Check_true
+
+-- Phase 4.0c: the bridges tying each analysis to the memoized backend
+#print axioms VerifiedLL1.Grammar.follow_eq_iterP
+#print axioms VerifiedLL1.Grammar.follow_fun_eq
+#print axioms VerifiedLL1.Grammar.nullable_eq_iterMemo
+#print axioms VerifiedLL1.Grammar.occurs_eq_iterMemo
+#print axioms VerifiedLL1.Grammar.first_eq_iterMemo
+#print axioms VerifiedLL1.Grammar.lcReach_eq_iterP
+#print axioms VerifiedLL1.Grammar.lcReach_fun_eq
+
+-- Phase 6 addendum: canonical-tree inversion and extraction of parser output
+#print axioms VerifiedLL1.Examples.QCircuits.match_tok_inv
+#print axioms VerifiedLL1.Examples.QCircuits.match_var_inv
+#print axioms VerifiedLL1.Examples.QCircuits.valid_qubit_canonical
+#print axioms VerifiedLL1.Examples.QCircuits.valid_instr_canonical
+#print axioms VerifiedLL1.Examples.QCircuits.valid_instrs_canonical
+#print axioms VerifiedLL1.Examples.QCircuits.valid_prog_canonical
+#print axioms VerifiedLL1.Examples.QCircuits.progOfTree_total
+#print axioms VerifiedLL1.Examples.QCircuits.printProg_toAST
+#print axioms VerifiedLL1.Examples.QCircuits.parse_printProg
+#print axioms VerifiedLL1.Examples.QCircuits.progOfTree_of_parse_success
+#print axioms VerifiedLL1.Examples.QCircuits.round_trip_extract
+#print axioms VerifiedLL1.Examples.QCircuits.round_trip_empty
+#print axioms VerifiedLL1.Examples.QCircuits.round_trip_all_forms
+#print axioms VerifiedLL1.Examples.QCircuits.parse_hq1_fuel20
+#print axioms VerifiedLL1.Examples.QCircuits.parse_hcx_fuel60
+#print axioms VerifiedLL1.Examples.QCircuits.parse_output_canonical
+#print axioms VerifiedLL1.Examples.QCircuits.unique_empty_tree
+#print axioms VerifiedLL1.Examples.QCircuits.same_tree_at_any_fuel
+
 def main : IO Unit := do
   IO.println "The axiom audit above is produced when this module is built."
   IO.println "Re-run it with:  lake env lean Axioms.lean"

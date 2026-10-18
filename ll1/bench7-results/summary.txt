@@ -1,0 +1,6 @@
+lc4_iterp                      0.79
+lc4_memo                       0.40
+lc8_iterp                      0.95
+lc8_memo                       0.41
+lc16_iterp                     1.60
+lc16_memo                      0.52
