@@ -27,6 +27,7 @@ lake env lean Axioms.lean # prints the axiom dependencies of every main theorem
 | 5.3 | LL(1) => no **reachable selected** left-corner cycle (lookahead-indexed, Vermillion-style), with the unreachable counterexample | **done** |
 | 5.4 | checked generation: a table *or* a named conflicting pair of productions | **done** |
 | 5.5 | the classical LL(1) characterization for reduced grammars (`ll1Check = true <-> ClassicalLL1`) | **done** |
+| 5.6 | parser execution invariants: reachable context, suffix preservation, non-consuming descent is a selected edge | **done** |
 | 6 | Quantum circuit DSL as a worked instance | **done**: token-kind grammar + hand table, payload grammar + generated table, AST, printer, canonical-tree inversion, parser-extractor round trip |
 
 ## Layout
@@ -53,6 +54,7 @@ ll1/
 │   ├── SelectedLC.lean       # LL(1) => no reachable selected left-corner cycle (Phase 5.3)
 │   ├── Generate.lean         # checked generation: table or named conflict (Phase 5.4)
 │   ├── Classical.lean        # the classical LL(1) characterization (Phase 5.5)
+│   ├── Exec.lean             # parser execution invariants (Phase 5.6)
 │   ├── LeftRec.lean            # LL(1) + reduced => no left recursion (head-step counting)
 │   ├── Memo.lean               # memoized Boolean-list backend for the fixed points
 │   ├── MemoTest.lean           # validation of the memoized backend against Fixpoint.iterP
@@ -971,6 +973,46 @@ leftDerives_head_of_derives              occurrence -> leftmost configuration + 
 classical_word_first / classical_word_erased  the two witness completions
 Grammar.ll1Check_iff_classicalLL1        the characterization
 Examples.ToyReduced.toy_classicalLL1     derived for the toy grammar
+```
+
+## Phase 5.6 - parser execution invariants (`Exec.lean`)
+
+The operational theorem has two halves.  This module proves the first: the invariants every
+recursive call of the table-driven parser maintains, for *any* execution, successful or
+not, with no assumption about the fuel.
+
+* **Reachable context** (`parseForest_reachable_suffix`, `reachable_of_table_entry`).  A
+  sibling step takes a suffix of a reachable list (`Grammar.reachable_tail`); an expansion
+  step rewrites a reachable stack top by a production (`Grammar.reachable_of_derives`).  So
+  the parser never asks about a continuation the grammar cannot produce - which is exactly
+  the hypothesis every Phase 2/3 adequacy lemma needs.
+* **Successful subparses leave a suffix** (`parseForest_ok_suffix`, `parseSym_ok_suffix`).
+  The remaining input of a successful subparse is a suffix of the input it was given.  The
+  two statements are proved together by induction on the fuel and use *no* table property:
+  it is a structural fact about the interpreter.
+* **Non-consuming descent is a selected edge** (`selectedLC_of_empty_prefix_parse`).  If the
+  table expands `A` to `alpha B beta` at lookahead `x` and the prefix `alpha` parses
+  successfully *without consuming input* with an empty-yield forest, then `A -> alpha B beta`
+  is a selected left corner at `x`: the lookup gives `Select` (`genTable_entry`), the
+  empty-yield forest gives `Derives alpha []` (`derives_nil_of_match`).
+
+Put together with Phase 5.3, these say: along any parser execution the grammar context
+stays reachable, the input position never moves backwards, and every step that does not
+advance it follows a selected left corner at the current lookahead - and no occurring
+nonterminal lies on such a cycle.  That is the semantic content of termination; turning it
+into a *numeric* recursion-depth bound (and hence an executable `fuelFor`) is the remaining
+operational item, listed under *Remaining work*.
+
+### Theorem inventory (Phase 5.6)
+
+```text
+parseForest_reachable_suffix   sibling steps keep reachability
+reachable_of_table_entry       expansion steps keep reachability
+parse_ok_suffix                mutual fuel induction: successes leave a suffix
+parseForest_ok_suffix / parseSym_ok_suffix   the two halves
+derives_nil_of_match           empty-yield forest -> erasable symbol list
+selectedLC_of_empty_prefix_parse  non-consuming descent -> selected left corner
+selectedLC_of_match_child      the relational form
 ```
 
 ## Limitations and next steps

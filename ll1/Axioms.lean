@@ -227,6 +227,13 @@ axiom appearing below is a bug.
 #print axioms VerifiedLL1.Grammar.ll1Check_iff_classicalLL1
 #print axioms VerifiedLL1.Examples.ToyReduced.toy_classicalLL1
 #print axioms VerifiedLL1.Examples.ToyReduced.toy_selected_acyclic
+-- Phase 5.6: parser execution invariants
+#print axioms VerifiedLL1.parseForest_reachable_suffix
+#print axioms VerifiedLL1.reachable_of_table_entry
+#print axioms VerifiedLL1.parse_ok_suffix
+#print axioms VerifiedLL1.parseForest_ok_suffix
+#print axioms VerifiedLL1.parseSym_ok_suffix
+#print axioms VerifiedLL1.selectedLC_of_empty_prefix_parse
 -- Phase 5.4: checked generation
 #print axioms VerifiedLL1.Grammar.conflictList_eq_nil_iff
 #print axioms VerifiedLL1.Grammar.generate_eq_ok_iff

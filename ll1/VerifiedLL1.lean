@@ -19,6 +19,7 @@ import VerifiedLL1.Generator
 import VerifiedLL1.LeftRec
 import VerifiedLL1.SelectedLC
 import VerifiedLL1.Classical
+import VerifiedLL1.Exec
 import VerifiedLL1.Generate
 import VerifiedLL1.Memo
 import VerifiedLL1.MemoAnalyses
@@ -52,6 +53,7 @@ import VerifiedLL1.Examples.UnreachableSelectedCycle
 * `VerifiedLL1.LeftRec`      - LL(1) + reduced => no left recursion (counted head traces)
 * `VerifiedLL1.SelectedLC`   - LL(1) => no reachable selected left-corner cycle (Phase 5.3)
 * `VerifiedLL1.Classical`    - the classical LL(1) characterization for reduced grammars
+* `VerifiedLL1.Exec`         - parser execution invariants: reachable context, suffix, selected descent
 * `VerifiedLL1.Generate`     - checked generation: a table or a named conflict (Phase 5.4)
 * `VerifiedLL1.Memo`         - memoized Boolean-list backend for the fixed-point approximants
 * `VerifiedLL1.MemoTest`     - validation of the memoized backend against `Fixpoint.iterP`
