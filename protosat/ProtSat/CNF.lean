@@ -642,6 +642,138 @@ theorem atMostOneSeq_correct : ∀ (vs : List BVar) (s : Nat -> BVar) (a : Assig
                   · exact False.elim (bool_ne (hx1 (hqeq ▸ hqa)) (htail0 p hp hpa))
                   · exact hamo p hp q hq hpa hqa
 
+set_option maxHeartbeats 8000000 in
+/-- **The converse direction: the canonical flags satisfy the clauses.**  This is what the
+completeness theorem of specification 8B needs: given the characteristic function of a run,
+the auxiliary flags must be set so that the sequential encoding is satisfied.  The flag of
+position j says "the chosen variable is at or before j"; formally "p, or one of the first
+j+1 variables, is true", where the incoming flag p records that a variable before the
+current list suffix was chosen (p is false at the top level, and the induction passes
+p || a.head to the suffix). -/
+theorem atMostOneSeq_sat_aux :
+    ∀ (vs : List BVar) (s : Nat -> BVar) (a : Assignment) (p : Bool),
+      vs.Nodup ->
+      (∀ x ∈ vs, ∀ y ∈ vs, a x = true -> a y = true -> x = y) ->
+      (p = true -> ∀ z ∈ vs, a z = false) ->
+      (∀ j, j < vs.length ->
+          a (s j) = decide (p || (vs.take (j + 1)).any (fun x => a x = true))) ->
+      ∀ cl ∈ atMostOneSeq vs s, Clause.eval a cl = true := by
+  intro vs
+  induction vs with
+  | nil => intro s a p _ _ _ _ cl hcl; cases hcl
+  | cons x rest ih =>
+      intro s a p hnd hamo hp hflag cl hcl
+      cases rest with
+      | nil => cases hcl
+      | cons y rest' =>
+          have hlen0 : 0 < (x :: y :: rest').length := by simp [List.length_cons]
+          have htake0 : ((x :: y :: rest').take 1).any (fun z => a z = true) = decide (a x = true) := by
+            simp [List.take, List.any_cons, List.any_nil]
+          have h0 : a (s 0) = decide (p || a x = true) := by
+            have h := hflag 0 hlen0
+            rw [htake0] at h
+            exact h
+          have ce_a : Clause.eval a [neg x, pos (s 0)] = (!a x || a (s 0)) := by
+            simp [Clause.eval, List.any_cons, List.any_nil, neg_eval, pos_eval]
+          have ce_b : Clause.eval a [neg y, neg (s 0)] = (!a y || !a (s 0)) := by
+            simp [Clause.eval, List.any_cons, List.any_nil, neg_eval, neg_eval]
+          have hxn : ¬ x ∈ (y :: rest') := (List.nodup_cons.mp hnd).1
+          have hxy_ne : x ≠ y := by
+            intro e
+            exact absurd (e ▸ List.Mem.head _) hxn
+          have hnx_of_y : a y = true -> a x = false := by
+            intro hy
+            cases hax : a x with
+            | true => exact absurd (hamo x (List.Mem.head _) y
+                (List.Mem.tail _ (List.Mem.head _)) hax hy) hxy_ne
+            | false => rfl
+          have hnp_of_y : a y = true -> p = false := by
+            intro hy
+            cases hpx : p with
+            | true => exact absurd (hy.symm.trans (hp hpx y (List.Mem.tail _ (List.Mem.head _)))) (by decide)
+            | false => rfl
+          cases rest' with
+          | nil =>
+              rw [atMostOneSeq_two] at hcl
+              have hsplit : cl = [neg x, pos (s 0)] ∨ cl = [neg y, neg (s 0)] := by
+                simpa [List.mem_cons, List.mem_singleton] using hcl
+              rcases hsplit with h | h
+              · subst h
+                rw [ce_a, h0]
+                cases hax : a x <;> cases hpx : p <;> decide
+              · subst h
+                cases hay : a y with
+                | true => rw [ce_b, h0]; rw [hay, hnp_of_y hay, hnx_of_y hay]; decide
+                | false => rw [ce_b]; rw [hay]; simp
+          | cons w rest'' =>
+              rw [atMostOneSeq_three] at hcl
+              have hsplit : cl = [neg x, pos (s 0)] ∨ cl = [neg y, neg (s 0)] ∨
+                  cl = [neg (s 0), pos (s 1)] ∨
+                    cl ∈ atMostOneSeq (y :: w :: rest'') (fun j => s (j + 1)) := by
+                rw [List.mem_cons, List.mem_cons, List.mem_cons] at hcl
+                exact hcl
+              rcases hsplit with h | h | h | h
+              · subst h
+                rw [ce_a, h0]
+                cases hax : a x <;> cases hpx : p <;> decide
+              · subst h
+                cases hay : a y with
+                | true => rw [ce_b, h0]; rw [hay, hnp_of_y hay, hnx_of_y hay]; decide
+                | false => rw [ce_b]; rw [hay]; simp
+              · subst h
+                have hlen1 : 1 < (x :: y :: w :: rest'').length := by
+                  simp [List.length_cons]
+                have htake1 : ((x :: y :: w :: rest'').take 2).any (fun z => a z = true)
+                    = (decide (a x = true) || decide (a y = true)) := by
+                  simp [List.take, List.any_cons, List.any_nil]
+                have h1 : a (s 1) = decide (p || (decide (a x = true) || decide (a y = true))) := by
+                  have h := hflag 1 hlen1
+                  rw [htake1] at h
+                  exact h
+                have cea : Clause.eval a [neg (s 0), pos (s 1)] = (!a (s 0) || a (s 1)) := by
+                  simp [Clause.eval, List.any_cons, List.any_nil, neg_eval, pos_eval]
+                rw [cea, h0, h1]
+                cases hpx : p <;> cases hax : a x <;> cases hay : a y <;> decide
+              · -- a clause of the suffix
+                refine ih (fun j => s (j + 1)) a (p || a x = true) ?_ ?_ ?_ ?_ cl h
+                · exact hnd.tail
+                · intro u hu v hv hua hva
+                  exact hamo u (List.mem_cons.mpr (Or.inr hu)) v (List.mem_cons.mpr (Or.inr hv))
+                    hua hva
+                · intro hp' z hz
+                  rw [Bool.or_eq_true] at hp'
+                  rcases hp' with hpp | hpx'
+                  · exact hp hpp z (List.mem_cons.mpr (Or.inr hz))
+                  · cases hz2 : a z with
+                    | true =>
+                        have hxn' : ¬ x ∈ (y :: w :: rest'') := (List.nodup_cons.mp hnd).1
+                        have hxeq : x = z := hamo x (List.Mem.head _) z
+                          (List.mem_cons.mpr (Or.inr hz)) (of_decide_eq_true hpx') hz2
+                        exact (hxn' (by rw [hxeq]; exact hz)).elim
+                    | false => rfl
+                · intro j hj
+                  have hlen : j + 1 < (x :: y :: w :: rest'').length := by
+                    simp [List.length_cons] at hj ⊢
+                    omega
+                  have h := hflag (j + 1) hlen
+                  have htake : (x :: y :: w :: rest'').take (j + 2)
+                      = x :: (y :: w :: rest'').take (j + 1) := rfl
+                  rw [htake, List.any_cons] at h
+                  simpa [Bool.or_assoc] using h
+
+/-- The canonical flags of a one-hot group satisfy its sequential encoding: if at most one
+variable of the (duplicate-free) list is true and s j is set to "the chosen variable is at or
+before j", then every clause of atMostOneSeq is satisfied. -/
+theorem atMostOneSeq_sat {vs : List BVar} {s : Nat -> BVar} {a : Assignment}
+    (hnd : vs.Nodup)
+    (hamo : ∀ x ∈ vs, ∀ y ∈ vs, a x = true -> a y = true -> x = y)
+    (hflag : ∀ j, j < vs.length ->
+        a (s j) = decide ((vs.take (j + 1)).any (fun x => a x = true))) :
+    ∀ cl ∈ atMostOneSeq vs s, Clause.eval a cl = true :=
+  atMostOneSeq_sat_aux vs s a false hnd hamo
+    (by intro h z hz; exact absurd h (by simp))
+    (by intro j hj; exact hflag j hj)
+
 /-- **At-most-one** is the consequence the one-hot groups need: no two variables of the list
 are true at the same time. -/
 theorem atMostOneSeq_amo {vs : List BVar} {s : Nat -> BVar} {a : Assignment}
