@@ -258,6 +258,174 @@ theorem parse_success_unique {f₁ f₂ : Nat} {input : List (LTok T)}
 
 end Monotone
 
+section Stability
+
+open Parser
+
+/-- **Fuel stability for every outcome but fuel exhaustion.**  If a (sub)parse at fuel
+\`fuel\` returns anything other than \`PRes.error ParseError.outOfFuel\` — a success *or*
+any syntax error — then every larger fuel returns exactly the same result.  The two
+statements are proved together by induction on the available fuel.
+
+\`monotone\` is the \`PRes.ok\` half of this lemma; the extra half is what lets a
+fuel bound that was proved for successful parses also certify that a *failing* parse
+failed for a real reason rather than for want of fuel. -/
+theorem fuel_stable : ∀ fuel : Nat,
+    (∀ (fuel' : Nat) (s : Sym T N) (input : List (LTok T)), fuel ≤ fuel' →
+        parseSym M fuel s input = PRes.error ParseError.outOfFuel ∨
+          parseSym M fuel' s input = parseSym M fuel s input) ∧
+    (∀ (fuel' : Nat) (syms : List (Sym T N)) (input : List (LTok T)), fuel ≤ fuel' →
+        parseForest M fuel syms input = PRes.error ParseError.outOfFuel ∨
+          parseForest M fuel' syms input = parseForest M fuel syms input) := by
+  intro fuel
+  induction fuel with
+  | zero =>
+      refine ⟨?_, ?_⟩
+      · intro fuel' s input _
+        cases s with
+        | tok a =>
+            exact Or.inr (parseSym_tok_fuel (a := a) (input := input) (f := fuel') (f' := 0))
+        | var A => exact Or.inl rfl
+      · intro fuel' syms input _
+        exact Or.inl rfl
+  | succ fuel ih =>
+      refine ⟨?_, ?_⟩
+      · intro fuel' s input hle
+        cases s with
+        | tok a =>
+            exact Or.inr (parseSym_tok_fuel (a := a) (input := input)
+              (f := fuel') (f' := fuel + 1))
+        | var A =>
+            cases fuel' with
+            | zero => exact absurd hle (by omega)
+            | succ k =>
+                cases input with
+                | nil => exact Or.inr rfl
+                | cons x xs =>
+                    cases hget : M.get A x with
+                    | none =>
+                        right
+                        simp only [parseSym_var, hget]
+                    | some rhs =>
+                        rcases ih.2 k rhs (x :: xs) (by omega) with hf | hf
+                        · left
+                          simp only [parseSym_var, hget, hf]
+                        · right
+                          simp only [parseSym_var, hget, hf]
+      · intro fuel' syms input hle
+        cases syms with
+        | nil =>
+            cases fuel' with
+            | zero => exact absurd hle (by omega)
+            | succ k =>
+                exact Or.inr (parseForest_nil_fuel (input := input) (f := k) (f' := fuel))
+        | cons s ss =>
+            cases fuel' with
+            | zero => exact absurd hle (by omega)
+            | succ k =>
+                have hle' : fuel ≤ k := by omega
+                have lhs : parseForest M (fuel + 1) (s :: ss) input =
+                    pbind (parseSym M fuel s input) fun t rest =>
+                      pbind (parseForest M fuel ss rest) fun ts rest' => PRes.ok (t :: ts) rest' := rfl
+                have rhs : parseForest M (k + 1) (s :: ss) input =
+                    pbind (parseSym M k s input) fun t rest =>
+                      pbind (parseForest M k ss rest) fun ts rest' => PRes.ok (t :: ts) rest' := rfl
+                rcases ih.1 k s input hle' with hs | hs
+                · left
+                  rw [lhs, hs]
+                  rfl
+                · cases h1 : parseSym M fuel s input with
+                  | error e =>
+                      by_cases he : e = ParseError.outOfFuel
+                      · subst he
+                        left
+                        rw [lhs, h1]
+                        rfl
+                      · right
+                        rw [lhs, rhs, hs, h1]
+                        rfl
+                  | ok t rest =>
+                      rcases ih.2 k ss rest hle' with hf | hf
+                      · left
+                        rw [lhs, h1]
+                        show pbind (parseForest M fuel ss rest)
+                          (fun ts rest' => PRes.ok (t :: ts) rest') = PRes.error ParseError.outOfFuel
+                        rw [hf]
+                        rfl
+                      · right
+                        rw [lhs, rhs, hs, h1]
+                        show pbind (parseForest M k ss rest) (fun ts rest' => PRes.ok (t :: ts) rest') =
+                          pbind (parseForest M fuel ss rest) (fun ts rest' => PRes.ok (t :: ts) rest')
+                        rw [hf]
+
+/-- **Stability of a subparse.**  Whatever a `parseForest` returns at fuel `fuel`, as
+long as it is not fuel exhaustion, it returns at every larger fuel. -/
+theorem parseForest_stable {fuel fuel' : Nat} (hle : fuel ≤ fuel') {syms : List (Sym T N)}
+    {input : List (LTok T)} {r : PRes T N (List (Tree T N))}
+    (h : parseForest M fuel syms input = r)
+    (hne : r ≠ PRes.error ParseError.outOfFuel) : parseForest M fuel' syms input = r := by
+  rcases (fuel_stable fuel).2 fuel' syms input hle with hf | hf
+  · exact absurd (h.symm.trans hf) hne
+  · exact hf.trans h
+
+/-- **Stability of a symbol parse.** -/
+theorem parseSym_stable {fuel fuel' : Nat} (hle : fuel ≤ fuel') {s : Sym T N}
+    {input : List (LTok T)} {r : PRes T N (Tree T N)} (h : parseSym M fuel s input = r)
+    (hne : r ≠ PRes.error ParseError.outOfFuel) : parseSym M fuel' s input = r := by
+  rcases (fuel_stable fuel).1 fuel' s input hle with hf | hf
+  · exact absurd (h.symm.trans hf) hne
+  · exact hf.trans h
+
+/-- A genuine syntax error never turns into fuel exhaustion, or into a different error,
+when more fuel is given. -/
+theorem parseForest_error_stable {fuel fuel' : Nat} (hle : fuel ≤ fuel') {syms : List (Sym T N)}
+    {input : List (LTok T)} {e : ParseError T N}
+    (h : parseForest M fuel syms input = PRes.error e) (hne : e ≠ ParseError.outOfFuel) :
+    parseForest M fuel' syms input = PRes.error e :=
+  parseForest_stable hle h (fun hc => hne (PRes.error.inj hc))
+
+/-- The same for a single symbol. -/
+theorem parseSym_error_stable {fuel fuel' : Nat} (hle : fuel ≤ fuel') {s : Sym T N}
+    {input : List (LTok T)} {e : ParseError T N}
+    (h : parseSym M fuel s input = PRes.error e) (hne : e ≠ ParseError.outOfFuel) :
+    parseSym M fuel' s input = PRes.error e :=
+  parseSym_stable hle h (fun hc => hne (PRes.error.inj hc))
+
+/-- **Stability of the top-level parse.**  Acceptance, a syntax error and trailing input
+all survive an increase of fuel; only fuel exhaustion can change. -/
+theorem parse_stable {fuel fuel' : Nat} (hle : fuel ≤ fuel') {input : List (LTok T)}
+    {r : PRes T N (Tree T N)} (h : Parser.parse G M fuel input = r)
+    (hne : r ≠ PRes.error ParseError.outOfFuel) : Parser.parse G M fuel' input = r := by
+  cases hfor : parseForest M fuel [Sym.var G.start] input with
+  | ok ts rest =>
+      have h2 : parseForest M fuel' [Sym.var G.start] input = PRes.ok ts rest :=
+        parseForest_stable hle hfor (fun hc => by cases hc)
+      have h3 : Parser.parse G M fuel' input = Parser.parse G M fuel input := by
+        simp only [Parser.parse, h2, hfor]
+      exact h3.trans h
+  | error e =>
+      by_cases he : e = ParseError.outOfFuel
+      · subst he
+        have : Parser.parse G M fuel input = PRes.error ParseError.outOfFuel := by
+          simp only [Parser.parse, hfor]
+        exact absurd (h.symm.trans this) hne
+      · have h2 : parseForest M fuel' [Sym.var G.start] input = PRes.error e :=
+          parseForest_stable hle hfor (fun hc => he (PRes.error.inj hc))
+        have h3 : Parser.parse G M fuel' input = Parser.parse G M fuel input := by
+          simp only [Parser.parse, h2, hfor]
+        exact h3.trans h
+
+/-- **A decision procedure from a fuel bound.**  If some fuel never runs out, then the
+outcome at that fuel is the outcome at *every* larger fuel: the parse is a function of the
+input alone. -/
+theorem parseForest_eq_of_not_outOfFuel {fuel fuel' : Nat} (hle : fuel ≤ fuel')
+    {syms : List (Sym T N)} {input : List (LTok T)}
+    (h : parseForest M fuel syms input ≠ PRes.error ParseError.outOfFuel) :
+    parseForest M fuel' syms input = parseForest M fuel syms input :=
+  parseForest_stable hle rfl h
+
+end Stability
+
 section Completeness
 
 open Parser

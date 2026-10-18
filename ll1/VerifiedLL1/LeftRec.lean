@@ -297,15 +297,27 @@ section Uniqueness
 
 variable [DecidableEq T] [DecidableEq N] [FiniteEnum T] [FiniteEnum N]
 
-/-- **Determinism of head expansion.**  From a *reachable* sentential form there is
-exactly one number of head expansions that reaches a position at lookahead x.  Two
-traces with different counts must disagree at their first step, i.e. use two different
-productions of the same nonterminal under the same lookahead: a Conflict.
+/-- **A form sitting at a lookahead has that lookahead in its FIRST.**  No productivity
+hypothesis is needed: the witness is the form itself, because \`AtLookahead\` already names
+the token (or the empty form) at the head.  Contrast \`Grammar.FirstList.of_atLookahead\`,
+which proves the same statement through \`Reduced\` and returns a *terminal* tail. -/
+theorem Grammar.FirstList.of_atLookahead_free {x : LTok T} {ys : List (Sym T N)}
+    (ha : AtLookahead x ys) : G.FirstList ys x := by
+  cases x with
+  | tok t =>
+      obtain ⟨zs, rfl⟩ := ha
+      exact ⟨zs, derives_refl _⟩
+  | eof =>
+      have hnil : ys = [] := ha
+      subst hnil
+      exact derives_refl []
 
-The Reduced hypothesis is not decoration: a trace stops with a *variable* still in
-front of the lookahead, and only productivity turns that position into a FIRST
-statement. -/
-theorem headSteps_stop_length_unique (hred : G.Reduced) (hall : G.Ll1)
+/-- **Determinism of head expansion, without \`Reduced\`.**  Productivity is only needed to
+*produce* stopping witnesses, never to compare them: two traces from the same reachable
+form that both stop at the same lookahead have the same length in any grammar.  The proof
+is the original one, with \`Grammar.FirstList.of_atLookahead\` replaced by
+\`Grammar.FirstList.of_atLookahead_free\`. -/
+theorem headSteps_stop_length_unique_free (hall : G.Ll1)
     {xs ys₁ : List (Sym T N)} {k₁ : Nat} (h₁ : HeadSteps G xs ys₁ k₁) :
     ∀ (x : LTok T) (_ : G.Reachable xs), AtLookahead x ys₁ →
       ∀ (ys₂ : List (Sym T N)) (k₂ : Nat), HeadSteps G xs ys₂ k₂ → AtLookahead x ys₂ →
@@ -337,12 +349,10 @@ theorem headSteps_stop_length_unique (hred : G.Reduced) (hall : G.Ll1)
           have hR₂ : G.Reachable (rhs₂ ++ cont) := Grammar.reachable_of_derives hR hstep₂
           have hf₁ : G.FirstList (rhs₁ ++ cont) x :=
             Grammar.FirstList.backwards_derives x hd₁
-              (Grammar.FirstList.of_atLookahead hred
-                (Grammar.reachable_of_derives hR₁ hd₁) hs₁)
+              (Grammar.FirstList.of_atLookahead_free hs₁)
           have hf₂ : G.FirstList (rhs₂ ++ cont) x :=
             Grammar.FirstList.backwards_derives x hd₂
-              (Grammar.FirstList.of_atLookahead hred
-                (Grammar.reachable_of_derives hR₂ hd₂) hs₂)
+              (Grammar.FirstList.of_atLookahead_free hs₂)
           have s₁ : G.Select A rhs₁ x := Grammar.select_of_first hR hf₁
           have s₂ : G.Select A rhs₂ x := Grammar.select_of_first hR hf₂
           have hne : rhs₁ = rhs₂ := by
@@ -353,10 +363,17 @@ theorem headSteps_stop_length_unique (hred : G.Reduced) (hall : G.Ll1)
           have hEq := ih x hR₁ hs₁ ys₂ k₂' htr₂ hs₂
           omega
 
+/-- **Determinism of head expansion** (the historical \`Reduced\` form): an immediate
+consequence of \`headSteps_stop_length_unique_free\`. -/
+theorem headSteps_stop_length_unique (_hred : G.Reduced) (hall : G.Ll1)
+    {xs ys₁ : List (Sym T N)} {k₁ : Nat} (h₁ : HeadSteps G xs ys₁ k₁) :
+    ∀ (x : LTok T) (_ : G.Reachable xs), AtLookahead x ys₁ →
+      ∀ (ys₂ : List (Sym T N)) (k₂ : Nat), HeadSteps G xs ys₂ k₂ → AtLookahead x ys₂ →
+        k₁ = k₂ :=
+  headSteps_stop_length_unique_free hall h₁
+
 end Uniqueness
 section Witnesses
-
-variable [DecidableEq T] [DecidableEq N] [FiniteEnum T] [FiniteEnum N]
 
 /-- n copies of a matched right-hand side are matched by n copies of the forest. -/
 theorem MatchList.forestPow {rhs : List (Sym T N)} {ts : List (Tree T N)}
@@ -453,6 +470,8 @@ theorem headSteps_of_leftCorner {A B : N} (h : G.LeftCorner A B) :
   have h2 : HeadSteps G [Sym.var A] ([Sym.var B] ++ β) (1 + k) := HeadSteps.trans h0 h1
   have hEq : 1 + k = k + 1 := by omega
   exact ⟨β, k + 1, Nat.zero_lt_succ _, hEq ▸ h2⟩
+
+variable [DecidableEq T] [DecidableEq N] [FiniteEnum T] [FiniteEnum N]
 
 /-- **A left-corner cycle is a positive-length trace from a variable back in front of
 itself.**  LcReach is consumed through its induction principle lcReach_ind, with the set

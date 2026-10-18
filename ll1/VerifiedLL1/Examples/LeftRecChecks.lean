@@ -4,6 +4,8 @@ Licensed under the MIT License. See the file LICENSE in the project root for
 license information.
 -/
 import VerifiedLL1.LeftRec
+import VerifiedLL1.SelectedLC
+import VerifiedLL1.Classical
 import VerifiedLL1.Examples.Toy
 
 /-!
@@ -266,6 +268,22 @@ theorem toy_ll1_pred : Examples.Toy.G.Ll1 :=
 Ll1 and Reduced, rather than by evaluation: a real use of the new theorem. -/
 theorem toy_no_left_recursion_from_ll1 : Examples.Toy.G.noLeftRecursion = true :=
   Grammar.noLeftRecursion_of_ll1 Examples.Toy.G toy_reduced toy_ll1_pred
+
+/-- **End-to-end check of Phase 5.3.**  The toy grammar has no reachable selected
+left-corner cycle - derived from LL(1), not evaluated. -/
+theorem toy_selected_acyclic : Examples.Toy.G.ReachableSelectedLCAcyclic :=
+  Grammar.reachableSelectedLCAcyclic Examples.Toy.G toy_ll1_pred
+
+/-- **End-to-end check of Phase 5.5.**  The textbook characterization now applies to the
+toy grammar: the decidable check and the derivation-level definition coincide. -/
+theorem toy_classicalLL1 : Examples.Toy.G.ClassicalLL1 :=
+  (Grammar.ll1Check_iff_classicalLL1 Examples.Toy.G toy_reduced).mp
+    Examples.Toy.toy_ll1
+
+/-- And the other direction, without needing reduction. -/
+theorem toy_ll1_from_classical :
+    Examples.Toy.G.ClassicalLL1 → Examples.Toy.G.ll1Check = true :=
+  (Grammar.ll1Check_iff_classicalLL1 Examples.Toy.G toy_reduced).mpr
 
 end ToyReduced
 

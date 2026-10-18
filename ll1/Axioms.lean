@@ -201,6 +201,41 @@ axiom appearing below is a bug.
 #print axioms VerifiedLL1.Examples.NullPrefixLR.np_lr
 #print axioms VerifiedLL1.Examples.NullPrefixLR.np_ll1
 
+-- Phase 5.3: reachable selected cycles are impossible
+#print axioms VerifiedLL1.headSteps_lift_derives1
+#print axioms VerifiedLL1.headAt_of_derives
+#print axioms VerifiedLL1.headSteps_stop_of_first
+#print axioms VerifiedLL1.selectedLCPath_trace
+#print axioms VerifiedLL1.selLCFirst_uniform_stop
+#print axioms VerifiedLL1.selPathF_uniform_stop
+#print axioms VerifiedLL1.selPathE_erases
+#print axioms VerifiedLL1.noSelPathF_cycle
+#print axioms VerifiedLL1.noSelPathE_cycle
+#print axioms VerifiedLL1.Grammar.noSelectedLCCycle
+#print axioms VerifiedLL1.Grammar.reachableSelectedLCAcyclic
+#print axioms VerifiedLL1.Examples.UnreachableSelectedCycle.not_occurs_U
+#print axioms VerifiedLL1.Examples.UnreachableSelectedCycle.selLCPath_U_U
+#print axioms VerifiedLL1.Examples.UnreachableSelectedCycle.never_parses_b
+#print axioms VerifiedLL1.headSteps_stop_length_unique_free
+#print axioms VerifiedLL1.Grammar.FirstList.of_atLookahead_free
+-- Phase 5.5: the classical LL(1) characterization
+#print axioms VerifiedLL1.hole_locate
+#print axioms VerifiedLL1.leftDerives_head_of_derives
+#print axioms VerifiedLL1.classical_word_first
+#print axioms VerifiedLL1.classical_word_erased
+#print axioms VerifiedLL1.Grammar.classicalLL1_of_ll1
+#print axioms VerifiedLL1.Grammar.ll1Check_iff_classicalLL1
+#print axioms VerifiedLL1.Examples.ToyReduced.toy_classicalLL1
+#print axioms VerifiedLL1.Examples.ToyReduced.toy_selected_acyclic
+-- Phase 5.4: checked generation
+#print axioms VerifiedLL1.Grammar.conflictList_eq_nil_iff
+#print axioms VerifiedLL1.Grammar.generate_eq_ok_iff
+#print axioms VerifiedLL1.Grammar.generate_iff_Ll1
+#print axioms VerifiedLL1.Grammar.generate_ok
+#print axioms VerifiedLL1.Grammar.generate_conflict
+#print axioms VerifiedLL1.Grammar.generate_not_ok
+#print axioms VerifiedLL1.Grammar.bad_conflict
+#print axioms VerifiedLL1.Grammar.good_ll1
 -- Phase 4.0b: the memoized Boolean-list backend
 #print axioms VerifiedLL1.Memo.lookup_map
 #print axioms VerifiedLL1.Memo.tabulate_map

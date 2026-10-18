@@ -17,6 +17,9 @@ import VerifiedLL1.Reach
 import VerifiedLL1.Follow
 import VerifiedLL1.Generator
 import VerifiedLL1.LeftRec
+import VerifiedLL1.SelectedLC
+import VerifiedLL1.Classical
+import VerifiedLL1.Generate
 import VerifiedLL1.Memo
 import VerifiedLL1.MemoAnalyses
 import VerifiedLL1.MemoTest
@@ -27,6 +30,7 @@ import VerifiedLL1.Examples.Continuation
 import VerifiedLL1.Examples.QCircuits
 import VerifiedLL1.Examples.LeftRecChecks
 import VerifiedLL1.Examples.LeftRecCases
+import VerifiedLL1.Examples.UnreachableSelectedCycle
 
 /-!
 # A formally verified LL(1) parser generator in Lean 4
@@ -46,6 +50,9 @@ import VerifiedLL1.Examples.LeftRecCases
 * `VerifiedLL1.Follow`       - FOLLOW: specification, computation, soundness, completeness
 * `VerifiedLL1.Generator`    - SELECT, the LL(1) check, table generation, correctness
 * `VerifiedLL1.LeftRec`      - LL(1) + reduced => no left recursion (counted head traces)
+* `VerifiedLL1.SelectedLC`   - LL(1) => no reachable selected left-corner cycle (Phase 5.3)
+* `VerifiedLL1.Classical`    - the classical LL(1) characterization for reduced grammars
+* `VerifiedLL1.Generate`     - checked generation: a table or a named conflict (Phase 5.4)
 * `VerifiedLL1.Memo`         - memoized Boolean-list backend for the fixed-point approximants
 * `VerifiedLL1.MemoTest`     - validation of the memoized backend against `Fixpoint.iterP`
 * `VerifiedLL1.Examples.Loop` - a correct table that loops: why progress is needed
