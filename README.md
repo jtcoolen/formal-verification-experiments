@@ -10,6 +10,7 @@ audit — nothing here contains `sorry`, `admit`, `unsafe` or user-declared axio
 | **Quantum circuit optimizer** | Deeply embedded quantum circuits with an independent matrix semantics over `Matrix (Fin n → Bool) (Fin n → Bool) ℂ`; equivalence modulo global phase; 35 machine-checked rewrite rules; an OptiSat equality-saturation engine; an **independent executable certificate checker** with a proved soundness theorem; end-to-end `optimize_sound`; a bug-regression suite built from documented quantum-compiler defects. | Lean core + Mathlib `v4.26.0` + vendored OptiSat | [`quantum/README.md`](quantum/README.md) |
 | **Dijkstra shortest paths** | Dijkstra's algorithm on finite directed `ℕ`-weighted graphs: termination, relaxation correctness, finalization (cut) correctness, global optimality against an independent `WithTop ℕ` specification, path reconstruction, and determinism of the answer. | Lean core + Mathlib `v4.34.1` | [`dijkstra/README.md`](dijkstra/README.md) |
 | **LL(1) parser generator** | Context-free grammars, parse trees and derivations with a proved correspondence (`tree_iff_derives`); a fuelled table-driven parser with proved soundness, completeness (under an explicit progress condition), rejection of non-members and a counterexample showing the progress condition is necessary. All four grammar analyses (`NULLABLE`, `REACH`, `FIRST`, `FOLLOW`) with proved soundness, completeness and termination, plus a memoized Boolean-list backend proved to compute the same approximants (and measured: 2x on the circuit grammars, up to 4.9x on a scaled family). A SELECT-based LL(1) table generator that refuses conflicted grammars, proved correct, and proved to *reconstruct the supplied parse tree exactly* — giving parser-output uniqueness, grammar unambiguity, and the end-to-end "accepts exactly the language" theorem from LL(1) alone; LL(1) plus reduced is then proved to imply no left recursion (counted head-expansion traces, with formal counterexamples for both structural hypotheses). The derivation-level classical characterization is now proved equivalent to the check for reduced grammars (`ll1Check_iff_classicalLL1`); LL(1) is proved to exclude every *reachable* selected left-corner cycle (the lookahead-indexed relation Vermillion uses), with the unreachable `U -> U b | eps` divergence kernel-checked as a counterexample to any unrestricted version; and generation is wrapped in a checked API that returns either a table or a named conflicting pair of productions. A quantum circuit DSL (qubit payloads, AST, pretty-printer) with canonical-tree inversion, a total extractor, and a proved parser-printer-extractor round trip. | Lean core only (no Mathlib) | [`ll1/README.md`](ll1/README.md) |
+| **ProtSat: SAT-based protocol analyser** | A symbolic Dolev-Yao analyser whose central theorem is a *proved correspondence* between bounded protocol attacks and satisfying assignments of a generated CNF: message algebra with constructors and destructors, an 11-rule inductive adversary plus an executable saturation over a finite universe (soundness, completeness on the universe, monotonicity, constructor/destructor laws), a protocol DSL with an independent small-step operational semantics (Rel/Runs, secrecy leaks and non-injective agreement), a compositional Tseitin encoding in eleven clause groups with linear-size one-hot constraints, a verified DPLL solver with proved soundness and completeness, an attack-certificate checker that imports neither the CNF nor the solver, and the end-to-end theorem that an attack verdict yields a checked certificate. Six protocol examples, including a kernel-verified Lowe attack on Needham-Schroeder and its rejection on Needham-Schroeder-Lowe. | Lean core + Mathlib `v4.34.1` | [`protosat/README.md`](protosat/README.md) |
 
 ## Layout
 
@@ -30,6 +31,12 @@ audit — nothing here contains `sorry`, `admit`, `unsafe` or user-declared axio
 │   ├── lakefile.toml, Main.lean, Axioms.lean, lean-toolchain
 │   ├── Dijkstra/      # Graph, Paths, Algorithm, Correctness, Examples
 │   └── README.md      # ← Dijkstra documentation, theorem table, build steps
+├── protosat/          # SAT-based protocol analyser package (its own Lake project)
+│   ├── ProtSat/       #   Syntax, Protocol, Attacker, Deduce, Operational, Bounded,
+│   │                  #   CNF, OneHot, Encode, Clauses, Encoding, Complete, DPLL,
+│   │                  #   Certificate, Analyzer, Examples
+│   ├── Main.lean      #   the command-line analyser (lake exe protosatDemo)
+│   └── README.md      # ← ProtSat documentation, theorem inventory, guarantees
 └── ll1/               # LL(1) parser generator package (its own Lake project)
     ├── lakefile.toml, Main.lean, Axioms.lean, lean-toolchain
     ├── VerifiedLL1/   # Grammar, ParseTree, Derivation, Examples/{Toy,Circuits}
@@ -61,6 +68,19 @@ lake build                 # library + demo + axiom audit, a few seconds, no dep
 lake exe verifiedLL1Demo   # worked demonstration
 lake env lean Axioms.lean  # axiom audit
 ```
+
+### ProtSat: the SAT-based protocol analyser
+
+```sh
+cd protosat
+lake build                 # library + demo, ~10 s once Mathlib is cached
+lake exe protosatDemo      # the six protocol examples with their verdicts
+lake env lean Axioms.lean  # axiom audit
+```
+
+Mathlib `v4.34.1` is required; prebuilt objects are in `protosat/.mathlibcache`.  See
+[`protosat/README.md`](protosat/README.md) for the model, the correspondence theorems and
+what the bounds do and do not prove.
 
 ### Dijkstra's algorithm
 

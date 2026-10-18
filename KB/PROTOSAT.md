@@ -394,3 +394,58 @@ of an instantiated session, or a ded whose message is in U).
   (Option.some.inj in the some branch).
 * A docstring before #eval is a parse error ('expected lemma'); use a line comment.
 * 'decide' on (dpll f).isSome works: every definition is structural and computable.
+
+
+## Round 6b (same round, later phase) - examples, demo, docs
+
+* ProtSat/Examples.lean: all six specification-9 protocols.
+  - Challenge (secure, SAFE at steps 2 / rounds 0, 1335 vars, 2995 clauses; bounds_ok and the
+    UNSAT verdict decided by the kernel).
+  - Replay (static authenticator): DPLL finds a 4-event attack; checkCertificate of the
+    decoded certificate DECIDED true; Attack derived by 8C.
+  - KeyDisclosure: 2-event attack found by the solver + certificate; the control with
+    compromised = [] is SAFE (decided).
+  - NS (original Needham-Schroeder public key) modelled per instantiation; the 14-event Lowe
+    attack trace is kernel-verified by checkCertificate = true (NS.checked / NS.attack).
+    The NS SAT instance at those bounds has 2,586,336 variables - too large for the reference
+    solver, hence the certificate route.
+  - NSL (Lowe's fix): the SAME script is REJECTED (decided false); NSL.prefix_ok and
+    NSL.breaks_at_the_check localise the failure to A's identity check.
+* Main.lean: lake exe protosatDemo prints shapes, CNF sizes, univClosed, verdicts and
+  certificate answers; runs in 1.7 s.
+* protosat/README.md (17 KB): model, encoding, solver, certificates, the 8A-8H table with
+  exact Lean names, the examples table, guarantees and non-claims, module map.
+* Root README: ProtSat row, layout entry, quick start.
+
+### Two CRITICAL bugs found and fixed this round (see the commits)
+1. The one-hot at-most-one encoding was pairwise: O(|U|^2) clauses per group (toy protocol:
+   6M clauses; smallest realistic instance: 227k clauses, 7 min to solve).  Replaced by a
+   linear sequential counter (CNF.atMostOneSeq + proof; Oh gains per-group aux flags in new
+   blocks bsApc..bsAfr).  8A (Encoding.lean, 3559 lines) recompiled UNCHANGED.
+2. univClosed demanded the finite universe be closed under the protocol's own constructors
+   (for pair: pair x y in U for ALL x,y in U) - unsatisfiable, so 8A was VACUOUS for every
+   protocol that builds a message.  Fixed with the standard BMC under-approximation:
+   Encode.uIdx maps out-of-universe values to the unset index (new valAt_uIdx_filter), an
+   action whose value the bounds cannot name is disabled, univClosed is now "every closed
+   protocol expression denotes a universe message" (satisfiable + decidable + checked by the
+   analyser), and decXe_eq is restated as the one-directional correspondence 8A needs
+   (decoded value some t => the real evaluation is some t), proved with the new filter_some.
+   xe_unary/xe_binary now state the gate through Option.filter.
+
+### Traps learned (add to the list above)
+* A docstring before #eval or set_option is a parse error ("expected lemma"); use --.
+* decide on a DPLL solve is far slower than the interpreter (heartbeat/whnf limits); keep
+  kernel decide for the cheap closed computations (checkCertificate, univClosedBool, small
+  solver examples) and run the big solves in the executable.
+* rcases with 'rfl' on 'p = x' may eliminate x (the outer variable) instead of p; use
+  explicit equations + 'hueq ▸ h' or subst deliberately.
+* 'rw [← hqy] at h' direction confusion: to replace q by y in hqa : a q = true, use
+  'rw [hqy] at hqa' (forward).
+* '!' before a Prop-valued expression is parsed as negation of a decide: write Bool.not.
+* In a term, 'l[i]?.getD x' inside a structured proof can fail to parse; use List.drop/take.
+* Protocol has no initKn field - initKn is derived from agents/compromised.  To give the
+  attacker a recorded message, model it as something the attacker can DEDUCE from public
+  data (that is the honest formulation of a replay anyway).
+* NS roles must extract Na with fst/snd of the decrypted pair; getting it wrong shows up as
+  relDecide = false at the forwarding step, so debug with
+  'certOfTrace P tr |>.steps |>.mapIdx (fun i st => relDecide P prev st.ev st.after)'.
