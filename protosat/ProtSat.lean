@@ -13,3 +13,4 @@ import ProtSat.Encoding
 import ProtSat.Complete
 import ProtSat.Certificate
 import ProtSat.Analyzer
+import ProtSat.Examples

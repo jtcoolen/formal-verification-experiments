@@ -1,23 +1,13 @@
-ProtSat CRITICAL FIX: univClosed was unsatisfiable for any protocol that builds messages
+ProtSat: Examples.lean - protocol models with kernel-checked attack certificates
 
-univClosed demanded that the finite universe be closed under the protocol's own constructors:
-for every e in allExprs and every v,w in vals U, stepEval e v w must lie in U.  For e = pair
-that asks pair x y in U for ALL x,y in U - impossible for a finite nonempty U - so 8A was
-vacuous for exactly the protocols that matter (Needham-Schroeder, Lowe, any key exchange).
-
-Fix: the encoding now uses the standard bounded-model-checking under-approximation.
-- Encode.lean: uIdx maps every out-of-universe value to the UNSET index (new lemma
-  valAt_uIdx_filter); an action whose value the bounds do not name is disabled instead of
-  being mis-modelled.
-- Clauses.lean: univClosed is now "every closed protocol expression denotes a universe
-  message" - satisfiable, decidable, and exactly what the leaf gates need.
-- Encoding.lean: xe_unary / xe_binary state the gate through the filter; decXe_eq becomes the
-  one-directional correspondence 8A actually needs (decoded value some t => the real
-  evaluation is some t), proved by induction with the new filter_some lemma; the four use
-  sites (send / assign / check x2) updated.
-- Analyzer.lean: univClosedBool simplified to match.
-
-Verified: lake build green (925 jobs).  End-to-end: a 1-session protocol sending <A,K(A,A)> in
-the clear now has univClosedBool = true, and analyze P { steps := 2, rounds := 1 } computes an
-ATTACK with a 2-step certificate via the real DPLL over a 26,803-clause CNF (5,751 variables,
-4,692 decisions).
+Adds ProtSat/Examples.lean (integrated into the library root):
+- simStep / certOfTrace: build a certificate by simulating a trace through the operational
+  semantics, so an attack trace is written as a plain list of events.
+- Example 1 Challenge (secure challenge-response, SAFE within bounds: 1335 vars / 2995 clauses,
+  univClosed decided; safe_if_none / verdict_if_none state the conditional verdict).
+- Example 2 Replay (no freshness check: attacker rebuilds the static authenticator from public
+  information and B hands over the session key) - checkCertificate of the 4-step trace is
+  DECIDED by the kernel, hence Attack P tr by 8C.
+- Example 3 KeyDisclosure (compromised key opens the ciphertext) - certificate decided, plus
+  the same protocol with compromised = [] as the control.
+Verified: lake build green, Examples.lean elaborates in 5s.
