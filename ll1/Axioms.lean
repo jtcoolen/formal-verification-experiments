@@ -241,8 +241,31 @@ axiom appearing below is a bug.
 #print axioms VerifiedLL1.Grammar.generate_ok
 #print axioms VerifiedLL1.Grammar.generate_conflict
 #print axioms VerifiedLL1.Grammar.generate_not_ok
-#print axioms VerifiedLL1.Grammar.bad_conflict
-#print axioms VerifiedLL1.Grammar.good_ll1
+#print axioms VerifiedLL1.bad_conflict
+#print axioms VerifiedLL1.good_ll1
+-- Phase 5.7: the executable fuel bound and the total generated parser
+#print axioms VerifiedLL1.chain_occurs
+#print axioms VerifiedLL1.chain_path
+#print axioms VerifiedLL1.chain_nodup
+#print axioms VerifiedLL1.length_le_of_mem_of_nodup
+#print axioms VerifiedLL1.Grammar.chainBdd_universal
+#print axioms VerifiedLL1.Grammar.allOccurs_of_production
+#print axioms VerifiedLL1.budget_of_get
+#print axioms VerifiedLL1.budget_of_allOccurs
+#print axioms VerifiedLL1.fuel_not_outOfFuel
+#print axioms VerifiedLL1.parse_ne_fuel
+#print axioms VerifiedLL1.Grammar.parseGenerated_ne_outOfFuel
+#print axioms VerifiedLL1.Grammar.parseGenerated_ok_imp
+#print axioms VerifiedLL1.Grammar.parseGenerated_imp_ok
+#print axioms VerifiedLL1.Grammar.parseGenerated_iff
+#print axioms VerifiedLL1.Grammar.fuelFor_bound
+#print axioms VerifiedLL1.Grammar.decideMembership_iff
+#print axioms VerifiedLL1.Grammar.parseGenerated_tree_unique
+#print axioms VerifiedLL1.Examples.FuelChecks.E_ok
+#print axioms VerifiedLL1.Examples.FuelChecks.R_ok
+#print axioms VerifiedLL1.Examples.FuelChecks.RR_ok
+#print axioms VerifiedLL1.Examples.FuelChecks.U_ok
+#print axioms VerifiedLL1.Examples.FuelChecks.U_cycle
 -- Phase 4.0b: the memoized Boolean-list backend
 #print axioms VerifiedLL1.Memo.lookup_map
 #print axioms VerifiedLL1.Memo.tabulate_map

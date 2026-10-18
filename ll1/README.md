@@ -999,9 +999,8 @@ not, with no assumption about the fuel.
 Put together with Phase 5.3, these say: along any parser execution the grammar context
 stays reachable, the input position never moves backwards, and every step that does not
 advance it follows a selected left corner at the current lookahead - and no occurring
-nonterminal lies on such a cycle.  That is the semantic content of termination; turning it
-into a *numeric* recursion-depth bound (and hence an executable `fuelFor`) is the remaining
-operational item, listed under *Remaining work*.
+nonterminal lies on such a cycle.  That is the semantic content of termination; Phase 5.7
+turns it into a number, an executable `fuelFor` and a total generated parser.
 
 ### Theorem inventory (Phase 5.6)
 
@@ -1013,6 +1012,120 @@ parseForest_ok_suffix / parseSym_ok_suffix   the two halves
 derives_nil_of_match           empty-yield forest -> erasable symbol list
 selectedLC_of_empty_prefix_parse  non-consuming descent -> selected left corner
 selectedLC_of_match_child      the relational form
+```
+
+## Phase 5.7 - the executable fuel bound and a total generated parser (`Fuel.lean`)
+
+The last operational gap in the review was that every end-to-end theorem was *existential*
+in the fuel: every word of the language is accepted at some fuel, and no fuel was known to
+be enough for an *invalid* input.  This module supplies a number.
+
+### The counting argument
+
+Fuel is the length of a call path, and every call on a path except the last one succeeded -
+a failed subparse aborts its parent.  So the Phase 5.6 invariants apply to exactly the
+calls that actually happen, and along a path:
+
+* the input position never moves backwards (`parseSym_ok_suffix`),
+* a nonterminal call that does not consume input descends through an erasable prefix of a
+  production the lookahead selects - a *selected left corner* at that lookahead
+  (`selectedLC_of_empty_prefix_parse`),
+* and no occurring nonterminal lies on such a cycle (Phase 5.3), so the expansions between
+  two position increases form a duplicate-free chain and there are at most `n` of them.
+
+Grouping the expansions by input position gives the measures, with `n = G.numVars` (the size
+of the nonterminal enumeration) and `W = G.maxRhsLen` (the widest right-hand side):
+
+```text
+muS l k    = (l * (n + 2) + k) * (W + 1) + 1      -- a symbol call
+muF l kb m = (l * (n + 2) + kb) * (W + 1) + m + 1 -- a forest call
+```
+
+`k`/`kb` is a *chain budget*: `ChainBdd x A kb` says every selected chain at lookahead `x`
+starting at `A` has at most `kb` nodes, and `chainBdd_universal` proves `n + 1` is always
+enough for an occurring `A`.  `Budget x kb syms` says every variable of the forest whose
+prefix *inside the forest* erases has that budget; a variable with a non-erasable prefix is
+only reachable after a token has been consumed, so it gets the universal budget and a
+strictly shorter input.  Each parser step strictly decreases the measure:
+
+| step | budget | input | symbols |
+|------|--------|-------|---------|
+| expansion `A -> rhs` | `kb -> kb - 1` | unchanged | `\|rhs\| + 1 <= W + 1`, paid by the dropped budget |
+| sibling, nothing consumed | unchanged | unchanged | `m` drops by one |
+| sibling, a token consumed | reset to `n + 1` | `l` drops by one | paid by one whole input block |
+| terminal match | - | one token consumed | no recursion |
+
+Production width appears because `parseForest` spends a fuel unit on every *sibling* as
+well as on every nesting level.  The bound is proved for the *generated* table under
+`G.Ll1` alone: no `Reduced`, no `wellFormed`, and no assumption that the input parses.
+
+### The API
+
+```lean
+Grammar.fuelFor        G ws = G.muF (ws.length + 1) (G.numVars + 1) 1
+Grammar.parseGenerated G ws = Parser.parse G G.genTable (G.fuelFor ws) (ltoks ws ++ [LTok.eof])
+
+def Grammar.FuelBound (G : Grammar T N) (fuelFor : List T -> Nat) : Prop :=
+  G.ll1Check = true ->
+    (forall ws, Parser.parse G G.genTable (fuelFor ws) (ltoks ws ++ [LTok.eof])
+        != PRes.error ParseError.outOfFuel) /\
+    (forall ws t, Parser.parse G G.genTable (fuelFor ws) (ltoks ws ++ [LTok.eof])
+        = PRes.ok t [LTok.eof] <->
+          Valid G t /\ t.root? = some G.start /\ Tree.yield t = ws)
+
+theorem Grammar.fuelFor_bound (hall : G.ll1Check = true) : G.FuelBound G.fuelFor
+```
+
+The success half is the *exact-tree* statement, so it composes with the existing
+`generated_parse_tree` and `parseTree_unique` rather than replacing them; the failing half is
+what makes `parseGenerated` a decision procedure (`decideMembership`) instead of only a
+recognizer.  Fuel monotonicity for every outcome other than `outOfFuel` (`fuel_stable`,
+`parse_stable` - including syntax errors and trailing input) is what lifts Phase 5.1's
+existential fuel to `fuelFor`.
+
+### Regression checks (`Examples/FuelChecks.lean`)
+
+Every check is a `rfl` or a `decide`: the kernel itself runs the parser at the chosen fuel.
+
+* `E : S -> eps | c` - end-of-input selection; `fuelFor [] = 12`; trailing input is reported
+  as `trailing`, never as exhaustion.
+* `R : S -> N N x; N -> eps` - repeated nullable siblings; both empty trees appear in the
+  result; `[]` is rejected with `noEntry`.
+* `RR : Q -> x Q | eps` - right recursion, so nesting grows with the input;
+  `fuelFor [x,x,x] = 44`; the invalid word `x y` yields `noEntry q y`.
+* `U : S -> a; U -> U b | eps` - the unreachable selected cycle: `U` really does carry a
+  selected cycle at `b` (`U_cycle`) and its *subparser* diverges at every fuel
+  (`UnreachableSelectedCycle.never_parses_b`), yet the start parser terminates on `[a]`, `[b]`
+  and `[]`.  Reachability is what the acyclicity theorem needs; the bound is what the *start*
+  parser gets.
+* Conflicts stay rejected: `Generate.bad` (`S -> a | a b`) reports the conflicting pair, and
+  `fuelFor_bound` is only ever available under `ll1Check = true`.
+
+### Theorem inventory (Phase 5.7)
+
+```text
+Grammar.SelChain / Grammar.ChainBdd      explicit chains and their budget
+Grammar.occurs_of_selectedLeftCorner     a selected child of an occurring symbol occurs
+chain_occurs / chain_path / chain_nodup  chain structure; under Ll1, duplicate-free
+length_le_of_mem_of_nodup                the pigeonhole
+Grammar.chainBdd_universal               n + 1 is a universal chain budget
+Grammar.maxRhsLen / le_maxRhsLen         production width
+Grammar.muS / muF, muF_succ, muF_ge_muS, muF_expansion, muF_shrink, muF_mono
+Grammar.AllOccurs / allOccurs_of_production  occurrence is inherited by productions
+Grammar.Erasable / erasable_iff          syntactic erasure = derives epsilon
+Grammar.Budget, budget_head, budget_tail, budget_of_get, budget_of_allOccurs
+parseSym_tok_ne_fuel, parseSym_nil, parseForest_nil_input, pbind_ne_fuel
+fuel_not_outOfFuel                       the mutual fuel induction (the main lemma)
+parse_ne_fuel                            the top level inherits it
+Grammar.fuelFor / Grammar.parseGenerated the executable API
+Grammar.parseGenerated_ne_outOfFuel      no input exhausts fuel
+Grammar.parseGenerated_ok_imp            soundness and exact shape at that fuel
+Grammar.parseGenerated_imp_ok            completeness at that fuel, via parse_stable
+Grammar.parseGenerated_iff               the two-sided statement
+Grammar.FuelBound / Grammar.fuelFor_bound  the review's target, proved
+Grammar.decideMembership                 language membership as a Bool
+Grammar.decideMembership_iff             the Bool is true exactly for the language
+Grammar.parseGenerated_tree_unique     the tree it returns is the unique one
 ```
 
 ## Limitations and next steps
@@ -1105,16 +1218,11 @@ table — no hand-written table is needed.
   FIRST a carrier of only the symbol/lookahead pairs the grammar can reach, and cache the
   left-corner rows per source: all three are representation changes that the measurements
   say are worth doing, and none of them affects a proof.
-* **The fuel bound is still open.**  `generated_language_iff_ll1` is existential in the fuel:
-  every word of the language is accepted at *some* fuel, and `parseForest_stable` (Phase 5.1
-  plus the new `fuel_stable`) now says that any outcome other than fuel exhaustion is the
-  outcome at every larger fuel.  What is missing is an executable `fuelFor G ws` that is
-  large enough for *every* input, valid or not, so that the parser becomes a total decision
-  procedure.  Phase 5.3 supplies the semantic ingredient (no reachable selected cycle, hence
-  no infinite non-consuming descent); the remaining work is to turn the parser's call tree
-  into a numeric depth bound - a rank on the *lookahead-indexed* selected relation, plus the
-  observation that every recursive call keeps a reachable context and that a call which does
-  not consume a token descends along such an edge.
+* **Fuel: closed.**  `fuelFor G ws` (Phase 5.7) is an executable bound that holds on every
+  input, valid or not, and `Grammar.fuelFor_bound` proves the review's `FuelBoundTarget` under
+  `ll1Check = true` alone.  What remains is only tighter constants: the bound is deliberately
+  conservative (a whole `(n+2)*(W+1)` block per token), and a per-lookahead rank on the
+  selected relation would shrink it.  No proof depends on the conservatism.
 * `genTable` still exists alongside `generate`.  The unchecked table is what the theorems are
   stated about, so it stays; `generate` is the API a caller should use, and
   `generate_iff_Ll1` says the two agree exactly when the grammar is LL(1).

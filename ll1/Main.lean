@@ -52,6 +52,25 @@ private def showCSym : Sym Circuits.Tok Circuits.Var → String
 private def showCProd : Circuits.Var × List (Sym Circuits.Tok Circuits.Var) → String
   | (A, rhs) => showCVar A ++ " -> " ++ (if rhs.isEmpty then "eps" else String.intercalate " " (rhs.map showCSym))
 
+private def showLTok (t : Toy.Tok) : String := "tok " ++ showTok t
+
+private def showLook (x : LTok Toy.Tok) : String :=
+  match x with
+  | LTok.tok t => showTok t
+  | LTok.eof => "eof"
+
+private def showToyRes (r : PRes Toy.Tok Toy.Var (Tree Toy.Tok Toy.Var)) : String :=
+  match r with
+  | PRes.ok t _ =>
+      "accepts, yield = [" ++ String.intercalate " " (Tree.yield t |>.map showTok) ++ "]"
+  | PRes.error (ParseError.noEntry A x) =>
+      "rejects: no table entry for " ++ showVar A ++ " at " ++ showLook x
+  | PRes.error (ParseError.tokenMismatch t x) =>
+      "rejects: expected " ++ showTok t ++ ", found " ++ showLook x
+  | PRes.error (ParseError.trailing x) =>
+      "rejects: trailing input at " ++ showLook x
+  | PRes.error e => "rejects: " ++ (repr e).pretty
+
 def main : IO Unit := do
   IO.println line
   IO.println "PHASE 1 — CONTEXT-FREE GRAMMARS, PARSE TREES, DERIVATIONS"
@@ -259,6 +278,49 @@ def main : IO Unit := do
   IO.println "           terminal words with the shared lookahead, and the four SELECT"
   IO.println "           combinations are the same argument."
   IO.println "  ToyReduced.toy_classicalLL1 : the toy grammar satisfies ClassicalLL1, derived."
+  IO.println ""
+  IO.println line
+  IO.println "PHASE 5.6 / 5.7 - EXECUTION INVARIANTS, THE FUEL BOUND, A TOTAL PARSER"
+  IO.println line
+  IO.println "  Exec: every recursive call keeps a reachable context and leaves a suffix of its"
+  IO.println "        input, and a call that consumes nothing descends a *selected* nullable-"
+  IO.println "        prefix edge at the current lookahead."
+  IO.println "  Fuel: with n = numVars and W = maxRhsLen,"
+  IO.println "        muS l k = (l*(n+2)+k)*(W+1)+1,  muF l kb m = (l*(n+2)+kb)*(W+1)+m+1."
+  IO.println "        An expansion drops k by one and pays |rhs|+1 <= W+1 (the production width"
+  IO.println "        is what parseForest spends on siblings); a sibling that consumed nothing"
+  IO.println "        keeps kb and drops m; a sibling that consumed a token drops l and resets"
+  IO.println "        the budget to n+1 out of one whole input block.  A selected chain from an"
+  IO.println "        occurring nonterminal is duplicate-free (Phase 5.3), so k <= n+1 suffices."
+  IO.println "  fuelFor_bound (the review's FuelBoundTarget): ll1Check = true alone gives"
+  IO.println "        (i) no input - valid or not - ever returns outOfFuel, and"
+  IO.println "        (ii) success <-> valid start-rooted tree yielding exactly the input."
+  IO.println "        No Reduced, no wellFormed, and the tree statement is exact, not existential."
+  IO.println ("  Toy.G.fuelFor [a, b]    = " ++ toString (Toy.G.fuelFor [Toy.Tok.a, Toy.Tok.b]))
+  IO.println ("  Toy.G.parseGenerated [a, b] = " ++
+    showToyRes (Toy.G.parseGenerated [Toy.Tok.a, Toy.Tok.b]))
+  IO.println ("  Toy.G.parseGenerated [b]    = " ++
+    showToyRes (Toy.G.parseGenerated [Toy.Tok.b]))
+  IO.println ("  Toy.G.parseGenerated [a, c] = " ++
+    showToyRes (Toy.G.parseGenerated [Toy.Tok.a, Toy.Tok.c]))
+  IO.println ("  Toy.G.parseGenerated []     = " ++
+    showToyRes (Toy.G.parseGenerated []))
+  IO.println "  UnreachableSelectedCycle: the U subparser still diverges at every fuel, but the"
+  IO.println ("  start parser answers (fuel " ++
+    toString (Examples.UnreachableSelectedCycle.G.fuelFor [UnreachableSelectedCycle.Tok.a]) ++
+    " / " ++ toString (Examples.UnreachableSelectedCycle.G.fuelFor
+      [UnreachableSelectedCycle.Tok.b]) ++ "):")
+  IO.println ("   [a] -> " ++
+    (match Examples.UnreachableSelectedCycle.G.parseGenerated
+        [UnreachableSelectedCycle.Tok.a] with
+     | PRes.ok _ _ => "accepts 'a'"
+     | PRes.error e => "rejects with " ++ (repr e).pretty))
+  IO.println ("   [b] -> " ++
+    (match Examples.UnreachableSelectedCycle.G.parseGenerated
+        [UnreachableSelectedCycle.Tok.b] with
+     | PRes.error (ParseError.outOfFuel) => "OUT OF FUEL (would be a bug)"
+     | PRes.error e => "rejects with " ++ (repr e).pretty
+     | PRes.ok _ _ => "unexpectedly accepts"))
 
   IO.println line
   IO.println "MAIN CORRESPONDENCE THEOREM (Phase 1)"
