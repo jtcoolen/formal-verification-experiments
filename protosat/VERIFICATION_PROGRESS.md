@@ -415,6 +415,27 @@ What this does **not** yet give is the compression theorem (every attack has a w
 universe. Monotonicity is its prerequisite, not a substitute: it moves a verdict between stated bounds;
 it does not discharge a bound that was never stated.
 
+## A resource-bounded driver: `unknown` becomes a real answer
+
+Stage 1's table lists `unknown reason`, and until now nothing in the project could produce it:
+`Query.analyzeQuery_ne_unknown` proves the *total* reference analyser never does, which is correct
+but leaves the category empty. `Contract.searchFuel` scans at most `fuel` nodes and
+`Contract.driverAnswer` reports three things - `outOfFuel`, `attack x`, `safe` - with the
+budget made explicit:
+
+| Declaration | Meaning |
+|---|---|
+| `searchFuel_eq_find?` | with `xs.length + 1` fuel the bounded scan agrees exactly with the unbounded search |
+| `driverAnswer_attack_sound`, `driverAnswer_safe_sound` | either answer, when the driver gives one, is true of the query |
+| `driverAnswer_complete` | an attack *is* found at the sufficient-fuel budget: exhaustion is a resource fact, not a semantic one |
+| `driverAnswer_not_outOfFuel`, `driverAnswer_outOfFuel_zero` | the budget that always suffices, and a budget that honestly says it is too small |
+| `driver_safe_evidence` | a driver `safe` answer carries the same kind of `SafeEvidence` as the total analyser |
+| `Gates.authQ_driver_outOfFuel`, `authQ_driver_attack`, `secureQ_driver_safe` | all three instantiated |
+
+The distinction the roadmap asked for - "keep mathematical reference solving total; distinguish this
+from a production driver that may time out" - is now in the API with theorems on both sides: the total
+`analyze` never says `unknown`, and the bounded driver says nothing at all when it runs out.
+
 ## Log
 
 * 2026-10-19 (a) - baseline inspected; build green; three review witnesses promoted to permanent
@@ -460,6 +481,10 @@ it does not discharge a bound that was never stated.
   smaller bound without re-running the search (and agreeing with the smaller search when it is run), plus
   an attack carried to a larger bound. Also fixed a `printf` bug in the CI script's separator lines.
   Build green (1855 jobs), audit clean over 2574 theorems, 15/15 gates green.
+* 2026-10-19 (i) - `Contract.searchFuel` / `driverAnswer`: a fuel-bounded production driver with
+  `searchFuel_eq_find?` (agreement with the unbounded search), soundness of both answers, completeness
+  at the sufficient-fuel budget, and gates for exhaustion, attack and safety. All five stage-1 result
+  categories now have a declaration that can produce them.
 * Next - the explorer (above), then stage 3's `BoundedExecution` unification, then per-expression
   `EvalDomain` construction (so `fst (pair x x)` is representable even when the pair is outside
   `U`), and deriving the compiler's representability conditions from the public bound instead of

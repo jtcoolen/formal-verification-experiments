@@ -284,6 +284,203 @@ theorem boundedAttack_of_BoundedAttack {q : Query} (hsec : Goal.secrecy ∈ q.go
   · exact ⟨Goal.secrecy, hsec, tr, Cs, hrun, hleak⟩
   · exact ⟨Goal.agreement, hag, tr, Cs, hrun, hbreak⟩
 
+/-! ### A resource-bounded driver: making `unknown` a real answer -/
+
+/-- The enumeration with a budget on how many nodes it may inspect. The result is three-way:
+`none` means the budget ran out, `some none` means the whole list was scanned and nothing
+violated a selected goal, and `some (some x)` means `x` is the first violation found. -/
+def searchFuel (q : Query) : Nat -> List Node -> Option (Option Node)
+  | 0, _ => none
+  | _ + 1, [] => some none
+  | fuel + 1, x :: xs =>
+      if nodeViolatesQuery q x = true then some (some x) else searchFuel q fuel xs
+
+/-- A witness reported by the bounded scan is in the scanned list and really violates a goal. -/
+theorem searchFuel_some_mem {q : Query} {x : Node} :
+    ∀ {fuel : Nat} {xs : List Node}, searchFuel q fuel xs = some (some x) ->
+      ∃ y ∈ xs, nodeViolatesQuery q y = true
+  | 0, _, h => absurd h (by simp [searchFuel])
+  | _ + 1, [], h => absurd h (by simp [searchFuel])
+  | fuel + 1, y :: ys, h => by
+      by_cases hv : nodeViolatesQuery q y = true
+      · rw [searchFuel] at h
+        simp only [if_pos hv] at h
+        have hyx : y = x := by simpa using (Option.some.inj (Option.some.inj h))
+        subst hyx
+        exact ⟨y, List.Mem.head _, hv⟩
+      · rw [searchFuel] at h
+        simp only [if_neg hv] at h
+        obtain ⟨z, hz, hz'⟩ := searchFuel_some_mem h
+        exact ⟨z, List.Mem.tail _ hz, hz'⟩
+
+/-- A finished scan that reports nothing really found nothing in the scanned list. -/
+theorem searchFuel_none_all {q : Query} :
+    ∀ {fuel : Nat} {xs : List Node}, searchFuel q fuel xs = some none ->
+      ∀ y ∈ xs, nodeViolatesQuery q y = false
+  | 0, _, h => absurd h (by simp [searchFuel])
+  | _ + 1, [], _ => fun _ hmem => absurd hmem (by simp)
+  | fuel + 1, y :: ys, h => by
+      by_cases hv : nodeViolatesQuery q y = true
+      · rw [searchFuel] at h
+        simp only [if_pos hv] at h
+        exact absurd h (by simp)
+      · rw [searchFuel] at h
+        simp only [if_neg hv] at h
+        intro z hz
+        rcases List.mem_cons.mp hz with rfl | hz
+        · exact by simpa using hv
+        · exact searchFuel_none_all h z hz
+
+/-- With enough fuel the bounded scan agrees exactly with the unbounded search: it returns
+`some` of what `find?` would return. -/
+theorem searchFuel_eq_find? {q : Query} :
+    ∀ (xs : List Node), searchFuel q (xs.length + 1) xs =
+      some (List.find? (nodeViolatesQuery q) xs)
+  | [] => rfl
+  | x :: xs => by
+      by_cases hv : nodeViolatesQuery q x = true
+      · rw [searchFuel, List.find?_cons_of_pos hv]
+        simp only [if_pos hv]
+      · rw [searchFuel, List.find?_cons_of_neg hv]
+        simp only [if_neg hv, List.length_cons]
+        exact searchFuel_eq_find? xs
+
+/-- Enough fuel always suffices: one unit per node. -/
+theorem searchFuel_total {q : Query} (xs : List Node) :
+    ∃ r, searchFuel q (xs.length + 1) xs = some r :=
+  ⟨List.find? (nodeViolatesQuery q) xs, searchFuel_eq_find? xs⟩
+
+/-- **The driver's answer.** Three cases, and the third is the contract's `unknown`: a search that ran
+out of budget says so instead of guessing. Unlike the total analyser this is a production shape, and the
+theorems below say exactly what each answer is worth. -/
+inductive DriverAnswer where
+  | outOfFuel : DriverAnswer
+  | attack : Node -> DriverAnswer
+  | safe : DriverAnswer
+
+/-- The nodes the driver would scan for `q`. -/
+def driverNodes (q : Query) : List Node :=
+  allNodes q.protocol q.bounds q.bounds.steps
+
+/-- The driver's answer for a query and a node budget. -/
+def driverAnswer (q : Query) (fuel : Nat) : DriverAnswer :=
+  match searchFuel q fuel (driverNodes q) with
+  | none => DriverAnswer.outOfFuel
+  | some none => DriverAnswer.safe
+  | some (some x) => DriverAnswer.attack x
+
+/-- The three ways the driver can answer, read off the scan result. -/
+theorem driverAnswer_of_attack {q : Query} {fuel : Nat} {x : Node}
+    (h : searchFuel q fuel (driverNodes q) = some (some x)) :
+    driverAnswer q fuel = DriverAnswer.attack x := by
+  rw [driverAnswer, h]
+
+theorem driverAnswer_of_safe {q : Query} {fuel : Nat}
+    (h : searchFuel q fuel (driverNodes q) = some none) :
+    driverAnswer q fuel = DriverAnswer.safe := by
+  rw [driverAnswer, h]
+
+theorem driverAnswer_of_outOfFuel {q : Query} {fuel : Nat}
+    (h : searchFuel q fuel (driverNodes q) = none) :
+    driverAnswer q fuel = DriverAnswer.outOfFuel := by
+  rw [driverAnswer, h]
+
+/-- Conversely, each answer tells what the scan did. -/
+theorem driverAnswer_attack_only {q : Query} {fuel : Nat} {x : Node}
+    (h : driverAnswer q fuel = DriverAnswer.attack x) :
+    searchFuel q fuel (driverNodes q) = some (some x) := by
+  classical
+  cases hs : searchFuel q fuel (driverNodes q) with
+  | none =>
+      rw [driverAnswer_of_outOfFuel hs] at h
+      cases h
+  | some o =>
+      cases o with
+      | none =>
+          rw [driverAnswer_of_safe hs] at h
+          cases h
+      | some y =>
+          rw [driverAnswer_of_attack hs] at h
+          cases h
+          rfl
+
+theorem driverAnswer_safe_only {q : Query} {fuel : Nat}
+    (h : driverAnswer q fuel = DriverAnswer.safe) :
+    searchFuel q fuel (driverNodes q) = some none := by
+  classical
+  cases hs : searchFuel q fuel (driverNodes q) with
+  | none =>
+      rw [driverAnswer_of_outOfFuel hs] at h
+      cases h
+  | some o =>
+      cases o with
+      | some y =>
+          rw [driverAnswer_of_attack hs] at h
+          cases h
+      | none => rfl
+
+/-- **An attack answer is sound.** -/
+theorem driverAnswer_attack_sound {q : Query} {fuel : Nat} {x : Node}
+    (h : driverAnswer q fuel = DriverAnswer.attack x) : boundedAttack q := by
+  classical
+  obtain ⟨z, hz, hvy⟩ := searchFuel_some_mem (driverAnswer_attack_only h)
+  rw [driverNodes] at hz
+  exact boundedAttack_of_attackFound (List.any_eq_true.mpr ⟨z, hz, hvy⟩)
+
+/-- **A safe answer is sound**: the scan finished, so no permitted execution violates a selected goal. -/
+theorem driverAnswer_safe_sound {q : Query} {fuel : Nat}
+    (h : driverAnswer q fuel = DriverAnswer.safe) : boundedSafe q := by
+  classical
+  have hnone : ∀ y ∈ driverNodes q, nodeViolatesQuery q y = false :=
+    searchFuel_none_all (driverAnswer_safe_only h)
+  apply boundedSafe_of_attackFound_false
+  by_cases hc : attackFound q = true
+  · have hc' : (driverNodes q).any (nodeViolatesQuery q) = true := hc
+    obtain ⟨z, hz, hvz⟩ := List.any_eq_true.mp hc'
+    have := hnone z hz
+    simp_all
+  · exact by simpa using hc
+
+/-- **The driver is complete for attacks**: the sufficient-fuel budget finds the attack. Running out
+of fuel is a resource fact, not a semantic one. -/
+theorem driverAnswer_complete (q : Query) (h : boundedAttack q) :
+    ∃ x, driverAnswer q ((driverNodes q).length + 1) = DriverAnswer.attack x := by
+  classical
+  obtain ⟨x, hx⟩ := findAttack_some_of_attackFound (attackFound_of_boundedAttack q h)
+  refine ⟨x, driverAnswer_of_attack ?_⟩
+  rw [searchFuel_eq_find?]
+  simpa [driverNodes, findAttack] using hx
+
+/-- **Sufficient fuel is known**: one unit per scanned node, and the driver never answers
+`outOfFuel`. -/
+theorem driverAnswer_not_outOfFuel (q : Query) :
+    driverAnswer q ((driverNodes q).length + 1) ≠ DriverAnswer.outOfFuel := by
+  classical
+  rw [driverAnswer, searchFuel_eq_find?]
+  cases h : List.find? (nodeViolatesQuery q) (driverNodes q) with
+  | none =>
+      show DriverAnswer.safe ≠ DriverAnswer.outOfFuel
+      intro hc
+      cases hc
+  | some x =>
+      show DriverAnswer.attack x ≠ DriverAnswer.outOfFuel
+      intro hc
+      cases hc
+
+/-- And when nothing is found, sufficient fuel yields the `safe` answer: the driver and the total
+analyser agree wherever the driver finishes. -/
+theorem driverAnswer_safe_of_attackFound_false {q : Query} (hf : attackFound q = false) :
+    driverAnswer q ((driverNodes q).length + 1) = DriverAnswer.safe := by
+  classical
+  have : List.find? (nodeViolatesQuery q) (driverNodes q) = none := by
+    rw [driverNodes, ← findAttack]
+    exact findAttack_none_of_attackFound_false hf
+  rw [driverAnswer, searchFuel_eq_find?, this]
+
+/-- A budget that is too small says so rather than answering: this is the only way `unknown` is
+produced, and it never produces a security verdict. -/
+theorem driverAnswer_outOfFuel_zero (q : Query) : driverAnswer q 0 = DriverAnswer.outOfFuel := rfl
+
 /-! ### Monotonicity: what a verdict says about other bounds and other goal sets -/
 
 /-- **Growing the bounds cannot lose an attack**: a permitted execution under smaller bounds is still
@@ -622,6 +819,12 @@ theorem analyze_ne_attack_of_boundedSafe (q : Query) (h : boundedSafe q) (x : No
     intro hc
     cases hc
 
+/-- **A driver's safe answer promotes to a verdict with evidence**: the finished scan is the proof, so
+the resource-bounded driver and the total analyser agree on what a safety claim is worth. -/
+def driver_safe_evidence {q : Query} {fuel : Nat}
+    (h : driverAnswer q fuel = DriverAnswer.safe) : SafeEvidence :=
+  { query := q, safe := driverAnswer_safe_sound h }
+
 /-- One-line rendering of an answer, for the command-line driver. -/
 def describe : Verdict -> String
   | Verdict.invalidModel ds =>
@@ -741,6 +944,30 @@ permitted execution at four, so no re-search is needed to carry it upward. -/
 theorem transientQ4_boundedAttack :
     boundedAttack (Query.mk ProtSat.ExprDomain.boundsP { steps := 4, rounds := 0 } [Goal.secrecy]) :=
   boundedAttack_mono_bounds (by exact ⟨by decide, by decide⟩) transientQ_boundedAttack
+
+/-! The driver, on the same queries. -/
+
+/-- A budget of one node is not enough, and the driver says so instead of answering. -/
+theorem authQ_driver_outOfFuel : driverAnswer authQ 1 = DriverAnswer.outOfFuel := rfl
+
+/-- With the sufficient-fuel bound the driver finds the authentication attack, and that answer is
+sound by `driverAnswer_attack_sound`. -/
+theorem authQ_driver_attack :
+    ∃ x, driverAnswer authQ ((driverNodes authQ).length + 1) = DriverAnswer.attack x :=
+  driverAnswer_complete authQ authQ_boundedAttack
+
+/-- And it never reports exhaustion at that budget. -/
+theorem authQ_driver_answers :
+    driverAnswer authQ ((driverNodes authQ).length + 1) ≠ DriverAnswer.outOfFuel :=
+  driverAnswer_not_outOfFuel authQ
+
+/-- The secure query gets the `safe` answer from the driver too, with evidence attached. -/
+theorem secureQ_driver_safe :
+    driverAnswer secureQ ((driverNodes secureQ).length + 1) = DriverAnswer.safe :=
+  driverAnswer_safe_of_attackFound_false (by decide : attackFound secureQ = false)
+
+theorem secureQ_driver_evidence_safe : boundedSafe secureQ :=
+  (driver_safe_evidence secureQ_driver_safe).safe
 
 theorem emptyQ_wellFormed : (validate emptyQ).isEmpty = true := by decide
 

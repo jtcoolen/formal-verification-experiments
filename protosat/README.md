@@ -84,7 +84,13 @@ Contract.analyze_attack_sound : analyze q = attack x -> boundedAttack q
 Contract.checkWitness_sound     : checkWitness q x = true -> boundedAttack q
 `
 
-and the analyser *produces* safety evidence instead of withholding it. All four verdicts are
+and the analyser *produces* safety evidence instead of withholding it.
+
+`analyze` is total - it has no `unknown` answer, because it never gives up.
+The production shape is separate and explicit: `driverAnswer q fuel` returns `outOfFuel`,
+`attack x` or `safe` under a node budget, with `driverAnswer_attack_sound` and
+`driverAnswer_safe_sound` for what an answer is worth, and `searchFuel_eq_find?` /
+`driverAnswer_complete` for what running out is not: a resource fact, never a semantic one. All four verdicts are
 instantiated on models that already carry permanent witnesses:
 
 * `Gates.secureQ_verdict` - `boundedSafe` with its `SafeEvidence`, on a model whose honest
