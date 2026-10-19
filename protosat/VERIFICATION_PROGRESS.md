@@ -588,40 +588,20 @@ family at `shValX`/`uIdxX` and `shapeOf` at `exprVals` - after which `exprB` lea
 
 ## Log
 
-* 2026-10-19 (l) - stage 4 third installment: `Shape.V` plus the extended-domain interface in
-  `Encode.lean` (`ShapePrefix`, `shValX`, `valAtX`, `uIdxX`, `uIdxX_eq_uIdx_of_mem`,
-  `valAtX_uIdxX_of_nameable`), `Represent.shapeX` redefined so `U` is persistent and `V` is
-  nameable, the gate-equation read-back lemmas, and `Represent.domainGap` reported by the demo.
-  CI now runs 18 gates (three new ones on the representability report) with the theorem floor at
-  2740. Build green (1859 jobs), audit clean over 2752 theorems.
-* Next - the `xe` stride flip: `szXe`, `szAxe`, `vxe`, `axe`, `xeOh`, `f1`, `f2`, `evalGate`,
-  `evalLeafGate` onto `shValX`/`uIdxX`/`valAtX`, `shapeOf` onto `exprVals`, then delete `exprB`
-  from `RunOK`. Blast radius ~65 declarations, ~40 mechanical; the five hardcoded `sh.U.length`
-  sites in `Clauses.lean` (281, 429, 437, 455, 461) split into universe and extended indices.
-
-* 2026-10-19 (k) - stage 4 second installment: `ProtSat/BoundedExec.lean` (52 declarations) derives
-  ten of the twelve `RunOK` conditions from `BoundedTrace` plus the existing protocol theorems,
-  names the remaining two as `Residual`, proves the acting-session index bound (`lt_nS1_of_act`),
-  exhibits the dummy-field run that no bound can admit (`residual_not_derivable`) and the canonical
-  run that does (`canonical_actM_actD`), and adds
-  `Query.boundedSafe_of_encodingUnsat_of_residual`. Build green (1859 jobs), audit clean over 2725
-  theorems, 15/15 CI gates green.
-* Next - wire `Represent.exprVals` into `Shape` and the `xe` family so `exprB` leaves `Residual`
-  too; then the `actB` residue disappears by moving `encoding_complete` onto the repaired event
-  type, which is the last thing standing between `encodingUnsat` and a real `boundedSafe` on the
-  CNF route.
-
 * 2026-10-19 (a) - baseline inspected; build green; three review witnesses promoted to permanent
   regressions in `ProtSat/Regressions.lean`; `ProtSat/Query.lean` added (contract, validator,
   gate theorems); `Analyzer.Verdict.safe` renamed to `encodingUnsat`; README headline, section 8,
   section 10 and the module map corrected; demo extended with the query contract.
+
 * 2026-10-19 (b) - stage 2a/2b: `ProtSat/Reference.lean` with the allocation history,
   action-specific events, ordered role-aware authentication monitor, injective-agreement monitor,
   credential provisioning and persistent secret obligations; twelve kernel-checked gate theorems
   that each reverse a `Regressions` witness. Build green (1847 jobs), audit clean over 2313
   theorems.
+
 * 2026-10-19 (c) - repo housekeeping: `tmp/`, `scratch/` and `output/pdf/` untracked (kept on disk).
   Explorer prototyped and deliberately withdrawn rather than merged with holes; design recorded above.
+
 * 2026-10-19 (d) - stage 3: `ProtSat/ExprDomain.lean` (compositional expression domains,
   `eval_mem_evalDomain`, the transient pair handled) and `ProtSat/BoundedCert.lean`
   (`checkBounded` + `checkBounded_sound` giving `BoundedAttack`, with the old checker's gap exhibited
@@ -630,40 +610,55 @@ family at `shValX`/`uIdxX` and `shapeOf` at `exprVals` - after which `exprB` lea
   (`inBounds`, `candidates_complete`, `stepB`, `Node`, `isPrefix`, `extend`, `frontier`,
   `run_snoc`); it was withdrawn again at the completeness direction rather than committed with holes.
   The remaining obstacle is stated precisely below.
+
 * 2026-10-19 (e) - `ProtSat/Contract.lean`: the goal-indexed contract over the repaired
   semantics with `attackFound_decides` (sound and complete, no encoding hypothesis) and an analyser
   that issues `boundedSafe` with evidence; `analyze_attack_certificate` and `checkWitness` make an
   `attack` verdict re-checkable without the search; seven kernel-checked verdict gates including a
   non-vacuous safe authentication verdict (`authOrderQ_verdict`) and its swapped-order counterexample;
   demo extended with the enumeration contract. Build green (1855 jobs), audit clean over 2535 theorems.
+
 * 2026-10-19 (f) - `Goal.agreementInj` added and wired into the deciding contract: `goalViolation`
   and `goalViolationBool` gain the injective case with its proved monitor,
   `boundedSafe_of_BoundedSafe` is restricted to the goals the explorer actually checks, and the new
   gates give opposite verdicts for the two agreement notions on one model at one bound. The validator
   now runs the authentication-tag check for either agreement goal. Build green (1855 jobs), audit clean
   over 2555 theorems.
+
 * 2026-10-19 (g) - continuous verification (stage 7's CI item): `protosat/scripts/ci.sh` runs fifteen
   gates - build inside a time budget, no `sorry` / `native_decide` / user `axiom`, the axiom audit,
   a theorem-inventory floor so a deleted guarantee fails CI, the demo inside a budget, and assertions
   that the demo actually prints every contract verdict, replays attack certificates independently of the
   search, and both accepts the Lowe certificate and rejects the same script on NSL. All fifteen green.
   Wired into `.github/workflows/ci.yml` for a clean machine. Scratch `Probe.lean` removed.
+
 * 2026-10-19 (h) - stage 9's monotonicity layer: `Bounds.le`, `univ_mono`, `BoundedRun.mono` /
   `BoundedAttack.mono` / `BoundedSafe.mono`, the query-level `boundedSafe_mono_bounds` /
   `boundedSafe_mono_goals` / `boundedSafe_mono`, and gates showing a safety verdict transferred to a
   smaller bound without re-running the search (and agreeing with the smaller search when it is run), plus
   an attack carried to a larger bound. Also fixed a `printf` bug in the CI script's separator lines.
   Build green (1855 jobs), audit clean over 2574 theorems, 15/15 gates green.
+
 * 2026-10-19 (i) - `Contract.searchFuel` / `driverAnswer`: a fuel-bounded production driver with
   `searchFuel_eq_find?` (agreement with the unbounded search), soundness of both answers, completeness
   at the sufficient-fuel budget, and gates for exhaustion, attack and safety. All five stage-1 result
   categories now have a declaration that can produce them.
 
 * 2026-10-19 (j) - stage 4 first installment: `ProtSat/Represent.lean` (extended value domain
-  `exprVals`, index preservation, `eval_inside_exprVals`, the two gate-equation lemmas,
-  `exprB_of_exprVals`, the transient pair made nameable at the bounds that fail `exprB`, and
-  `no_bound_discharges_exprB` proving no bound discharges it). Build green (1857 jobs), audit clean
-  over 2657 theorems, 15/15 CI gates green. Roadmap stage 6 investigated; its real shape is
-  recorded above.
-* Next - wire `exprVals` into `Shape` and the `xe` family (the ~65-declaration stride change), then
-  `encoding_complete` without `exprB`; then stage 6 through `Sat.Fmla.proof []`, not the reified form.
+
+* 2026-10-19 (k) - stage 4 second installment: `ProtSat/BoundedExec.lean` (52 declarations) derives
+  ten of the twelve `RunOK` conditions from `BoundedTrace` plus the existing protocol theorems,
+  names the remaining two as `Residual`, proves the acting-session index bound (`lt_nS1_of_act`),
+  exhibits the dummy-field run that no bound can admit (`residual_not_derivable`) and the canonical
+  run that does (`canonical_actM_actD`), and adds
+  `Query.boundedSafe_of_encodingUnsat_of_residual`. Build green (1859 jobs), audit clean over 2725
+  theorems, 15/15 CI gates green.
+
+* 2026-10-19 (l) - stage 4 third installment: `Shape.V` plus the extended-domain interface in
+  `Encode.lean` (`ShapePrefix`, `shValX`, `valAtX`, `uIdxX`, `uIdxX_eq_uIdx_of_mem`,
+  `valAtX_uIdxX_of_nameable`), `Represent.shapeX` redefined so `U` is persistent and `V` is
+  nameable, the gate-equation read-back lemmas, and `Represent.domainGap` reported by the demo.
+  CI now runs 18 gates (three new ones on the representability report) with the theorem floor at
+  2740. Build green (1859 jobs), audit clean over 2755 theorems.
+
+* Next - the `xe` stride flip: `szXe`, `szAxe`, `vxe`, `axe`, `xeOh`, `f1`, `f2`, `evalGate`,
