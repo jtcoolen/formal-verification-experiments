@@ -3449,4 +3449,327 @@ theorem sat_step (hok : RunOK sh P cfg ev)
     exact clause_eval_append_left_true _ _ _ hg
   · exact stepClausesAt_act_sat sh P cfg ev hok hrel hi' hq' hc' hg cl h4
 
+/-- The deduction step's successor knowledge. -/
+theorem Rel.ded_kn {P₁ : Protocol} {C C' : Cfg} {t : Term} (h : Rel P₁ C (Ev.ded t) C') :
+    C'.kn = C.kn ++ [t] := by
+  cases h with
+  | rDed => rfl
+
+/-- If the event alternative of a deduction instance is selected, the event is a deduction step
+and the instance is the one the completeness of the instance enumeration found for it. -/
+theorem dedEv_of_evDed (hok : RunOK sh P cfg ev) (hi : i < sh.steps) (hn : n < nInst sh)
+    (hd : assignOf sh P cfg ev (evDed sh i n) = true) :
+    ∃ t, ev i = Ev.ded t ∧ dedIx sh ((cfg i).kn) (uIdx sh (some t)) = n := by
+  have hsev : shEv sh = 1 + shS sh + nInst sh := rfl
+  have hk : 1 + shS sh + n < shEv sh := by rw [hsev]; omega
+  have h2 : rdEv sh P cfg ev i = 1 + shS sh + n := by
+    rw [evDed] at hd
+    rw [assignOf_ev sh P cfg ev hi hk] at hd
+    exact of_decide_eq_true hd
+  cases h : ev i with
+  | idle =>
+      have h3 : rdEv sh P cfg ev i = 0 := by unfold rdEv; rw [h]
+      omega
+  | act q m d =>
+      have h3 : rdEv sh P cfg ev i = 1 + q := by unfold rdEv; rw [h]
+      have hqa : q < sh.nS1 := (runOK_act sh P cfg ev hok i q m d h).1
+      have hq : q < shS sh := by rw [shS]; omega
+      omega
+  | ded t =>
+      have h3 : rdEv sh P cfg ev i = 1 + shS sh + dedIx sh ((cfg i).kn) (uIdx sh (some t)) := by
+        unfold rdEv
+        rw [h]
+      have h4 : dedIx sh ((cfg i).kn) (uIdx sh (some t)) = n := by omega
+      exact ⟨t, rfl, h4⟩
+
+/-- The publisher conjunction is true exactly when its three parts are. -/
+theorem assignOf_vpb_iff (hok : RunOK sh P cfg ev) (hi : i < sh.steps) (hq : q < shS sh)
+    (hc : c < shPc sh) (hu : u < shVal sh) {a : Agent} {e : Expr}
+    (hact : P.actionAt q c = some (Action.send a e)) :
+    (assignOf sh P cfg ev (vpb sh i q c u) = true) <->
+      (assignOf sh P cfg ev (evAct sh i q) = true ∧
+       assignOf sh P cfg ev (vpc sh i q c) = true ∧
+       assignOf sh P cfg ev (vxe sh i q (eIdx P e) u) = true) := by
+  have heE : eIdx P e < shE sh := runOK_eIdx sh P cfg ev hok e (mem_allExprs_send hact)
+  have h1iff : (assignOf sh P cfg ev (evAct sh i q) = true) <-> ∃ m d, ev i = Ev.act q m d := by
+    rw [assignOf_evAct sh P cfg ev hi hq]
+    refine ⟨fun h => (evActs sh P cfg ev hq).mpr (of_decide_eq_true h),
+      fun h => decide_eq_true ((evActs sh P cfg ev hq).mp h)⟩
+  have h2iff : (assignOf sh P cfg ev (vpc sh i q c) = true) <->
+      rdPc sh P cfg ev i q = c := by
+    rw [assignOf_pc sh P cfg ev (Nat.le_of_lt hi) hq hc]
+    exact ⟨fun h => of_decide_eq_true h, fun h => decide_eq_true h⟩
+  have h3iff : (assignOf sh P cfg ev (vxe sh i q (eIdx P e) u) = true) <->
+      rdXe sh P cfg ev i q (eIdx P e) = u := by
+    rw [assignOf_xe sh P cfg ev (Nat.le_of_lt hi) hq heE hu]
+    exact ⟨fun h => of_decide_eq_true h, fun h => decide_eq_true h⟩
+  rw [assignOf_vpb sh P cfg ev hi hq hc hu]
+  constructor
+  · intro h
+    rw [asgPb] at h
+    rw [List.any_eq_true] at h
+    obtain ⟨i', hi', h2⟩ := h
+    rw [List.any_eq_true] at h2
+    obtain ⟨q', hq', h3⟩ := h2
+    rw [List.any_eq_true] at h3
+    obtain ⟨c', hc', h4⟩ := h3
+    rw [List.any_eq_true] at h4
+    obtain ⟨u', hu', h5⟩ := h4
+    rw [Bool.and_eq_true] at h5
+    obtain ⟨heq, hrd⟩ := h5
+    obtain ⟨rfl, rfl, rfl, rfl⟩ := vpb_inj_full hq (List.mem_range.mp hq') hc
+      (List.mem_range.mp hc') hu (List.mem_range.mp hu') (of_decide_eq_true heq)
+    cases h6 : ev i with
+    | act q' m' d' =>
+        simp only [h6, hact, Bool.and_eq_true, decide_eq_true_eq] at hrd
+        obtain ⟨⟨h1, h2'⟩, h3'⟩ := hrd
+        subst h1
+        exact ⟨h1iff.mpr ⟨m', d', h6⟩, h2iff.mpr h2', h3iff.mpr h3'⟩
+    | idle =>
+        simp only [h6, hact] at hrd
+        exact absurd hrd (by simp)
+    | ded t =>
+        simp only [h6, hact] at hrd
+        exact absurd hrd (by simp)
+  · intro h
+    obtain ⟨h1, h2', h3'⟩ := h
+    obtain ⟨m, d, h6⟩ : ∃ m d, ev i = Ev.act q m d := h1iff.mp h1
+    rw [asgPb]
+    refine List.any_eq_true.mpr ⟨i, List.mem_range.mpr hi, ?_⟩
+    refine List.any_eq_true.mpr ⟨q, List.mem_range.mpr hq, ?_⟩
+    refine List.any_eq_true.mpr ⟨c, List.mem_range.mpr hc, ?_⟩
+    refine List.any_eq_true.mpr ⟨u, List.mem_range.mpr hu, ?_⟩
+    rw [Bool.and_eq_true]
+    refine ⟨decide_eq_true rfl, ?_⟩
+    simp only [h6, hact, Bool.and_eq_true, decide_eq_true_eq]
+    exact ⟨⟨trivial, h2iff.mp h2'⟩, h3iff.mp h3'⟩
+
+/-- The store-leak conjunction is true exactly when the slot holds the message and the attacker
+knows it. -/
+theorem assignOf_vau_iff (hi : i ≤ sh.steps) (hq : q < shS sh) (hx : x < shV sh)
+    (hu : u < shVal sh) (hsec : storeSecret sh P q x = true) :
+    (assignOf sh P cfg ev (vau sh i q x u) = true) <->
+      (assignOf sh P cfg ev (vst sh i q x u) = true ∧
+       assignOf sh P cfg ev (vkn sh i u) = true) := by
+  have hst_iff : (assignOf sh P cfg ev (vst sh i q x u) = true) <->
+      rdSt sh P cfg ev i q x = u := by
+    rw [assignOf_st sh P cfg ev hi hq hx hu]
+    exact ⟨fun h => of_decide_eq_true h, fun h => decide_eq_true h⟩
+  have hkn_iff : (assignOf sh P cfg ev (vkn sh i u) = true) <->
+      match valAt sh u with
+      | some t => t ∈ (cfg i).kn
+      | none => False := by
+    rw [assignOf_kn sh P cfg ev hi hu, knHolds]
+    cases h : valAt sh u with
+    | none => simp [h]
+    | some t => simp [h, decide_eq_true_eq]
+  rw [assignOf_vau sh P cfg ev hi hq hx hu]
+  constructor
+  · intro h
+    rw [asgAu] at h
+    rw [List.any_eq_true] at h
+    obtain ⟨i', hi', h2⟩ := h
+    rw [List.any_eq_true] at h2
+    obtain ⟨q', hq', h3⟩ := h2
+    rw [List.any_eq_true] at h3
+    obtain ⟨x', hx', h4⟩ := h3
+    rw [List.any_eq_true] at h4
+    obtain ⟨u', hu', h5⟩ := h4
+    rw [Bool.and_eq_true] at h5
+    obtain ⟨heq, hrd⟩ := h5
+    obtain ⟨rfl, rfl, rfl, rfl⟩ := vau_inj_full hq (List.mem_range.mp hq') hx
+      (List.mem_range.mp hx') hu (List.mem_range.mp hu') (of_decide_eq_true heq)
+    cases h6 : valAt sh u with
+    | none =>
+        simp only [h6] at hrd
+        exact absurd hrd (by simp)
+    | some t =>
+        simp only [h6, Bool.and_eq_true, decide_eq_true_eq] at hrd
+        obtain ⟨hst, hkn⟩ := hrd
+        rw [h6] at hkn_iff
+        exact ⟨hst_iff.mpr hst, hkn_iff.mpr hkn⟩
+  · intro h
+    obtain ⟨h1, h2⟩ := h
+    cases h6 : valAt sh u with
+    | none =>
+        rw [h6] at hkn_iff
+        rw [hkn_iff] at h2
+        simp at h2
+    | some t =>
+        rw [asgAu]
+        refine List.any_eq_true.mpr ⟨i, List.mem_range.mpr (Nat.lt_succ_of_le hi), ?_⟩
+        refine List.any_eq_true.mpr ⟨q, List.mem_range.mpr hq, ?_⟩
+        refine List.any_eq_true.mpr ⟨x, List.mem_range.mpr hx, ?_⟩
+        refine List.any_eq_true.mpr ⟨u, List.mem_range.mpr hu, ?_⟩
+        rw [Bool.and_eq_true]
+        refine ⟨decide_eq_true rfl, ?_⟩
+        simp only [h6, Bool.and_eq_true, decide_eq_true_eq]
+        rw [h6] at hkn_iff
+        exact ⟨hst_iff.mp h1, hkn_iff.mp h2⟩
+
+/-- **Clause group 6 (deduction instances).**  If the event alternative of a universe rule
+instance is selected at step i, then every premise of that instance is known at step i and its
+conclusion is known at step i+1: this is the propositional form of the eleven rules of
+specification section 2, one clause per premise.  The selection literal `evDed sh i n` is true
+exactly when the run's event is a deduction whose message is produced by instance n, which is
+where the completeness of the instance enumeration (ProtSat.Complete.dedIx_spec) is used. -/
+theorem sat_ded (hok : RunOK sh P cfg ev) (hsub : univSub sh)
+    (hrel : ∀ i, Rel P (cfg i) (ev i) (cfg (i + 1))) :
+    Sat (assignOf sh P cfg ev) (dedClauses sh) := by
+  intro cl hcl
+  simp only [dedClauses, cnfOf, eachStep, eachInst, List.mem_flatMap, List.mem_range] at hcl
+  obtain ⟨i, hi, h2⟩ := hcl
+  obtain ⟨n, hn, h3⟩ := h2
+  have hn' : n < nInst sh := List.mem_range.mp (by simpa using hn)
+  cases hinst : instAt sh n with
+  | none =>
+      rw [dedClausesAt, hinst] at h3
+      exact absurd h3 (by simp)
+  | some inst =>
+      rw [dedClausesAt, hinst] at h3
+      rw [List.mem_append] at h3
+      rcases h3 with hprem | hconcl
+      · -- a premise clause
+        rw [List.mem_map] at hprem
+        obtain ⟨p, hp, rfl⟩ := hprem
+        rcases bool_eq_cases (assignOf sh P cfg ev (evDed sh i n)) with hd | hd
+        · obtain ⟨t, htev, hidx⟩ := dedEv_of_evDed sh P cfg ev hok hi hn' hd
+          have htU : t ∈ sh.U := runOK_dedU sh P cfg ev hok i t htev
+          have htev' : ev i = Ev.ded t := htev
+          have hone : OneStep (cfg i).kn t := by
+            have h2 := hrel i
+            rw [htev] at h2
+            exact Rel.ded_oneStep h2
+          obtain ⟨n', hn', hon'⟩ :=
+            dedIx_exists hsub (runOK_knU sh P cfg ev hok i) htU hone
+          have hspec := dedIx_spec ⟨n', hn', hon'⟩
+          have hon2 : dedInstOk sh ((cfg i).kn) n (uIdx sh (some t)) = true := by
+            rw [← hidx]
+            exact hspec.2
+          have hall : inst.prem.all fun p' =>
+              match valAt sh p' with
+              | some x => decide (x ∈ (cfg i).kn)
+              | none => false := by
+            rw [dedInstOk, hinst] at hon2
+            rw [Bool.and_eq_true] at hon2
+            exact hon2.2
+          rw [List.all_eq_true] at hall
+          have h2' := hall p (by simpa using hp)
+          have hsl : shVal sh = sh.U.length + 1 := rfl
+          have hpV : p < shVal sh := by
+            by_contra e
+            rw [hsl] at e
+            have h3' : valAt sh p = none := rget_oob_ge sh.U p (by omega)
+            rw [h3'] at h2'
+            simp at h2'
+          have hlit : Lit.eval (assignOf sh P cfg ev) (pos (vkn sh i p)) = true := by
+            rw [pos_eval, assignOf_kn sh P cfg ev (Nat.le_of_lt hi) hpV, knHolds]
+            cases hval : valAt sh p with
+            | none => simp [hval] at h2'
+            | some x =>
+                simp only [hval] at h2' ⊢
+                exact h2'
+          exact clause2_right _ _ _ hlit
+        · exact clause2_left _ _ _ (by simp [neg_eval, hd])
+      · -- the conclusion clause
+        simp only [List.mem_singleton] at hconcl
+        subst hconcl
+        rcases bool_eq_cases (assignOf sh P cfg ev (evDed sh i n)) with hd | hd
+        · obtain ⟨t, htev, hidx⟩ := dedEv_of_evDed sh P cfg ev hok hi hn' hd
+          have htU : t ∈ sh.U := runOK_dedU sh P cfg ev hok i t htev
+          have hone : OneStep (cfg i).kn t := by
+            have h2 := hrel i
+            rw [htev] at h2
+            exact Rel.ded_oneStep h2
+          obtain ⟨n', hn', hon'⟩ :=
+            dedIx_exists hsub (runOK_knU sh P cfg ev hok i) htU hone
+          have hspec := dedIx_spec ⟨n', hn', hon'⟩
+          have hon2 : dedInstOk sh ((cfg i).kn) n (uIdx sh (some t)) = true := by
+            rw [← hidx]
+            exact hspec.2
+          have hc' : inst.concl = uIdx sh (some t) := by
+            rw [dedInstOk, hinst] at hon2
+            rw [Bool.and_eq_true] at hon2
+            exact of_decide_eq_true hon2.1
+          have h2r := hrel i
+          rw [htev] at h2r
+          have hkn : (cfg (i + 1)).kn = (cfg i).kn ++ [t] := Rel.ded_kn h2r
+          have hcV : inst.concl < shVal sh := by rw [hc']; exact uIdx_lt' sh _
+          have hlit : Lit.eval (assignOf sh P cfg ev) (pos (vkn sh (i + 1) inst.concl)) = true := by
+            rw [pos_eval, assignOf_kn sh P cfg ev (Nat.succ_le_of_lt hi) hcV, knHolds]
+            have hv : valAt sh inst.concl = some t := by rw [hc']; exact valAt_uIdx_some sh htU
+            rw [hv, hkn]
+            exact decide_eq_true (by simp)
+          exact clause2_right _ _ _ hlit
+        · exact clause2_left _ _ _ (by simp [neg_eval, hd])
+
+/-- **Clause group 7 (publisher conjunctions).**  Each send publisher is a Tseitin definition of
+the conjunction "session q acts at step i with program counter c and the value it sends is u";
+the characteristic assignment sets the auxiliary variable exactly when the three conjuncts hold
+(ProtSat.Complete.assignOf_vpb_iff), which is what the completeness direction of
+ProtSat.sat_andNDef requires. -/
+theorem sat_pubAux (hok : RunOK sh P cfg ev) :
+    Sat (assignOf sh P cfg ev) (pubAuxClauses sh P) := by
+  intro cl hcl
+  simp only [pubAuxClauses, cnfOf, eachStep, eachSess, eachPc, List.mem_flatMap, List.mem_range] at hcl
+  obtain ⟨i, hi, h2⟩ := hcl
+  obtain ⟨q, hq, h3⟩ := h2
+  obtain ⟨c, hc, h4⟩ := h3
+  obtain ⟨u, hu, h5⟩ := h4
+  have huV : u < shVal sh := Nat.lt_succ_of_lt hu
+  cases h : P.actionAt q c with
+  | none =>
+      rw [pubAuxEntry, h] at h5
+      exact absurd h5 (by simp)
+  | some act =>
+      cases act with
+      | send a e =>
+          have heE : eIdx P e < shE sh :=
+            runOK_eIdx sh P cfg ev hok e (mem_allExprs_send h)
+          rw [pubAuxEntry, h] at h5
+          have hiff := assignOf_vpb_iff sh P cfg ev hok hi hq hc huV h
+          refine (sat_andNDef.mpr ⟨?_, ?_⟩) cl h5
+          · intro haux l hl
+            simp only [List.mem_cons, List.mem_nil_iff, or_false] at hl
+            rcases hl with rfl | rfl | rfl
+            · exact ((hiff.mp haux).1)
+            · exact ((hiff.mp haux).2.1)
+            · exact ((hiff.mp haux).2.2)
+          · intro hall
+            refine hiff.mpr ⟨by simpa using hall (pos (evAct sh i q)) (by simp),
+              by simpa using hall (pos (vpc sh i q c)) (by simp),
+              by simpa using hall (pos (vxe sh i q (eIdx P e) u)) (by simp)⟩
+      | _ =>
+          rw [pubAuxEntry, h] at h5
+          exact absurd h5 (by simp)
+
+/-- **Clause group 10 (store-leak conjunctions).**  Each store-leak auxiliary variable defines
+the conjunction "session q holds the message numbered u at step i and the attacker knows it", and
+again the characteristic assignment agrees with the definition. -/
+theorem sat_leakAux (hok : RunOK sh P cfg ev) :
+    Sat (assignOf sh P cfg ev) (leakAuxClauses sh P) := by
+  intro cl hcl
+  simp only [leakAuxClauses, cnfOf, eachStep1, eachSess, eachVar, List.mem_flatMap, List.mem_range] at hcl
+  obtain ⟨i, hi, h2⟩ := hcl
+  obtain ⟨q, hq, h3⟩ := h2
+  obtain ⟨x, hx, h4⟩ := h3
+  rw [leakAuxEntry] at h4
+  by_cases hsec : storeSecret sh P q x
+  · rw [if_pos hsec, List.mem_flatMap] at h4
+    obtain ⟨u, hu, h5⟩ := h4
+    have huV : u < shVal sh := Nat.lt_succ_of_lt (List.mem_range.mp hu)
+    rw [andNDef] at h5
+    have hiff := assignOf_vau_iff sh P cfg ev (Nat.le_of_lt_succ hi) hq hx huV hsec
+    refine (sat_andNDef.mpr ⟨?_, ?_⟩) cl h5
+    · intro haux l hl
+      simp only [List.mem_cons, List.mem_nil_iff, or_false] at hl
+      rcases hl with rfl | rfl
+      · exact (hiff.mp haux).1
+      · exact (hiff.mp haux).2
+    · intro hall
+      refine hiff.mpr ⟨by simpa using hall (pos (vst sh i q x u)) (by simp),
+        by simpa using hall (pos (vkn sh i u)) (by simp)⟩
+  · rw [if_neg hsec] at h4
+    exact absurd h4 (by simp)
+
 end ProtSat.Complete
