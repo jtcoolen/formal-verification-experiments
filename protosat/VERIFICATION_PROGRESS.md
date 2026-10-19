@@ -636,17 +636,6 @@ linear proof check. The table is in the module header so the cost is published, 
 
 ## Log
 
-* 2026-10-19 (m) - stage 4 fourth installment: `RunOK.actB` made conditional on the actions that
-  read the fields (`readsDelivery`, `readsNonce`), `BoundedExec.actB_of_bounded` deriving it from
-  the public bound, `Residual` reduced to `exprB`, `Represent.exprB_of_domainGap_false` and
-  `BoundedExec.withinBounds_of_bounded` discharging it from a decidable query check, and
-  `ProtSat/EndToEnd.lean` producing `boundedSafeGoals` / `noLeak` for a gap-free example with the
-  solver answer as its only hypothesis. Kernel re-derivation costs measured and published.
-  Build green (1861 jobs), audit clean over 2769 theorems, 18/18 CI gates green.
-* Next - stage 6: an independently checked UNSAT certificate (through `Sat.Fmla.proof []`, not the
-  reified form) so `hvs` stops being a hypothesis; then the `xe` stride flip onto `Shape.V` so
-  gap-free stops being a restriction on the protocol; then stage 7 NS/NSL instrumentation.
-
 * 2026-10-19 (a) - baseline inspected; build green; three review witnesses promoted to permanent
   regressions in `ProtSat/Regressions.lean`; `ProtSat/Query.lean` added (contract, validator,
   gate theorems); `Analyzer.Verdict.safe` renamed to `encodingUnsat`; README headline, section 8,
@@ -719,5 +708,13 @@ linear proof check. The table is in the module header so the cost is published, 
   nameable, the gate-equation read-back lemmas, and `Represent.domainGap` reported by the demo.
   CI now runs 18 gates (three new ones on the representability report) with the theorem floor at
   2740. Build green (1859 jobs), audit clean over 2755 theorems.
+
+* 2026-10-19 (m) - stage 4 fourth installment: `RunOK.actB` made conditional on the actions that
+  read the fields (`readsDelivery`, `readsNonce`), `BoundedExec.actB_of_bounded` deriving it from
+  the public bound, `Residual` reduced to `exprB`, `Represent.exprB_of_domainGap_false` and
+  `BoundedExec.withinBounds_of_bounded` discharging it from a decidable query check, and
+  `ProtSat/EndToEnd.lean` producing `boundedSafeGoals` / `noLeak` for a gap-free example with the
+  solver answer as its only hypothesis. Kernel re-derivation costs measured and published.
+  Build green (1861 jobs), audit clean over 2769 theorems, 18/18 CI gates green.
 
 * Next - the `xe` stride flip: `szXe`, `szAxe`, `vxe`, `axe`, `xeOh`, `f1`, `f2`, `evalGate`,
