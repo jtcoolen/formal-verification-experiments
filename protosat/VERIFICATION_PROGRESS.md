@@ -918,14 +918,30 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   protocol, `qg_safe_of_code` says: any code the checker accepts for this protocol's formula is a
   bounded-security theorem about the protocol, with no solver in the statement. What is still
   missing is the producer of such a code.
+* 2026-10-19 (v) - stage 5, the half that was missing: `ProtSat/Sound.lean`. `encoding_sound` now
+  returns the **complete bounded predicate**. `decVal_range` - a decoded value is a read *of* the
+  universe list, `valAt sh u = rget sh.U u`, so it is a universe message by construction - lifts
+  through `decSt_range`, `decXe_range`, `decLearn_range` and `decKnSeq_range` (seeded by
+  `initKn_subset_univ`, with `StoreWF` from `Agrees` pinning every stored pair to a slot) to
+  `decRun_cfgInUniverse`, and thence to `decoding_runsInUniverse` and `boundedTrace_decRun`. So
+  `Sat a (encode P B)` gives `BoundedAttack P B` (`encoding_sound_bounded'`) and
+  `boundedAttackGoals (Query.mk P B [secrecy])` (`boundedAttackGoals_of_sat`) - with only the two
+  hypotheses `encoding_sound` already had: `domainGap` is a *forward* closure condition and the
+  decoders run the other way. That closes the equivalence:
+  `encoding_correct : Satisfiable (encode P B) <-> boundedAttackGoals q` for a gap-free query,
+  and `leaky_query_boundedAttack` instantiates it with no hypotheses at all on a real protocol,
+  the witness being the decoded run rather than a hand-built trace. Still secrecy only:
+  `Encode.violationLits` names leak literals and nothing else.
+  Build green (1870 jobs), audit clean over 2936 theorems, 22/22 CI gates green.
 * Next - stage 6 is nearly closed: the checker (`Resolution`), the binding of evidence to its
-  formula (`checkAgainst`), and the serialization (`Serialize`) are proved; what is missing is a
-  PROVER, so that a safety answer arrives with a refutation instead of being re-run in the kernel.
-  `ProtSat/Refute.lean` is the next file: a saturating resolution engine whose output
-  `checkProof` accepts (`refute_sound`), plus the completeness half. Then the xe stride flip onto
-  `Shape.V` (szXe, szAxe, vxe, axe, xeOh, f1, f2, evalGate, evalLeafGate), after which `domainGap`
-  is no longer a restriction on the protocol and `Residual` is empty. Then the two open halves of
-  the correspondence: `encoding_sound` returning `runsInUniverse` for the decoded run, and
-  agreement violations in the CNF at all - until that is done a CNF `boundedSafe` is a statement
-  about secrecy only, which is why the label says `encodingUnsat`. Then stage 7: NS/NSL
+  formula (`checkAgainst`), and the serialization (`Serialize`) are proved, and a checked code now
+  reaches `boundedSafeGoals q` (`CheckedSafe.boundedSafe_of_checkedCode`). What is missing is a
+  PROVER, so a safety answer arrives with a refutation instead of being re-run in the kernel:
+  `ProtSat/Refute.lean` - a saturating resolution engine whose output `checkProof` accepts. Then
+  the xe stride flip onto `Shape.V` (szXe, szAxe, vxe, axe, xeOh, f1, f2, evalGate,
+  evalLeafGate), after which `domainGap` is no longer a restriction on the protocol and
+  `Residual` is empty - it is now the *only* hypothesis separating the CNF route from an
+  unconditional statement. Then agreement violations in the CNF at all: until that is done a CNF
+  `boundedSafe` is a statement about secrecy only, which is why the label says `encodingUnsat`
+  and why `Sound.encoding_correct` is indexed by `[Goal.secrecy]`. Then stage 7: NS/NSL
   authentication instrumentation with honest-execution witnesses..

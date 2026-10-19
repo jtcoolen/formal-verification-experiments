@@ -387,7 +387,8 @@ solver.  Five accepted and three rejected example certificates are checked by `d
 
 | # | statement | Lean theorem | status |
 |---|---|---|---|
-| A | every model of the CNF decodes to a valid bounded execution that **leaks a declared secret** | `Encoding.encoding_sound`, `encoding_sound_bounded` | proved |
+| A | every model of the CNF decodes to a valid bounded execution that **leaks a declared secret** - and the decoded run is now proved to stay inside the universe, so the conclusion is the public bounded predicate and not an attack plus a length inequality | `Encoding.encoding_sound`, `Sound.decoding_runsInUniverse`, `Sound.encoding_sound_bounded'` | proved |
+| A= | **the equivalence**, both directions, for a gap-free query: the generated CNF is satisfiable exactly when the query has a bounded attack on its secrecy goal; instantiated with no hypotheses at all on a real leaking protocol, where the witness is the run decoded from the assignment | `Sound.encoding_correct`, `Sound.leaky_query_boundedAttack` | proved (secrecy only) |
 | B | every valid bounded **leaking** execution that satisfies `WithinBounds` yields a model of the CNF; for a gap-free query `WithinBounds` is itself a theorem of the bound (`BoundedExec.withinBounds_of_bounded`), and the correspondence is instantiated in both directions on two real protocols (`Differential.guard_correct`, `Differential.leak_correct`) | `Complete.encoding_complete`, `Differential.leak_sat` | **proved, with the hypotheses shown** |
 | C | every accepted certificate is a genuine trace | `Certificate.checkCertificate_sound` | proved |
 | D | solver SAT answer is a real model | `DPLL.dpll_sound` | proved |
@@ -507,6 +508,7 @@ and the tenth is not enabled.
 | `ProtSat/Resolution.lean` | 351 | independently checkable UNSAT evidence: resolution refutations, `checkProof_sound`, kernel-checked rejection gates, evidence bound to its formula, DIMACS export |
 | `ProtSat/Serialize.lean` | 336 |
 | `ProtSat/CheckedSafe.lean` | 152 | the evidence chain at query level: `boundedSafe_of_checkedCode`, `SafeEvidence` from a checked refutation |
+| `ProtSat/Sound.lean` | 380 | the soundness half: decoded values are universe values, `decoding_runsInUniverse`, and the two-sided `encoding_correct` |
  refutations as a flat integer code: total decoder, round trip, injectivity, `checkCode_sound` |
 | `ProtSat/ExprDomain.lean` | 310 | finite per-expression domains: `evalDomain`, `eval_mem_evalDomain`, the transient pair handled |
 | `ProtSat/BoundedCert.lean` | 170 | `checkBounded`: certificates that carry their bounds, sound to `BoundedAttack` |
