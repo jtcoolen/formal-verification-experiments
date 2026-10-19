@@ -426,6 +426,12 @@ stay separate in the verdict rather than collapsing into "something went wrong".
   gates give opposite verdicts for the two agreement notions on one model at one bound. The validator
   now runs the authentication-tag check for either agreement goal. Build green (1855 jobs), audit clean
   over 2555 theorems.
+* 2026-10-19 (g) - continuous verification (stage 7's CI item): `protosat/scripts/ci.sh` runs fifteen
+  gates - build inside a time budget, no `sorry` / `native_decide` / user `axiom`, the axiom audit,
+  a theorem-inventory floor so a deleted guarantee fails CI, the demo inside a budget, and assertions
+  that the demo actually prints every contract verdict, replays attack certificates independently of the
+  search, and both accepts the Lowe certificate and rejects the same script on NSL. All fifteen green.
+  Wired into `.github/workflows/ci.yml` for a clean machine. Scratch `Probe.lean` removed.
 * Next - the explorer (above), then stage 3's `BoundedExecution` unification, then per-expression
   `EvalDomain` construction (so `fst (pair x x)` is representable even when the pair is outside
   `U`), and deriving the compiler's representability conditions from the public bound instead of

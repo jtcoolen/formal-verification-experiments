@@ -146,6 +146,32 @@ MATHLIB_CACHE_DIR=$PWD/.mathlibcache lake exe cache get
 
 Single-module checking: `lake env lean ProtSat/Encoding.lean`.
 
+### Continuous verification
+
+`scripts/ci.sh` is the gate the roadmap asks for, and `.github/workflows/ci.yml` runs it on a clean
+machine. It is one command and it is meant to be run before every commit:
+
+`sh
+cd protosat && ./scripts/ci.sh
+`
+
+Each line of its output is a claim this README makes, checked rather than asserted:
+
+| Gate | What fails if |
+|---|---|
+| `lake build` inside a time budget | a proof stops checking, or the development silently becomes unbuildable |
+| no `sorry`, no `native_decide`, no user `axiom` | a trusted result stops being a proof |
+| axiom audit | a theorem starts depending on something beyond `propext`, `Classical.choice`, `Quot.sound` |
+| theorem inventory floor | a guarantee is deleted: the count may go up, not down |
+| demo inside a time budget | the executable pipeline breaks or regresses badly in cost |
+| demo prints `BOUNDED SAFE`, `ATTACK`, `ENCODING UNSAT`, `UNSUPPORTED GOALS`, `NO GOALS SELECTED`, `INVALID MODEL` | a contract case stops being reachable, so a verdict category becomes untested |
+| demo prints `witness re-checked without the search: true` | attack certificates stop replaying independently of the search |
+| demo prints `checkCertificate = true` and `= false` | the independent checker stops accepting the Lowe attack, or stops rejecting the same script on NSL |
+
+The honest-execution witnesses and the kernel-checked gates (`ProtSat/Regressions.lean`,
+`ProtSat/Reference.lean`, `ProtSat/Explore.lean`, `ProtSat/Contract.lean`) are part of the build,
+so they are covered by the first line rather than needing a separate check.
+
 ---
 
 ## 1. The message algebra (specification section 1)
