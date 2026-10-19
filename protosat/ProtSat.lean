@@ -28,3 +28,4 @@ import ProtSat.Correspondence
 import ProtSat.BoundedCert
 import ProtSat.Explore
 import ProtSat.Contract
+import ProtSat.CheckedSafe
