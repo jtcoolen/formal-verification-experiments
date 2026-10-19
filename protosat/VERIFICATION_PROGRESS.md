@@ -945,6 +945,18 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   that does declare a secret, keeps it, and still breaks agreement, with an honest execution
   reaching the secret) is the follow-up in progress.
   Build green, audit clean over 2965 theorems, 22/22 CI gates green.
+* 2026-10-19 (x) - stage 6 fourth installment: `ProtSat/Refute.lean`, the producer the checker was
+  waiting for. A saturating resolution engine (`saturate : Nat -> CNF -> List Line`, all resolvents
+  of all pairs per round, structurally decreasing with clause deduplication) plus `refutationOf`,
+  which cuts the line list at the empty clause. The theorem that matters is the direction nobody
+  had: `refute_sound : refutationOf f k = some p -> checkProof f p = true` - the engine's output is
+  accepted by the INDEPENDENT checker, so a safety answer no longer has to be certified by replaying
+  a search. `refute_unsat` composes it with `checkProof_sound`; `refute_answer` reaches the analyser's
+  verdict without running the solver. Kernel gate `demo_refutation_checked` decides that the engine's
+  own 19-line refutation of `demoF` is accepted, and `demo_refutation_found` proves the engine did
+  not silently fall back to the empty list. Not yet: completeness (DP variable elimination in
+  progress) and any run on a real protocol formula.
+  Build green, audit clean, 22/22 CI gates green.
 * Next - stage 6 is nearly closed: the checker (`Resolution`), the binding of evidence to its
   formula (`checkAgainst`), and the serialization (`Serialize`) are proved, and a checked code now
   reaches `boundedSafeGoals q` (`CheckedSafe.boundedSafe_of_checkedCode`). What is missing is a

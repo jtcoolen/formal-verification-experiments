@@ -51,9 +51,11 @@ for two reasons that are proved rather than confessed - see
     `ProtSat/CheckedSafe.lean` closes the chain at the level of a query:
     `boundedSafe_of_checkedCode` gives `boundedSafeGoals q` from an accepted code, with the
     goal-selection hypothesis stated rather than assumed, and it builds a `SafeEvidence` -
-    something nothing could construct before. The prover that emits refutations for large
-    instances is not wired up: the reference DPLL emits none and no LRAT solver is installed
-    here, so the checker stands ready and the gap is named, not hidden.
+    something nothing could construct before. `ProtSat/Refute.lean` is the producer: a
+    saturating resolution engine whose output the checker accepts (`refute_sound`), gated by `decide`
+    on a real refutation it emits itself; it has not yet been run on a protocol-sized formula,
+    and the reference DPLL still emits no proofs and no LRAT solver is installed
+    here, so what remains is production at protocol size - measured, not hidden.
 
 `ProtSat/Query.lean` is the layer that keeps the two apart. A `Query` names the protocol, the
 bounds and the **selected goals** (`secrecy`, `agreement`, `agreementInj`);
@@ -514,6 +516,7 @@ and the tenth is not enabled.
 | `ProtSat/CheckedSafe.lean` | 152 | the evidence chain at query level: `boundedSafe_of_checkedCode`, `SafeEvidence` from a checked refutation |
 | `ProtSat/Sound.lean` | 380 | the soundness half: decoded values are universe values, `decoding_runsInUniverse`, and the two-sided `encoding_correct` |
 | `ProtSat/AuthGap.lean` | 310 | the authentication gap as a theorem: safe for secrecy and attacked for agreement at one protocol and one bound |
+| `ProtSat/Refute.lean` | 571 | the producer: saturating resolution, `refute_sound` (the checker accepts the engine's output), kernel-checked gate on its own refutation |
  refutations as a flat integer code: total decoder, round trip, injectivity, `checkCode_sound` |
 | `ProtSat/ExprDomain.lean` | 310 | finite per-expression domains: `evalDomain`, `eval_mem_evalDomain`, the transient pair handled |
 | `ProtSat/BoundedCert.lean` | 170 | `checkBounded`: certificates that carry their bounds, sound to `BoundedAttack` |
