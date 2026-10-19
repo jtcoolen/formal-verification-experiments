@@ -168,7 +168,7 @@ theorem runs_rel {P : Protocol} {C0 : Cfg} {tr : List Ev} {Cs : List Cfg}
 /-! ### The boundedness hypothesis -/
 
 /-- **The run stays inside the shape** (the general form, stated for an arbitrary shape).
-Ten conditions, all of them instances of "the bounds can name what the run does":
+Twelve conditions, all of them instances of "the bounds can name what the run does":
 
 1. every message the attacker ever knows is a universe message;
 2. every value any session ever stores is a universe message;
@@ -188,23 +188,42 @@ Ten conditions, all of them instances of "the bounds can name what the run does"
 9. the shape's store-slot stride covers every variable the protocol reads - otherwise the
    store group a variable leaf of an evaluation gate refers to would not exist;
 10. the shape's expression stride covers the protocol's expression table - otherwise the
-   value group of an evaluation gate would not exist.  At the shape of the analysis both 9 and
-   10 are theorems (ProtSat.Encoding.lt_shV_of_mem, ProtSat.Encoding.eIdx_lt), not hypotheses.
+   value group of an evaluation gate would not exist.
+11. every variable an action writes has a store slot in the shape;
+12. every position that has an action leaves room for the successor program counter.
+
+At the shape of the analysis, conditions 9 to 12 are theorems about the protocol
+(ProtSat.Encoding.lt_shV_of_mem, ProtSat.Encoding.eIdx_lt, ProtSat.Encoding.lt_shV_of_written,
+ProtSat.Encoding.lt_shPc_succ), not hypotheses.
 
 These are precisely the conditions under which a finite encoding can represent the run at all
 - a run that leaves the universe has no finite name, and a run whose session index is not
 instantiated has no event alternative. -/
-def RunOK (sh : Shape) (P : Protocol) (cfg : Nat → Cfg) (ev : Nat → Ev) : Prop :=
-  (∀ i t, t ∈ (cfg i).kn → t ∈ sh.U) ∧
-  (∀ i q v, q < sh.nS1 → v ∈ storeVals (storeOf (cfg i) q) → v ∈ sh.U) ∧
-  (∀ i q m d, ev i = Ev.act q m d → q < sh.nS1 ∧ m ∈ sh.U ∧ d ∈ sh.D) ∧
-  (∀ i t, ev i = Ev.ded t → t ∈ sh.U) ∧
-  (∀ i q, q < sh.nS1 → pcOf (cfg i) q < shPc sh) ∧
-  (∀ i q x, q < sh.nS1 → x ∈ (storeOf (cfg i) q).map Prod.fst → x < shV sh) ∧
-  (∀ i q e, e ∈ allExprs P → admissible sh (Expr.eval e (storeOf (cfg i) q)) = true) ∧
-  (∀ i, (cfg i).sess.length = sh.nS1) ∧
-  (∀ E ∈ allExprs P, ∀ x ∈ Expr.vars E, x < shV sh) ∧
-  (∀ E ∈ allExprs P, eIdx P E < shE sh)
+structure RunOK (sh : Shape) (P : Protocol) (cfg : Nat → Cfg) (ev : Nat → Ev) : Prop where
+  /-- 1. -/
+  knU : ∀ i t, t ∈ (cfg i).kn → t ∈ sh.U
+  /-- 2. -/
+  storeU : ∀ i q v, q < sh.nS1 → v ∈ storeVals (storeOf (cfg i) q) → v ∈ sh.U
+  /-- 3. -/
+  actB : ∀ i q m d, ev i = Ev.act q m d → q < sh.nS1 ∧ m ∈ sh.U ∧ d ∈ sh.D
+  /-- 4. -/
+  dedU : ∀ i t, ev i = Ev.ded t → t ∈ sh.U
+  /-- 5. -/
+  pcB : ∀ i q, q < sh.nS1 → pcOf (cfg i) q < shPc sh
+  /-- 6. -/
+  varB : ∀ i q x, q < sh.nS1 → x ∈ (storeOf (cfg i) q).map Prod.fst → x < shV sh
+  /-- 7. -/
+  exprB : ∀ i q e, e ∈ allExprs P → admissible sh (Expr.eval e (storeOf (cfg i) q)) = true
+  /-- 8. -/
+  sessLen : ∀ i, (cfg i).sess.length = sh.nS1
+  /-- 9. -/
+  varsB : ∀ E ∈ allExprs P, ∀ x ∈ Expr.vars E, x < shV sh
+  /-- 10. -/
+  eIdxB : ∀ E ∈ allExprs P, eIdx P E < shE sh
+  /-- 11. every variable an action writes has a store slot in the shape. -/
+  writtenB : ∀ q c act, P.actionAt q c = some act → ∀ x ∈ act.written, x < shV sh
+  /-- 12. a position with an action leaves room for the successor program counter. -/
+  pcActB : ∀ q c, P.actionAt q c ≠ none → c + 1 < shPc sh
 
 /-- **The run stays inside the bounds**: ProtSat.Complete.RunOK at the shape of the analysis.
 This is the hypothesis the completeness theorem (specification 8B) needs and the analyser
@@ -1426,44 +1445,44 @@ theorem ixOf_lt [BEq α] [LawfulBEq α] : ∀ (l : List α) (a : α), a ∈ l �
 
 /-! ### Inverting a transition of the operational semantics -/
 
-theorem runOK_knU (h : RunOK sh P cfg ev) : ∀ i t, t ∈ (cfg i).kn → t ∈ sh.U := by
-  rcases h with ⟨h1, _, _, _, _, _, _, _, _, _⟩; exact h1
+/-- The twelve boundedness conditions, as named projections.  They are kept as lemmas so that
+a proof says which bound it is using. -/
+theorem runOK_knU (h : RunOK sh P cfg ev) : ∀ i t, t ∈ (cfg i).kn → t ∈ sh.U := h.knU
 
 theorem runOK_storeU (h : RunOK sh P cfg ev) : ∀ i q v, q < sh.nS1 →
-    v ∈ storeVals (storeOf (cfg i) q) → v ∈ sh.U := by
-  rcases h with ⟨_, h2, _, _, _, _, _, _, _, _⟩; exact h2
+    v ∈ storeVals (storeOf (cfg i) q) → v ∈ sh.U := h.storeU
 
 theorem runOK_act (h : RunOK sh P cfg ev) : ∀ i q m d, ev i = Ev.act q m d →
-    q < sh.nS1 ∧ m ∈ sh.U ∧ d ∈ sh.D := by
-  rcases h with ⟨_, _, h3, _, _, _, _, _, _, _⟩; exact h3
+    q < sh.nS1 ∧ m ∈ sh.U ∧ d ∈ sh.D := h.actB
 
-theorem runOK_dedU (h : RunOK sh P cfg ev) : ∀ i t, ev i = Ev.ded t → t ∈ sh.U := by
-  rcases h with ⟨_, _, _, h4, _, _, _, _, _, _⟩; exact h4
+theorem runOK_dedU (h : RunOK sh P cfg ev) : ∀ i t, ev i = Ev.ded t → t ∈ sh.U := h.dedU
 
-theorem runOK_pc (h : RunOK sh P cfg ev) : ∀ i q, q < sh.nS1 → pcOf (cfg i) q < shPc sh := by
-  rcases h with ⟨_, _, _, _, h5, _, _, _, _, _⟩; exact h5
+theorem runOK_pc (h : RunOK sh P cfg ev) : ∀ i q, q < sh.nS1 → pcOf (cfg i) q < shPc sh := h.pcB
 
 theorem runOK_var (h : RunOK sh P cfg ev) : ∀ i q x, q < sh.nS1 →
-    x ∈ (storeOf (cfg i) q).map Prod.fst → x < shV sh := by
-  rcases h with ⟨_, _, _, _, _, h6, _, _, _, _⟩; exact h6
+    x ∈ (storeOf (cfg i) q).map Prod.fst → x < shV sh := h.varB
 
 theorem runOK_expr (h : RunOK sh P cfg ev) : ∀ i q e, e ∈ allExprs P →
-    admissible sh (Expr.eval e (storeOf (cfg i) q)) = true := by
-  rcases h with ⟨_, _, _, _, _, _, h7, _, _, _⟩; exact h7
+    admissible sh (Expr.eval e (storeOf (cfg i) q)) = true := h.exprB
 
-theorem runOK_sessLen (h : RunOK sh P cfg ev) : ∀ i, (cfg i).sess.length = sh.nS1 := by
-  rcases h with ⟨_, _, _, _, _, _, _, h8, _, _⟩; exact h8
+theorem runOK_sessLen (h : RunOK sh P cfg ev) : ∀ i, (cfg i).sess.length = sh.nS1 := h.sessLen
 
 /-- The shape's store-slot stride covers every variable the protocol reads; this is what the
 variable leaf of an evaluation gate needs. -/
 theorem runOK_vars (h : RunOK sh P cfg ev) :
-    ∀ E ∈ allExprs P, ∀ x ∈ Expr.vars E, x < shV sh := by
-  rcases h with ⟨_, _, _, _, _, _, _, _, h9, _⟩; exact h9
+    ∀ E ∈ allExprs P, ∀ x ∈ Expr.vars E, x < shV sh := h.varsB
 
 /-- The shape's expression stride covers the protocol's expression table; this is what the
 value group of an evaluation gate needs. -/
-theorem runOK_eIdx (h : RunOK sh P cfg ev) : ∀ E ∈ allExprs P, eIdx P E < shE sh := by
-  rcases h with ⟨_, _, _, _, _, _, _, _, _, h10⟩; exact h10
+theorem runOK_eIdx (h : RunOK sh P cfg ev) : ∀ E ∈ allExprs P, eIdx P E < shE sh := h.eIdxB
+
+/-- Every variable an action writes has a store slot in the shape. -/
+theorem runOK_written (h : RunOK sh P cfg ev) : ∀ q c act, P.actionAt q c = some act →
+    ∀ x ∈ act.written, x < shV sh := h.writtenB
+
+/-- A position that has an action leaves room for the successor program counter. -/
+theorem runOK_pcAct (h : RunOK sh P cfg ev) : ∀ q c, P.actionAt q c ≠ none →
+    c + 1 < shPc sh := h.pcActB
 
 theorem Rel.noAct {P₁ : Protocol} {C C' : Cfg} {e : Ev} (h : Rel P₁ C e C') (q : Nat)
     (hq : ¬ ∃ (m : Term) (d : NonceName), e = Ev.act q m d) :
@@ -2684,5 +2703,750 @@ theorem sat_eval (hok : RunOK sh P cfg ev) :
       exact clause1 _ _ (by
         rw [pos_eval, hgoal, rdXe_const sh P cfg ev hE h h2 hv]
         exact decide_eq_true rfl)
+
+/-- A satisfied prefix satisfies the whole clause. -/
+theorem clause_eval_append_left_true (a : Assignment) (g t : List Lit)
+    (h : Clause.eval a g = true) : Clause.eval a (g ++ t) = true := by
+  rw [clause_eval_any] at *
+  obtain ⟨l, hl, he⟩ := h
+  exact ⟨l, List.mem_append_left t hl, he⟩
+
+/-- **The act guard.**  The two guard literals of ProtSat.actGuard are false exactly when the
+run really has session q acting while its program counter is c. -/
+theorem actGuard_false (hok : RunOK sh P cfg ev) (hi : i < sh.steps) (hq : q < shS sh)
+    (hc : c < shPc sh) :
+    Clause.eval (assignOf sh P cfg ev) (actGuard sh i q c) = false <->
+      (∃ m d, ev i = Ev.act q m d) ∧ rdPc sh P cfg ev i q = c := by
+  have h1 : (assignOf sh P cfg ev (evAct sh i q) = true) <-> ∃ m d, ev i = Ev.act q m d := by
+    rw [assignOf_evAct sh P cfg ev hi hq]
+    refine ⟨fun h => (evActs sh P cfg ev hq).mpr (of_decide_eq_true h),
+      fun h => decide_eq_true ((evActs sh P cfg ev hq).mp h)⟩
+  have h2 : (assignOf sh P cfg ev (vpc sh i q c) = true) <-> rdPc sh P cfg ev i q = c := by
+    rw [assignOf_pc sh P cfg ev (Nat.le_of_lt hi) hq hc]
+    exact ⟨fun h => of_decide_eq_true h, fun h => decide_eq_true h⟩
+  have hbase : Clause.eval (assignOf sh P cfg ev) (actGuard sh i q c) = false <->
+      assignOf sh P cfg ev (evAct sh i q) = true ∧
+        assignOf sh P cfg ev (vpc sh i q c) = true := by
+    unfold actGuard
+    rcases bool_eq_cases (assignOf sh P cfg ev (evAct sh i q)) with hx | hx
+    · rcases bool_eq_cases (assignOf sh P cfg ev (vpc sh i q c)) with hy | hy
+      · simp [Clause.eval, List.any_cons, List.any_nil, neg_eval, hx, hy]
+      · simp [Clause.eval, List.any_cons, List.any_nil, neg_eval, hx, hy]
+    · rcases bool_eq_cases (assignOf sh P cfg ev (vpc sh i q c)) with hy | hy
+      · simp [Clause.eval, List.any_cons, List.any_nil, neg_eval, hx, hy]
+      · simp [Clause.eval, List.any_cons, List.any_nil, neg_eval, hx, hy]
+  rw [hbase, h1, h2]
+
+/-- **Inversion of an acting transition.**  A step in which session q acts is one of the eight
+session rules of ProtSat.Rel, and each of them is driven by the action it finds at q's program
+counter.  The action is left implicit in each alternative so that a consumer can match it
+against its own action without naming the constructor's implicit parameters. -/
+theorem Rel.act_shapes {P₁ : Protocol} {C C' : Cfg} {q : Nat} {m : Term} {d : NonceName}
+    (h : Rel P₁ C (Ev.act q m d) C') :
+    (∃ (x : Nat) (N : NonceName), P₁.actionAt q (pcOf C q) = some (Action.fresh x N) ∧
+        C' = succStore C q x (Term.nonce d)) ∨
+    (∃ (x : Nat) (a : Agent), P₁.actionAt q (pcOf C q) = some (Action.recv a x) ∧ m ∈ C.kn ∧
+        C' = succStore C q x m) ∨
+    (∃ (x : Nat) (e : Expr) (t : Term), P₁.actionAt q (pcOf C q) = some (Action.assign x e) ∧
+        Expr.eval e (storeOf C q) = some t ∧ C' = succStore C q x t) ∨
+    (∃ (a : Agent) (e : Expr) (t : Term), P₁.actionAt q (pcOf C q) = some (Action.send a e) ∧
+        Expr.eval e (storeOf C q) = some t ∧ C' = succSend C q t) ∨
+    (∃ (e₁ e₂ : Expr) (v : Term), P₁.actionAt q (pcOf C q) = some (Action.check e₁ e₂) ∧
+        Expr.eval e₁ (storeOf C q) = some v ∧ Expr.eval e₂ (storeOf C q) = some v ∧
+          C' = succAdvance C q) ∨
+    (∃ (e : Expr), P₁.actionAt q (pcOf C q) = some (Action.secret e) ∧ C' = succAdvance C q) ∨
+    (∃ (tag : Tag) (peer v : Expr),
+        P₁.actionAt q (pcOf C q) = some (Action.claim tag peer v) ∧ C' = succAdvance C q) ∨
+    (∃ (tag : Tag) (peer v : Expr),
+        P₁.actionAt q (pcOf C q) = some (Action.commit tag peer v) ∧ C' = succAdvance C q) := by
+  cases h with
+  | rFresh hq _ _ => exact Or.inl ⟨_, _, hq, rfl⟩
+  | rRecv hq hkn => exact Or.inr (Or.inl ⟨_, _, hq, hkn, rfl⟩)
+  | rAssign hq heval => exact Or.inr (Or.inr (Or.inl ⟨_, _, _, hq, heval, rfl⟩))
+  | rSend hq heval => exact Or.inr (Or.inr (Or.inr (Or.inl ⟨_, _, _, hq, heval, rfl⟩)))
+  | rCheck hq h₁ h₂ =>
+      exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨_, _, _, hq, h₁, h₂, rfl⟩))))
+  | rSecret hq => exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨_, hq, rfl⟩)))))
+  | rClaim hq =>
+      exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inl ⟨_, _, _, hq, rfl⟩))))))
+  | rCommit hq =>
+      exact Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr (Or.inr ⟨_, _, _, hq, rfl⟩))))))
+
+/-- In an acting step every slot of the acting session that the action does not write keeps its
+value: this is the semantic content of the keep clauses of ProtSat.stepKeepClauses. -/
+theorem Rel.act_keep {P₁ : Protocol} {C C' : Cfg} {q : Nat} {m : Term} {d : NonceName}
+    {act : Action} {y : Nat} (h : Rel P₁ C (Ev.act q m d) C')
+    (hamt : P₁.actionAt q (pcOf C q) = some act) (hy : writtenVar act ≠ some y) :
+    readVar y (storeOf C' q) = readVar y (storeOf C q) := by
+  rcases Rel.act_shapes h with ⟨x, N, hq, hC⟩ | ⟨x, a, hq, _, hC⟩ | ⟨x, e, t, hq, _, hC⟩
+    | ⟨a, e, t, hq, _, hC⟩ | ⟨e₁, e₂, v, hq, _, _, hC⟩ | ⟨e, hq, hC⟩ | ⟨tag, peer, v, hq, hC⟩
+    | ⟨tag, peer, v, hq, hC⟩
+  · have hmatch : Action.fresh x N = act := Option.some.inj (hq.symm.trans hamt)
+    subst hmatch
+    have hxy : x ≠ y := fun hxy => hy (by subst hxy; rfl)
+    rw [hC]
+    exact readVar_succStore_other C q x y (Term.nonce d) hxy
+  · have hmatch : Action.recv a x = act := Option.some.inj (hq.symm.trans hamt)
+    subst hmatch
+    have hxy : x ≠ y := fun hxy => hy (by subst hxy; rfl)
+    rw [hC]
+    exact readVar_succStore_other C q x y m hxy
+  · have hmatch : Action.assign x e = act := Option.some.inj (hq.symm.trans hamt)
+    subst hmatch
+    have hxy : x ≠ y := fun hxy => hy (by subst hxy; rfl)
+    rw [hC]
+    exact readVar_succStore_other C q x y t hxy
+  · have hmatch : Action.send a e = act := Option.some.inj (hq.symm.trans hamt)
+    subst hmatch
+    rw [hC]
+    exact congrArg (readVar y) (storeOf_succAdvance C q q)
+  · have hmatch : Action.check e₁ e₂ = act := Option.some.inj (hq.symm.trans hamt)
+    subst hmatch
+    rw [hC]
+    exact congrArg (readVar y) (storeOf_succAdvance C q q)
+  · rw [hC]
+    exact congrArg (readVar y) (storeOf_succAdvance C q q)
+  · rw [hC]
+    exact congrArg (readVar y) (storeOf_succAdvance C q q)
+  · rw [hC]
+    exact congrArg (readVar y) (storeOf_succAdvance C q q)
+
+/-- **What an acting step does**, as a function of the action it performs: the written slot and
+its new value, the message the attacker learns from a send, and the equality a test requires.
+Declared as a function of the action so that a proof can case on the action shape. -/
+def ActData (P₁ : Protocol) (C C' : Cfg) (q : Nat) (m : Term) (d : NonceName) (act : Action) : Prop :=
+  match act with
+  | Action.fresh x N => readVar x (storeOf C' q) = some (Term.nonce d)
+  | Action.recv a x => readVar x (storeOf C' q) = some m ∧ m ∈ C.kn
+  | Action.assign x e =>
+      ∃ t, Expr.eval e (storeOf C q) = some t ∧ readVar x (storeOf C' q) = some t
+  | Action.send a e => ∃ t, Expr.eval e (storeOf C q) = some t ∧ C'.kn = C.kn ++ [t]
+  | Action.check e₁ e₂ =>
+      ∃ v, Expr.eval e₁ (storeOf C q) = some v ∧ Expr.eval e₂ (storeOf C q) = some v
+  | _ => True
+
+/-- The action of an acting step determines the successor configuration exactly as the step
+clauses require. -/
+theorem Rel.act_data {P₁ : Protocol} {C C' : Cfg} {q : Nat} {m : Term} {d : NonceName}
+    {act : Action} (h : Rel P₁ C (Ev.act q m d) C') (hS : q < C.sess.length)
+    (hamt : P₁.actionAt q (pcOf C q) = some act) : ActData P₁ C C' q m d act := by
+  obtain ⟨st, hst⟩ := sessAt_lt hS
+  rcases Rel.act_shapes h with ⟨x, N, hq, hC⟩ | ⟨x, a, hq, hkn, hC⟩ | ⟨x, e, t, hq, heval, hC⟩
+    | ⟨a, e, t, hq, heval, hC⟩ | ⟨e₁, e₂, v, hq, h₁, h₂, hC⟩ | ⟨e, hq, hC⟩
+    | ⟨tag, peer, v, hq, hC⟩ | ⟨tag, peer, v, hq, hC⟩
+  · have hmatch : Action.fresh x N = act := Option.some.inj (hq.symm.trans hamt)
+    subst hmatch
+    rw [hC]
+    simp only [ActData]
+    exact readVar_succStore C q x (Term.nonce d) st hst
+  · have hmatch : Action.recv a x = act := Option.some.inj (hq.symm.trans hamt)
+    subst hmatch
+    rw [hC]
+    simp only [ActData]
+    exact ⟨readVar_succStore C q x m st hst, hkn⟩
+  · have hmatch : Action.assign x e = act := Option.some.inj (hq.symm.trans hamt)
+    subst hmatch
+    rw [hC]
+    simp only [ActData]
+    exact ⟨t, heval, readVar_succStore C q x t st hst⟩
+  · have hmatch : Action.send a e = act := Option.some.inj (hq.symm.trans hamt)
+    subst hmatch
+    simp only [ActData]
+    exact ⟨t, heval, by rw [hC]; rfl⟩
+  · have hmatch : Action.check e₁ e₂ = act := Option.some.inj (hq.symm.trans hamt)
+    subst hmatch
+    simp only [ActData]
+    exact ⟨v, h₁, h₂⟩
+  · have hmatch : Action.secret e = act := Option.some.inj (hq.symm.trans hamt)
+    subst hmatch
+    simp only [ActData]
+  · have hmatch : Action.claim tag peer v = act := Option.some.inj (hq.symm.trans hamt)
+    subst hmatch
+    simp only [ActData]
+  · have hmatch : Action.commit tag peer v = act := Option.some.inj (hq.symm.trans hamt)
+    subst hmatch
+    simp only [ActData]
+
+/-- The guard of a step clause: if the session does not act, or not at this counter, the clause
+is satisfied whatever its tail is. -/
+theorem step_guard (tail : List Lit)
+    (h : assignOf sh P cfg ev (evAct sh i q) = false ∨
+         assignOf sh P cfg ev (vpc sh i q c) = false) :
+    Clause.eval (assignOf sh P cfg ev) (actGuard sh i q c ++ tail) = true := by
+  rcases h with h | h
+  · exact clause_eval_holds (neg (evAct sh i q)) (List.mem_append_left _ (List.Mem.head _))
+      (by simp [neg_eval, h])
+  · exact clause_eval_holds (neg (vpc sh i q c))
+      (List.mem_append_left _ (List.Mem.tail _ (List.Mem.head _))) (by simp [neg_eval, h])
+
+/-- The acting case of a step clause: when both guard literals are true the run really has
+session q acting at step i with program counter c. -/
+theorem step_act (hok : RunOK sh P cfg ev) (hrel : ∀ i, Rel P (cfg i) (ev i) (cfg (i + 1)))
+    (hi : i < sh.steps) (hq : q < shS sh) (hc : c < shPc sh)
+    (hact : assignOf sh P cfg ev (evAct sh i q) = true)
+    (hpc : assignOf sh P cfg ev (vpc sh i q c) = true) :
+    (∃ m d, ev i = Ev.act q m d) ∧ rdPc sh P cfg ev i q = c := by
+  have h1 : ∃ m d, ev i = Ev.act q m d := by
+    rw [assignOf_evAct sh P cfg ev hi hq] at hact
+    exact (evActs sh P cfg ev hq).mpr (of_decide_eq_true hact)
+  have h2 : rdPc sh P cfg ev i q = c := by
+    rw [assignOf_pc sh P cfg ev (Nat.le_of_lt hi) hq hc] at hpc
+    exact of_decide_eq_true hpc
+  exact ⟨h1, h2⟩
+
+/-- A satisfied tail satisfies the whole clause. -/
+theorem clause_eval_append_right_true (a : Assignment) (g t : List Lit)
+    (h : Clause.eval a t = true) : Clause.eval a (g ++ t) = true := by
+  rw [clause_eval_any] at *
+  obtain ⟨l, hl, he⟩ := h
+  exact ⟨l, List.mem_append_right g hl, he⟩
+
+/-- An acting transition has an action at the acting session's program counter. -/
+theorem Rel.act_ne_none {P₁ : Protocol} {C C' : Cfg} {q : Nat} {m : Term} {d : NonceName}
+    (h : Rel P₁ C (Ev.act q m d) C') : P₁.actionAt q (pcOf C q) ≠ none := by
+  rcases Rel.act_shapes h with ⟨x, N, hq, _⟩ | ⟨x, a, hq, _, _⟩ | ⟨x, e, t, hq, _, _⟩
+    | ⟨a, e, t, hq, _, _⟩ | ⟨e₁, e₂, v, hq, _, _, _⟩ | ⟨e, hq, _⟩ | ⟨tag, peer, v, hq, _⟩
+    | ⟨tag, peer, v, hq, _⟩
+  · exact fun he => absurd (hq.symm.trans he) (by simp)
+  · exact fun he => absurd (hq.symm.trans he) (by simp)
+  · exact fun he => absurd (hq.symm.trans he) (by simp)
+  · exact fun he => absurd (hq.symm.trans he) (by simp)
+  · exact fun he => absurd (hq.symm.trans he) (by simp)
+  · exact fun he => absurd (hq.symm.trans he) (by simp)
+  · exact fun he => absurd (hq.symm.trans he) (by simp)
+  · exact fun he => absurd (hq.symm.trans he) (by simp)
+
+/-- **Every step clause carries the act guard of its position as a prefix.** -/
+theorem actGuard_prefix_stepClausesAt (cl : Clause) (hcl : cl ∈ stepClausesAt sh P i q c) :
+    ∃ tail, cl = actGuard sh i q c ++ tail := by
+  cases h : P.actionAt q c with
+  | some act =>
+    rw [stepClausesAt_some sh P i q c act h] at hcl
+    rw [List.mem_append] at hcl
+    rcases hcl with h1 | hact2
+    · rw [List.mem_append] at h1
+      rcases h1 with hadv | hkeep
+      · rw [List.mem_singleton] at hadv
+        subst hadv
+        exact ⟨[pos (vpc sh (i + 1) q (c + 1))], rfl⟩
+      · rw [stepKeepClauses, List.mem_flatMap] at hkeep
+        obtain ⟨y, hy, h5⟩ := hkeep
+        by_cases hwy : writtenVar act = some y
+        · rw [if_pos hwy] at h5
+          exact absurd h5 (by simp)
+        · rw [if_neg hwy, keepVarClauses, mapVal, List.mem_map] at h5
+          obtain ⟨u, hu, heq⟩ := h5
+          subst heq
+          exact ⟨[neg (vst sh i q y u), pos (vst sh (i + 1) q y u)], rfl⟩
+    · cases act with
+        | fresh x N =>
+            rw [actionClauses] at hact2
+            rw [List.mem_append] at hact2
+            rcases hact2 with hfresh | hdummy
+            · rw [List.mem_flatMap] at hfresh
+              obtain ⟨dn, hd, h5⟩ := hfresh
+              rw [freshStepClauses] at h5
+              cases h5' : rget sh.D dn with
+              | none =>
+                  rw [h5'] at h5
+                  simp only [List.mem_singleton] at h5
+                  subst h5
+                  exact ⟨[neg (vfr sh i q dn)], rfl⟩
+              | some N' =>
+                  rw [h5'] at h5
+                  simp only [List.mem_singleton] at h5
+                  subst h5
+                  exact ⟨[neg (vfr sh i q dn),
+                    pos (vst sh (i + 1) q x (uIdx sh (some (Term.nonce N'))))], rfl⟩
+            · simp only [List.mem_singleton] at hdummy
+              subst hdummy
+              exact ⟨[neg (vfr sh i q (shD sh - 1))], rfl⟩
+        | send a e =>
+            rw [actionClauses] at hact2
+            rw [List.mem_append] at hact2
+            rcases hact2 with hreal | hpub
+            · simp only [List.mem_singleton] at hreal
+              subst hreal
+              exact ⟨[neg (vxe sh i q (eIdx P e) (sh.U.length))], rfl⟩
+            · rw [mapMsg, List.mem_map] at hpub
+              obtain ⟨u, hu, heq⟩ := hpub
+              subst heq
+              exact ⟨[neg (vxe sh i q (eIdx P e) u), pos (vkn sh (i + 1) u)], rfl⟩
+        | recv a x =>
+            rw [actionClauses] at hact2
+            rw [eachVal, List.mem_flatMap] at hact2
+            obtain ⟨u, hu, h5⟩ := hact2
+            by_cases hut : u < sh.U.length
+            · rw [if_pos hut] at h5
+              simp only [List.mem_cons, List.mem_nil_iff, or_false] at h5
+              rcases h5 with hst | hkn
+              · subst hst
+                exact ⟨[neg (vdl sh i q u), pos (vst sh (i + 1) q x u)], rfl⟩
+              · subst hkn
+                exact ⟨[neg (vdl sh i q u), pos (vkn sh i u)], rfl⟩
+            · rw [if_neg hut, List.mem_singleton] at h5
+              subst h5
+              exact ⟨[neg (vdl sh i q u)], rfl⟩
+        | assign x e =>
+            rw [actionClauses] at hact2
+            rw [eachVal, List.mem_flatMap] at hact2
+            obtain ⟨u, hu, h5⟩ := hact2
+            by_cases hut : u < sh.U.length
+            · rw [if_pos hut, List.mem_singleton] at h5
+              subst h5
+              exact ⟨[neg (vxe sh i q (eIdx P e) u), pos (vst sh (i + 1) q x u)], rfl⟩
+            · rw [if_neg hut, List.mem_singleton] at h5
+              subst h5
+              exact ⟨[neg (vxe sh i q (eIdx P e) u)], rfl⟩
+        | check e₁ e₂ =>
+            rw [actionClauses] at hact2
+            rw [List.mem_append] at hact2
+            rcases hact2 with hreal | hrest
+            · simp only [List.mem_cons, List.mem_nil_iff, or_false] at hreal
+              rcases hreal with h1 | h2
+              · subst h1
+                exact ⟨[neg (vxe sh i q (eIdx P e₁) (sh.U.length))], rfl⟩
+              · subst h2
+                exact ⟨[neg (vxe sh i q (eIdx P e₂) (sh.U.length))], rfl⟩
+            · rw [eachVal, List.mem_flatMap] at hrest
+              obtain ⟨u, hu, h5⟩ := hrest
+              obtain ⟨v, hv, hif⟩ := List.mem_filterMap.mp h5
+              by_cases hut : u == v
+              · rw [if_pos hut] at hif
+                exact absurd hif (by simp)
+              · rw [if_neg hut] at hif
+                have heq : checkEqClause sh i q c (eIdx P e₁) (eIdx P e₂) u v = cl :=
+                  Option.some.inj hif
+                subst heq
+                exact ⟨[neg (vxe sh i q (eIdx P e₁) u), neg (vxe sh i q (eIdx P e₂) v)], rfl⟩
+        | secret _ | claim _ _ _ | commit _ _ _ =>
+            simp only [actionClauses] at hact2
+            exact absurd hact2 (by simp)
+  | none =>
+    rw [stepClausesAt, h] at hcl
+    simp only [List.mem_singleton] at hcl
+    subst hcl
+    exact ⟨[], by rw [List.append_nil]⟩
+
+/-- Reading past the end of a list gives none only out of range. -/
+theorem rget_none_length {α : Type} : ∀ (l : List α) (i : Nat), rget l i = none -> l.length ≤ i := by
+  intro l
+  induction l with
+  | nil => intro i _; exact Nat.zero_le _
+  | cons x xs ih =>
+      intro i h
+      cases i with
+      | zero => exact absurd h (by simp [rget])
+      | succ i =>
+          have h2 : rget xs i = none := by simpa [rget] using h
+          have hlen := ih i h2
+          have hl : (x :: xs).length = xs.length + 1 := rfl
+          omega
+
+/-- The index of a universe message is a genuine position in the universe. -/
+theorem uIdx_some_lt (sh : Shape) {t : Term} (ht : t ∈ sh.U) : uIdx sh (some t) < sh.U.length := by
+  show (if t ∈ sh.U then ixOf t sh.U else sh.U.length) < sh.U.length
+  rw [if_pos ht]
+  exact ixOf_lt sh.U t ht
+
+/-- The unset index is a legal value index. -/
+theorem len_lt_shVal (sh : Shape) : sh.U.length < shVal sh := Nat.lt_succ_self _
+
+/-- A negated literal is true when the assignment sets its variable to false. -/
+theorem neg_lit (a : Assignment) (v : BVar) (h : a v = false) : Lit.eval a (neg v) = true := by
+  simp [neg_eval, h]
+
+/-- **Clause group 5 (step conditions), acting case.** -/
+theorem stepClausesAt_act_sat (hok : RunOK sh P cfg ev)
+    (hrel : ∀ i, Rel P (cfg i) (ev i) (cfg (i + 1)))
+    (hi : i < sh.steps) (hq : q < shS sh) (hc : c < shPc sh)
+    (hg : Clause.eval (assignOf sh P cfg ev) (actGuard sh i q c) = false)
+    (cl : Clause) (hcl : cl ∈ stepClausesAt sh P i q c) :
+    Clause.eval (assignOf sh P cfg ev) cl = true := by
+  obtain ⟨⟨m, d, hevm⟩, hpcd⟩ := (actGuard_false sh P cfg ev hok hi hq hc).mp hg
+  have hS : q < (cfg i).sess.length := by
+    rw [runOK_sessLen sh P cfg ev hok i]
+    exact (runOK_act sh P cfg ev hok i q m d hevm).1
+  have hrel' : Rel P (cfg i) (Ev.act q m d) (cfg (i + 1)) := by rw [← hevm]; exact hrel i
+  have hpcq : pcOf (cfg i) q = c := hpcd
+  have hdU : d ∈ sh.D := (runOK_act sh P cfg ev hok i q m d hevm).2.2
+  have hmU : m ∈ sh.U := (runOK_act sh P cfg ev hok i q m d hevm).2.1
+  have hrdFr : rdFr sh P cfg ev i q = ixOf d sh.D := by simp [rdFr, hevm]
+  have hrdDl : rdDl sh P cfg ev i q = uIdx sh (some m) := by simp [rdDl, hevm]
+  cases h : P.actionAt q c with
+  | none =>
+      have hne : P.actionAt q (pcOf (cfg i) q) ≠ none := Rel.act_ne_none hrel'
+      have he : P.actionAt q (pcOf (cfg i) q) = none := by rw [hpcq]; exact h
+      exact absurd he hne
+  | some act =>
+      have hamt : P.actionAt q (pcOf (cfg i) q) = some act := by rw [hpcq]; exact h
+      have hdata := Rel.act_data hrel' hS hamt
+      rw [stepClausesAt_some sh P i q c act h] at hcl
+      rw [List.mem_append] at hcl
+      rcases hcl with h1 | hact2
+      · rw [List.mem_append] at h1
+        rcases h1 with hadv | hkeep
+        · -- the advance clause
+          rw [List.mem_singleton] at hadv
+          subst hadv
+          have hc1 : c + 1 < shPc sh :=
+            runOK_pcAct sh P cfg ev hok q c
+              (fun he => absurd (h.symm.trans he) (Option.some_ne_none act))
+          have hpc1 : pcOf (cfg (i + 1)) q = c + 1 := by
+            rw [Rel.act_pcOf hrel' hS, hpcq]
+          rw [advClause]
+          refine clause_eval_append_right_true _ _ _ (clause1 _ _ (by
+            rw [pos_eval, assignOf_pc sh P cfg ev (Nat.succ_le_of_lt hi) hq hc1]
+            exact decide_eq_true hpc1))
+        · -- the keep clauses
+          rw [stepKeepClauses, List.mem_flatMap] at hkeep
+          obtain ⟨y, hy, h5⟩ := hkeep
+          have hyV : y < shV sh := List.mem_range.mp hy
+          by_cases hwy : writtenVar act = some y
+          · rw [if_pos hwy] at h5
+            exact absurd h5 (by simp)
+          · rw [if_neg hwy, keepVarClauses, mapVal, List.mem_map] at h5
+            obtain ⟨u, hu, heq⟩ := h5
+            have huV : u < shVal sh := List.mem_range.mp hu
+            subst heq
+            rw [keepClause]
+            refine clause_eval_append_right_true _ _ _ ?_
+            rcases bool_eq_cases (assignOf sh P cfg ev (vst sh i q y u)) with hst | hst
+            · have hrd : rdSt sh P cfg ev i q y = u := by
+                rw [assignOf_st sh P cfg ev (Nat.le_of_lt hi) hq hyV huV] at hst
+                exact of_decide_eq_true hst
+              have hkeep' : readVar y (storeOf (cfg (i + 1)) q) = readVar y (storeOf (cfg i) q) :=
+                Rel.act_keep hrel' hamt hwy
+              have hrd' : rdSt sh P cfg ev (i + 1) q y = u := by
+                show uIdx sh (readVar y (storeOf (cfg (i + 1)) q)) = u
+                rw [hkeep']
+                exact hrd
+              exact clause2_right _ _ _ (by
+                rw [pos_eval, assignOf_st sh P cfg ev (Nat.succ_le_of_lt hi) hq hyV huV]
+                exact decide_eq_true hrd')
+            · exact clause2_left _ _ _ (by simp [neg_eval, hst])
+      · cases act with
+        | fresh x N =>
+            have hxV : x < shV sh :=
+              runOK_written sh P cfg ev hok q c (Action.fresh x N) h x (by simp [Action.written])
+            have hwr : readVar x (storeOf (cfg (i + 1)) q) = some (Term.nonce d) := hdata
+            rw [actionClauses, List.mem_append] at hact2
+            rcases hact2 with hfresh | hdummy
+            · rw [List.mem_flatMap] at hfresh
+              obtain ⟨dn, hd, h5⟩ := hfresh
+              have hd' : dn < shD sh := List.mem_range.mp hd
+              rw [freshStepClauses] at h5
+              cases h5' : rget sh.D dn with
+              | none =>
+                  rw [h5'] at h5
+                  simp only [List.mem_singleton] at h5
+                  subst h5
+                  have hlen : sh.D.length ≤ dn := rget_none_length sh.D dn h5'
+                  have hlt : rdFr sh P cfg ev i q < sh.D.length := by
+                    rw [hrdFr]
+                    exact ixOf_lt sh.D d hdU
+                  have hne : rdFr sh P cfg ev i q ≠ dn := by
+                    intro he
+                    omega
+                  have hv : assignOf sh P cfg ev (vfr sh i q dn) = false := by
+                    rw [assignOf_fr sh P cfg ev hi hq hd']
+                    exact decide_eq_false hne
+                  refine clause_eval_append_right_true _ _ _ (clause1 _ _ (neg_lit _ _ hv))
+              | some N' =>
+                  rw [h5'] at h5
+                  simp only [List.mem_singleton] at h5
+                  subst h5
+                  refine clause_eval_append_right_true _ _ _ ?_
+                  rcases bool_eq_cases (assignOf sh P cfg ev (vfr sh i q dn)) with hf | hf
+                  · have hdn : d = N' := by
+                      have h1 : rdFr sh P cfg ev i q = dn := by
+                        rw [assignOf_fr sh P cfg ev hi hq hd'] at hf
+                        exact of_decide_eq_true hf
+                      have h2 : rget sh.D (ixOf d sh.D) = some N' := by
+                        rw [← h1] at h5'
+                        rw [hrdFr] at h5'
+                        exact h5'
+                      rw [rget_ixOf sh.D d hdU] at h2
+                      exact Option.some.inj h2
+                    have hrd' : rdSt sh P cfg ev (i + 1) q x = uIdx sh (some (Term.nonce N')) := by
+                      show uIdx sh (readVar x (storeOf (cfg (i + 1)) q)) = _
+                      rw [hwr, hdn]
+                    exact clause2_right _ _ _ (by
+                      rw [pos_eval,
+                        assignOf_st sh P cfg ev (Nat.succ_le_of_lt hi) hq hxV (uIdx_lt' sh _)]
+                      exact decide_eq_true hrd')
+                  · exact clause2_left _ _ _ (by simp [neg_eval, hf])
+            · simp only [List.mem_singleton] at hdummy
+              subst hdummy
+              have hlt : rdFr sh P cfg ev i q < sh.D.length := by
+                rw [hrdFr]
+                exact ixOf_lt sh.D d hdU
+              have hne : rdFr sh P cfg ev i q ≠ shD sh - 1 := by
+                intro he
+                have h2 : shD sh = sh.D.length + 1 := rfl
+                rw [h2] at he
+                omega
+              have hv : assignOf sh P cfg ev (vfr sh i q (shD sh - 1)) = false := by
+                rw [assignOf_fr sh P cfg ev hi hq (Nat.sub_lt (shD_pos sh) (by omega))]
+                exact decide_eq_false hne
+              refine clause_eval_append_right_true _ _ _ (clause1 _ _ (neg_lit _ _ hv))
+        | send a e =>
+            have hmemE : e ∈ allExprs P := mem_allExprs_send h
+            have heE : eIdx P e < shE sh := runOK_eIdx sh P cfg ev hok e hmemE
+            have hdata' : ∃ t, Expr.eval e (storeOf (cfg i) q) = some t ∧
+                (cfg (i + 1)).kn = (cfg i).kn ++ [t] := hdata
+            obtain ⟨t, heval, hkn⟩ := hdata'
+            have htU : t ∈ sh.U := by
+              have ad := runOK_expr sh P cfg ev hok i q e hmemE
+              rw [heval] at ad
+              simpa [admissible] using ad
+            have hrd : rdXe sh P cfg ev i q (eIdx P e) = uIdx sh (some t) := by
+              rw [rdXe_eIdx sh P cfg ev hmemE, heval]
+            rw [actionClauses, List.mem_append] at hact2
+            rcases hact2 with hreal | hpub
+            · simp only [List.mem_singleton] at hreal
+              subst hreal
+              have hlt : rdXe sh P cfg ev i q (eIdx P e) < sh.U.length := by
+                rw [hrd]
+                exact uIdx_some_lt sh htU
+              have hne : rdXe sh P cfg ev i q (eIdx P e) ≠ sh.U.length := by
+                intro he
+                omega
+              have hv : assignOf sh P cfg ev (vxe sh i q (eIdx P e) sh.U.length) = false := by
+                rw [assignOf_xe sh P cfg ev (Nat.le_of_lt hi) hq heE (len_lt_shVal sh)]
+                exact decide_eq_false hne
+              refine clause_eval_append_right_true _ _ _ (clause1 _ _ (neg_lit _ _ hv))
+            · rw [mapMsg, List.mem_map] at hpub
+              obtain ⟨u, hu, heq⟩ := hpub
+              have huV : u < shVal sh := Nat.lt_succ_of_lt (List.mem_range.mp hu)
+              subst heq
+              rw [sendPublishClause]
+              refine clause_eval_append_right_true _ _ _ ?_
+              rcases bool_eq_cases (assignOf sh P cfg ev (vxe sh i q (eIdx P e) u)) with hxe | hxe
+              · have hu' : uIdx sh (some t) = u := by
+                  have h3 : rdXe sh P cfg ev i q (eIdx P e) = u := by
+                    rw [assignOf_xe sh P cfg ev (Nat.le_of_lt hi) hq heE huV] at hxe
+                    exact of_decide_eq_true hxe
+                  rw [hrd] at h3
+                  exact h3
+                have hval : valAt sh u = some t := by
+                  rw [← hu']
+                  exact valAt_uIdx_some sh htU
+                refine clause2_right _ _ _ (by
+                  rw [pos_eval, assignOf_kn sh P cfg ev (Nat.succ_le_of_lt hi) huV]
+                  rw [knHolds, hval, hkn]
+                  exact decide_eq_true (by simp))
+              · exact clause2_left _ _ _ (by simp [neg_eval, hxe])
+        | recv a x =>
+            have hxV : x < shV sh :=
+              runOK_written sh P cfg ev hok q c (Action.recv a x) h x (by simp [Action.written])
+            have hdata' : readVar x (storeOf (cfg (i + 1)) q) = some m ∧ m ∈ (cfg i).kn := hdata
+            obtain ⟨hwr, hmem⟩ := hdata'
+            rw [actionClauses, eachVal, List.mem_flatMap] at hact2
+            obtain ⟨u, hu, h5⟩ := hact2
+            have huV : u < shVal sh := List.mem_range.mp hu
+            have hdl (hd : assignOf sh P cfg ev (vdl sh i q u) = true) : uIdx sh (some m) = u := by
+              have h3 : rdDl sh P cfg ev i q = u := by
+                rw [assignOf_dl sh P cfg ev hi hq huV] at hd
+                exact of_decide_eq_true hd
+              rw [hrdDl] at h3
+              exact h3
+            by_cases hut : u < sh.U.length
+            · rw [if_pos hut] at h5
+              simp only [List.mem_cons, List.mem_nil_iff, or_false] at h5
+              rcases h5 with hst | hkn
+              · subst hst
+                rw [recvStoreClause]
+                refine clause_eval_append_right_true _ _ _ ?_
+                rcases bool_eq_cases (assignOf sh P cfg ev (vdl sh i q u)) with hd | hd
+                · have hrd' : rdSt sh P cfg ev (i + 1) q x = u := by
+                    show uIdx sh (readVar x (storeOf (cfg (i + 1)) q)) = u
+                    rw [hwr, hdl hd]
+                  exact clause2_right _ _ _ (by
+                    rw [pos_eval, assignOf_st sh P cfg ev (Nat.succ_le_of_lt hi) hq hxV huV]
+                    exact decide_eq_true hrd')
+                · exact clause2_left _ _ _ (by simp [neg_eval, hd])
+              · subst hkn
+                rw [recvKnowClause]
+                refine clause_eval_append_right_true _ _ _ ?_
+                rcases bool_eq_cases (assignOf sh P cfg ev (vdl sh i q u)) with hd | hd
+                · have hval : valAt sh u = some m := by
+                    rw [← hdl hd]
+                    exact valAt_uIdx_some sh hmU
+                  refine clause2_right _ _ _ (by
+                    rw [pos_eval, assignOf_kn sh P cfg ev (Nat.le_of_lt hi) huV]
+                    rw [knHolds, hval]
+                    exact decide_eq_true hmem)
+                · exact clause2_left _ _ _ (by simp [neg_eval, hd])
+            · rw [if_neg hut, List.mem_singleton] at h5
+              subst h5
+              rw [recvRealClause]
+              have hlt : rdDl sh P cfg ev i q < sh.U.length := by
+                rw [hrdDl]
+                exact uIdx_some_lt sh hmU
+              have hne : rdDl sh P cfg ev i q ≠ sh.U.length := by
+                intro he
+                omega
+              have hsl : shVal sh = sh.U.length + 1 := rfl
+              rw [hsl] at huV
+              have hu_eq : u = sh.U.length := by omega
+              subst hu_eq
+              have hv : assignOf sh P cfg ev (vdl sh i q sh.U.length) = false := by
+                rw [assignOf_dl sh P cfg ev hi hq (len_lt_shVal sh)]
+                exact decide_eq_false hne
+              refine clause_eval_append_right_true _ _ _ (clause1 _ _ (neg_lit _ _ hv))
+        | assign x e =>
+            have hxV : x < shV sh :=
+              runOK_written sh P cfg ev hok q c (Action.assign x e) h x (by simp [Action.written])
+            have hmemE : e ∈ allExprs P := mem_allExprs_assign h
+            have heE : eIdx P e < shE sh := runOK_eIdx sh P cfg ev hok e hmemE
+            have hdata' : ∃ t, Expr.eval e (storeOf (cfg i) q) = some t ∧
+                readVar x (storeOf (cfg (i + 1)) q) = some t := hdata
+            obtain ⟨t, heval, hwr⟩ := hdata'
+            have htU : t ∈ sh.U := by
+              have ad := runOK_expr sh P cfg ev hok i q e hmemE
+              rw [heval] at ad
+              simpa [admissible] using ad
+            have hrd : rdXe sh P cfg ev i q (eIdx P e) = uIdx sh (some t) := by
+              rw [rdXe_eIdx sh P cfg ev hmemE, heval]
+            rw [actionClauses, eachVal, List.mem_flatMap] at hact2
+            obtain ⟨u, hu, h5⟩ := hact2
+            have huV : u < shVal sh := List.mem_range.mp hu
+            by_cases hut : u < sh.U.length
+            · rw [if_pos hut, List.mem_singleton] at h5
+              subst h5
+              rw [assignClause]
+              refine clause_eval_append_right_true _ _ _ ?_
+              rcases bool_eq_cases (assignOf sh P cfg ev (vxe sh i q (eIdx P e) u)) with hxe | hxe
+              · have hu' : uIdx sh (some t) = u := by
+                  have h3 : rdXe sh P cfg ev i q (eIdx P e) = u := by
+                    rw [assignOf_xe sh P cfg ev (Nat.le_of_lt hi) hq heE huV] at hxe
+                    exact of_decide_eq_true hxe
+                  rw [hrd] at h3
+                  exact h3
+                have hrd' : rdSt sh P cfg ev (i + 1) q x = u := by
+                  show uIdx sh (readVar x (storeOf (cfg (i + 1)) q)) = u
+                  rw [hwr, hu']
+                exact clause2_right _ _ _ (by
+                  rw [pos_eval, assignOf_st sh P cfg ev (Nat.succ_le_of_lt hi) hq hxV huV]
+                  exact decide_eq_true hrd')
+              · exact clause2_left _ _ _ (by simp [neg_eval, hxe])
+            · rw [if_neg hut, List.mem_singleton] at h5
+              subst h5
+              have hsl : shVal sh = sh.U.length + 1 := rfl
+              rw [hsl] at huV
+              have hu_eq : u = sh.U.length := by omega
+              subst hu_eq
+              rw [assignRealClause]
+              have hlt : rdXe sh P cfg ev i q (eIdx P e) < sh.U.length := by
+                rw [hrd]
+                exact uIdx_some_lt sh htU
+              have hne : rdXe sh P cfg ev i q (eIdx P e) ≠ sh.U.length := by
+                intro he
+                omega
+              have hv : assignOf sh P cfg ev (vxe sh i q (eIdx P e) sh.U.length) = false := by
+                rw [assignOf_xe sh P cfg ev (Nat.le_of_lt hi) hq heE (len_lt_shVal sh)]
+                exact decide_eq_false hne
+              refine clause_eval_append_right_true _ _ _ (clause1 _ _ (neg_lit _ _ hv))
+        | check e₁ e₂ =>
+            obtain ⟨hm₁, hm₂⟩ := mem_allExprs_check h
+            have he₁ : eIdx P e₁ < shE sh := runOK_eIdx sh P cfg ev hok e₁ hm₁
+            have he₂ : eIdx P e₂ < shE sh := runOK_eIdx sh P cfg ev hok e₂ hm₂
+            have hdata' : ∃ v, Expr.eval e₁ (storeOf (cfg i) q) = some v ∧
+                Expr.eval e₂ (storeOf (cfg i) q) = some v := hdata
+            obtain ⟨v, hv₁, hv₂⟩ := hdata'
+            have hvU : v ∈ sh.U := by
+              have ad := runOK_expr sh P cfg ev hok i q e₁ hm₁
+              rw [hv₁] at ad
+              simpa [admissible] using ad
+            have hrd₁ : rdXe sh P cfg ev i q (eIdx P e₁) = uIdx sh (some v) := by
+              rw [rdXe_eIdx sh P cfg ev hm₁, hv₁]
+            have hrd₂ : rdXe sh P cfg ev i q (eIdx P e₂) = uIdx sh (some v) := by
+              rw [rdXe_eIdx sh P cfg ev hm₂, hv₂]
+            rw [actionClauses, List.mem_append] at hact2
+            rcases hact2 with hreal | hrest
+            · simp only [List.mem_cons, List.mem_nil_iff, or_false] at hreal
+              rcases hreal with h1 | h2
+              · subst h1
+                rw [checkRealClause]
+                have hlt : rdXe sh P cfg ev i q (eIdx P e₁) < sh.U.length := by
+                  rw [hrd₁]
+                  exact uIdx_some_lt sh hvU
+                have hne : rdXe sh P cfg ev i q (eIdx P e₁) ≠ sh.U.length := by
+                  intro he
+                  omega
+                have hv : assignOf sh P cfg ev (vxe sh i q (eIdx P e₁) sh.U.length) = false := by
+                  rw [assignOf_xe sh P cfg ev (Nat.le_of_lt hi) hq he₁ (len_lt_shVal sh)]
+                  exact decide_eq_false hne
+                refine clause_eval_append_right_true _ _ _ (clause1 _ _ (neg_lit _ _ hv))
+              · subst h2
+                rw [checkRealClause]
+                have hlt : rdXe sh P cfg ev i q (eIdx P e₂) < sh.U.length := by
+                  rw [hrd₂]
+                  exact uIdx_some_lt sh hvU
+                have hne : rdXe sh P cfg ev i q (eIdx P e₂) ≠ sh.U.length := by
+                  intro he
+                  omega
+                have hv : assignOf sh P cfg ev (vxe sh i q (eIdx P e₂) sh.U.length) = false := by
+                  rw [assignOf_xe sh P cfg ev (Nat.le_of_lt hi) hq he₂ (len_lt_shVal sh)]
+                  exact decide_eq_false hne
+                refine clause_eval_append_right_true _ _ _ (clause1 _ _ (neg_lit _ _ hv))
+            · rw [eachVal, List.mem_flatMap] at hrest
+              obtain ⟨u, hu, h5⟩ := hrest
+              have huV : u < shVal sh := List.mem_range.mp hu
+              obtain ⟨w, hw, hif⟩ := List.mem_filterMap.mp h5
+              by_cases hut : u == w
+              · rw [if_pos hut] at hif
+                exact absurd hif (by simp)
+              · rw [if_neg hut] at hif
+                have heq : checkEqClause sh i q c (eIdx P e₁) (eIdx P e₂) u w = cl :=
+                  Option.some.inj hif
+                subst heq
+                rw [checkEqClause]
+                refine clause_eval_append_right_true _ _ _ ?_
+                rcases bool_eq_cases (assignOf sh P cfg ev (vxe sh i q (eIdx P e₁) u)) with h1 | h1
+                · rcases bool_eq_cases (assignOf sh P cfg ev (vxe sh i q (eIdx P e₂) w)) with h2 | h2
+                  · have hwV : w < shVal sh := List.mem_range.mp hw
+                    have hu₁ : uIdx sh (some v) = u := by
+                      have h3 : rdXe sh P cfg ev i q (eIdx P e₁) = u := by
+                        rw [assignOf_xe sh P cfg ev (Nat.le_of_lt hi) hq he₁ huV] at h1
+                        exact of_decide_eq_true h1
+                      rw [hrd₁] at h3
+                      exact h3
+                    have hw₁ : uIdx sh (some v) = w := by
+                      have h3 : rdXe sh P cfg ev i q (eIdx P e₂) = w := by
+                        rw [assignOf_xe sh P cfg ev (Nat.le_of_lt hi) hq he₂ hwV] at h2
+                        exact of_decide_eq_true h2
+                      rw [hrd₂] at h3
+                      exact h3
+                    have hthis : u = w := hu₁.symm.trans hw₁
+                    have hbeq : u == w := by simpa using hthis
+                    exact absurd hbeq hut
+                  · exact clause2_right _ _ _ (by simp [neg_eval, h2])
+                · exact clause2_left _ _ _ (by simp [neg_eval, h1])
+        | secret _ | claim _ _ _ | commit _ _ _ =>
+            simp only [actionClauses] at hact2
+            exact absurd hact2 (by simp)
+
+/-- **Clause group 5 (step conditions).**  Every step clause is satisfied: either the guard
+literal is true - the session does not act, or not at that program counter - or the session
+really acts there, and then the successor configuration is the one ProtSat.Rel prescribes for
+the action at that position, which is what ProtSat.stepClausesAt sh P i q c demands. -/
+theorem sat_step (hok : RunOK sh P cfg ev)
+    (hrel : ∀ i, Rel P (cfg i) (ev i) (cfg (i + 1))) :
+    Sat (assignOf sh P cfg ev) (stepClauses sh P) := by
+  intro cl hcl
+  simp only [stepClauses, cnfOf, eachStep, eachSess, eachPc, List.mem_flatMap, List.mem_range] at hcl
+  obtain ⟨i, hi, h2⟩ := hcl
+  obtain ⟨q, hq, h3⟩ := h2
+  obtain ⟨c, hc, h4⟩ := h3
+  have hi' : i < sh.steps := by simpa using hi
+  have hq' : q < shS sh := by simpa using hq
+  have hc' : c < shPc sh := by simpa using hc
+  rcases bool_eq_cases (Clause.eval (assignOf sh P cfg ev) (actGuard sh i q c)) with hg | hg
+  · obtain ⟨tail, htail⟩ := actGuard_prefix_stepClausesAt sh P cl h4
+    rw [htail]
+    exact clause_eval_append_left_true _ _ _ hg
+  · exact stepClausesAt_act_sat sh P cfg ev hok hrel hi' hq' hc' hg cl h4
 
 end ProtSat.Complete
