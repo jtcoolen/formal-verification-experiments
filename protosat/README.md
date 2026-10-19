@@ -104,6 +104,15 @@ instantiated on models that already carry permanent witnesses:
   (`replayInjQ_cnf_refused`, `Gates.authQ_cnf_refused`).
 
 
+A verdict is portable across bounds. `Bounds.le` orders bounds semantically (events and closure
+rounds), `univ_mono` proves the message universe grows with the rounds, and
+`boundedSafe_mono_bounds` / `boundedSafe_mono_goals` transfer a safety verdict downward while
+`boundedAttack_mono_bounds` carries an attack upward. `Gates.secureQ2_boundedSafe` obtains the
+two-event verdict from the three-event one without a second search, and
+`Gates.secureQ2_attackFound_false` confirms the transferred answer agrees with actually running the
+smaller enumeration. What is *not* claimed: no bound is discharged that was never stated - the
+`H + |U|` compression of roadmap stage 9 would do that, and it is still open.
+
 An `attack` verdict is a certificate, not a claim: `analyze_attack_certificate` shows the named
 execution is a bounded run that violates a selected goal, and `checkWitness` re-checks exactly that
 as a `Bool` computation without re-running the search (`checkWitness_sound` proves the re-check is

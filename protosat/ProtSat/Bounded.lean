@@ -63,6 +63,20 @@ structure Bounds where
   rounds : Nat
   deriving Repr, DecidableEq
 
+/-- **The semantic bound ordering**: the event count and the closure rounds both grow.
+
+This is the ordering the monotonicity theorems are stated against. It is deliberately a relation on
+the *semantics*, not a claim that one generated formula's variables are a subset of the other's:
+changing the bounds changes the encoding's indices, so the correspondence between two bounds has to
+be re-derived through the semantics rather than read off the clause lists. -/
+def Bounds.le (B B' : Bounds) : Prop := B.steps ≤ B'.steps ∧ B.rounds ≤ B'.rounds
+
+/-- The ordering is reflexive and transitive, so a chain of enlargements composes. -/
+theorem Bounds.le_refl (B : Bounds) : B.le B := ⟨Nat.le_refl _, Nat.le_refl _⟩
+
+theorem Bounds.le_trans {B₁ B₂ B₃ : Bounds} (h₁ : B₁.le B₂) (h₂ : B₂.le B₃) : B₁.le B₃ :=
+  ⟨Nat.le_trans h₁.1 h₂.1, Nat.le_trans h₁.2 h₂.2⟩
+
 /-! ### List-based subterms -/
 
 /-- The inclusive subterm list of a message (the List counterpart of Term.subterms;
@@ -165,6 +179,27 @@ theorem mem_closeOne {ag : List Agent} {ks : List Key} {U : List Term} {t : Term
     simp only [closeOne, List.mem_append]
     exact Or.inl (Or.inl (Or.inl (Or.inl h))))
 
+/-- One more iteration of an inclusion-preserving function keeps everything the previous ones had. -/
+theorem mem_iterate_step {f : List Term -> List Term}
+    (hf : ∀ (U : List Term) t, t ∈ U -> t ∈ f U) :
+    ∀ (k : Nat) (U : List Term) (t : Term), t ∈ f^[k] U -> t ∈ f^[k+1] U := by
+  intro k U t h
+  rw [Function.iterate_succ_apply']
+  exact hf _ _ h
+
+/-- Iteration is monotone in the count for an inclusion-preserving function. -/
+theorem mem_iterate_le {f : List Term -> List Term}
+    (hf : ∀ (U : List Term) t, t ∈ U -> t ∈ f U) :
+    ∀ {n m : Nat}, n ≤ m -> ∀ (U : List Term) (t : Term), t ∈ f^[n] U -> t ∈ f^[m] U := by
+  intro n m h
+  obtain ⟨k, rfl⟩ := Nat.exists_eq_add_of_le h
+  intro U t ht
+  induction k with
+  | zero => simpa using ht
+  | succ j ih =>
+      rw [Nat.add_succ]
+      exact mem_iterate_step hf (n + j) U t (ih (Nat.le_add_right n j))
+
 /-- Iterating a monotone-inclusion-preserving function keeps every original element. -/
 theorem iterate_mem {f : List Term -> List Term} (hf : ∀ (U : List Term) t, t ∈ U -> t ∈ f U) :
     ∀ (n : Nat) (U : List Term) t, t ∈ U -> t ∈ f^[n] U := by
@@ -224,6 +259,17 @@ space").  Subterm-closed, and closed under Bounds.rounds constructor rounds. -/
 def univ (P : Protocol) (B : Bounds) : List Term :=
   ((fun U => closeOne P.agents (domainKeys P.agents) U)^[B.rounds]
     (subtermClosureL (seeds P))).eraseDups
+
+/-- **The universe is monotone in the closure bound**: raising `Bounds.rounds` can only add
+messages, never remove one. Every permitted execution under the smaller bounds stays permitted under
+the larger ones, which is what makes a safety verdict at a larger bound informative about a smaller
+one (`ProtSat.Reference.Explore.BoundedSafe.mono`). -/
+theorem univ_mono {P : Protocol} {B B' : Bounds} (h : B.rounds ≤ B'.rounds) (t : Term)
+    (ht : t ∈ univ P B) : t ∈ univ P B' := by
+  unfold univ at ht ⊢
+  rw [List.mem_eraseDups] at ht
+  rw [List.mem_eraseDups]
+  exact mem_iterate_le (fun U x hx => mem_closeOne hx) h _ t ht
 
 theorem mem_univ_of_mem {P : Protocol} {B : Bounds} {t : Term}
     (h : t ∈ subtermClosureL (seeds P)) : t ∈ univ P B := by

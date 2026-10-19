@@ -393,6 +393,28 @@ stay separate in the verdict rather than collapsing into "something went wrong".
   Saying that plainly is better than hiding it behind a model that only looks strong.
 * Cost is exponential in `B.steps`, same as the explorer's.
 
+## Monotonicity: what one verdict says about other bounds (`ProtSat/Bounded.lean`, `Explore`, `Contract`)
+
+Stage 9's first item: a bound ordering and the two transfer directions, stated over the public bounded
+predicate rather than over clauses.
+
+| Declaration | Meaning |
+|---|---|
+| `Bounds.le`, `le_refl`, `le_trans` | the semantic ordering on bounds: event count and closure rounds both grow. Deliberately a relation on the *semantics*, not on the generated formulas - changing bounds changes the encoding's variable indices |
+| `mem_iterate_step`, `mem_iterate_le`, `univ_mono` | the message universe is monotone in `Bounds.rounds`: more closure rounds add messages and never remove one |
+| `BoundedRun.mono`, `BoundedAttack.mono`, `BoundedSafe.mono` | permitted executions and attacks are upward closed; **safety transfers downward** |
+| `boundedAttack_mono_bounds`, `boundedAttack_mono_goals` | neither enlargement can lose an attack |
+| `boundedSafe_mono_bounds`, `boundedSafe_mono_goals`, `boundedSafe_mono` | the query-level transfer: safe at a larger bound, or for a larger goal set, implies safe below |
+| `Gates.secureQ2_boundedSafe` | the secure model's verdict at three events *gives* the verdict at two, so the second search is never run |
+| `Gates.secureQ2_attackFound_false` | and the transferred verdict agrees with actually running the smaller enumeration - the cross-check that the ordering is over the right predicate |
+| `Gates.transientQ4_boundedAttack` | the transient-pair attack carried upward to a larger bound |
+| `Gates.replayBothQ_boundedAttack`, `replayBothQ_attackFound_true` | enlarging the *goal set* changes the answer: the pair is attacked while the weaker selection alone is safe at the same bound |
+
+What this does **not** yet give is the compression theorem (every attack has a witness of at most
+`H + |U|` events), which is the part that turns a finite search into safety for all lengths inside one
+universe. Monotonicity is its prerequisite, not a substitute: it moves a verdict between stated bounds;
+it does not discharge a bound that was never stated.
+
 ## Log
 
 * 2026-10-19 (a) - baseline inspected; build green; three review witnesses promoted to permanent
@@ -432,6 +454,12 @@ stay separate in the verdict rather than collapsing into "something went wrong".
   that the demo actually prints every contract verdict, replays attack certificates independently of the
   search, and both accepts the Lowe certificate and rejects the same script on NSL. All fifteen green.
   Wired into `.github/workflows/ci.yml` for a clean machine. Scratch `Probe.lean` removed.
+* 2026-10-19 (h) - stage 9's monotonicity layer: `Bounds.le`, `univ_mono`, `BoundedRun.mono` /
+  `BoundedAttack.mono` / `BoundedSafe.mono`, the query-level `boundedSafe_mono_bounds` /
+  `boundedSafe_mono_goals` / `boundedSafe_mono`, and gates showing a safety verdict transferred to a
+  smaller bound without re-running the search (and agreeing with the smaller search when it is run), plus
+  an attack carried to a larger bound. Also fixed a `printf` bug in the CI script's separator lines.
+  Build green (1855 jobs), audit clean over 2574 theorems, 15/15 gates green.
 * Next - the explorer (above), then stage 3's `BoundedExecution` unification, then per-expression
   `EvalDomain` construction (so `fst (pair x x)` is representable even when the pair is outside
   `U`), and deriving the compiler's representability conditions from the public bound instead of

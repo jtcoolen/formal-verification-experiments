@@ -96,6 +96,34 @@ def BoundedAttack (P : Protocol) (B : Bounds) : Prop :=
 /-- **Bounded safety**: what a SAFE verdict is supposed to mean. -/
 def BoundedSafe (P : Protocol) (B : Bounds) : Prop := ¬ BoundedAttack P B
 
+/-! ### Monotonicity in the bounds -/
+
+/-- **Permitted executions are monotone in the bounds.** More events and more closure rounds keep
+every previously permitted execution permitted. This is a property of the public bounded predicate
+itself, not of the enumeration. -/
+theorem BoundedRun.mono {P : Protocol} {B B' : Bounds} (hB : B.le B') {tr : List Ev} {Cs : List Cfg}
+    (h : BoundedRun P B tr Cs) : BoundedRun P B' tr Cs := by
+  obtain ⟨hrun, hlen, hb⟩ := h
+  obtain ⟨hsteps, hrounds⟩ := hB
+  refine ⟨hrun, Nat.le_trans hlen hsteps, ?_⟩
+  intro C hC
+  obtain ⟨h1, h2, h3, h4⟩ := hb C hC
+  exact ⟨fun t ht => univ_mono hrounds t (h1 t ht), fun v hv => univ_mono hrounds v (h2 v hv),
+    fun s hs p hp => univ_mono hrounds p.2 (h3 s hs p hp), h4⟩
+
+/-- **An attack stays an attack when the bounds grow.** -/
+theorem BoundedAttack.mono {P : Protocol} {B B' : Bounds} (hB : B.le B')
+    (h : BoundedAttack P B) : BoundedAttack P B' := by
+  obtain ⟨tr, Cs, hrun, hv⟩ := h
+  exact ⟨tr, Cs, hrun.mono hB, hv⟩
+
+/-- **Safety transfers downward**: safe at a larger bound means safe at a smaller one. This is the
+direction that makes one verified bound informative about the others, and the precondition for the
+trace-compression result of roadmap stage 9. -/
+theorem BoundedSafe.mono {P : Protocol} {B B' : Bounds} (hB : B.le B')
+    (h : BoundedSafe P B') : BoundedSafe P B :=
+  fun hat => h (BoundedAttack.mono hB hat)
+
 /-- The seeds contain the initial knowledge and the declared secrets, and nothing is allocated or
 stored at the start. -/
 theorem inBounds_initCfg (P : Protocol) (B : Bounds) : inBounds P B (initCfg P) := by

@@ -29,7 +29,7 @@ ok() { printf 'PASS  %s\n' "$1"; pass=$((pass + 1)); }
 no() { printf 'FAIL  %s\n' "$1"; fail=$((fail + 1)); }
 
 printf 'ProtSat verification gate\n'
-printf '-------------------------\n'
+printf '%s\n' '-------------------------'
 
 # 1. clean build -------------------------------------------------------------
 t0=$(date +%s)
@@ -109,7 +109,7 @@ expect 'INVALID MODEL' 'a malformed model is reported with diagnostics'
 expect 'checkCertificate = true' 'the independent certificate checker accepts the Lowe attack'
 expect 'checkCertificate = false' 'the independent certificate checker rejects the same script on NSL'
 
-printf '-------------------------\n'
+printf '%s\n' '-------------------------'
 printf '%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ] || exit 1
 printf 'ALL GATES GREEN\n'

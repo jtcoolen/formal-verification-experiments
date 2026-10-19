@@ -284,6 +284,43 @@ theorem boundedAttack_of_BoundedAttack {q : Query} (hsec : Goal.secrecy ∈ q.go
   · exact ⟨Goal.secrecy, hsec, tr, Cs, hrun, hleak⟩
   · exact ⟨Goal.agreement, hag, tr, Cs, hrun, hbreak⟩
 
+/-! ### Monotonicity: what a verdict says about other bounds and other goal sets -/
+
+/-- **Growing the bounds cannot lose an attack**: a permitted execution under smaller bounds is still
+permitted under larger ones. -/
+theorem boundedAttack_mono_bounds {P : Protocol} {B B' : ProtSat.Bounded.Bounds} (hB : B.le B')
+    {gs : List Goal} (hat : boundedAttack (Query.mk P B gs)) : boundedAttack (Query.mk P B' gs) := by
+  obtain ⟨g, hg, tr, Cs, hrun, hv⟩ := hat
+  exact ⟨g, hg, tr, Cs, BoundedRun.mono hB hrun, hv⟩
+
+/-- **Selecting more goals cannot lose an attack**: a violation of a selected goal is a violation of a
+superset of the selection. -/
+theorem boundedAttack_mono_goals {P : Protocol} {B : ProtSat.Bounded.Bounds} {gs gs' : List Goal}
+    (h : ∀ g ∈ gs, g ∈ gs') (hat : boundedAttack (Query.mk P B gs)) :
+    boundedAttack (Query.mk P B gs') := by
+  obtain ⟨g, hg, tr, Cs, hrun, hv⟩ := hat
+  exact ⟨g, h g hg, tr, Cs, hrun, hv⟩
+
+/-- **Safety transfers down in the bounds**: safe with more events and more closure rounds means safe
+with fewer. With `analyze_boundedSafe_sound` this is the roadmap's
+`B ≤ B' → BoundedSafe P B' → BoundedSafe P B`, stated for a query rather than for a bare pair. -/
+theorem boundedSafe_mono_bounds {P : Protocol} {B B' : ProtSat.Bounded.Bounds} (hB : B.le B')
+    {gs : List Goal} (h : boundedSafe (Query.mk P B' gs)) : boundedSafe (Query.mk P B gs) :=
+  fun hat => h (boundedAttack_mono_bounds hB hat)
+
+/-- **Safety transfers down in the goal set**: proving the stronger selection proves the weaker one. -/
+theorem boundedSafe_mono_goals {P : Protocol} {B : ProtSat.Bounded.Bounds} {gs gs' : List Goal}
+    (h : ∀ g ∈ gs, g ∈ gs') (hsafe : boundedSafe (Query.mk P B gs')) :
+    boundedSafe (Query.mk P B gs) :=
+  fun hat => hsafe (boundedAttack_mono_goals h hat)
+
+/-- And the two orders compose: safety at a larger bound with a larger goal set gives safety at a
+smaller bound with a smaller goal set. -/
+theorem boundedSafe_mono {P : Protocol} {B B' : ProtSat.Bounded.Bounds} (hB : B.le B')
+    {gs gs' : List Goal} (hg : ∀ g ∈ gs, g ∈ gs')
+    (h : boundedSafe (Query.mk P B' gs')) : boundedSafe (Query.mk P B gs) :=
+  boundedSafe_mono_bounds hB (boundedSafe_mono_goals hg h)
+
 /-! ### Evidence and verdicts -/
 
 /-- **Evidence for a bounded-safety verdict**: the query it is evidence *for*, and the proof that no
@@ -686,6 +723,25 @@ theorem transientQ_boundedAttack : boundedAttack transientQ := by
   obtain ⟨x, hx⟩ := transientQ_verdict
   exact analyze_attack_sound transientQ hx
 
+/-- **Monotonicity in action.** The secure model is safe at three events, so safety at two events
+follows from the theorem and the second enumeration never has to run. -/
+theorem secureQ2_boundedSafe :
+    boundedSafe (Query.mk Explore.Gates.secureP { steps := 2, rounds := 0 }
+      [Goal.secrecy, Goal.agreement]) :=
+  boundedSafe_mono_bounds (by exact ⟨by decide, by decide⟩) secureQ_boundedSafe
+
+/-- The transferred verdict agrees with running the smaller search: the theorem and the enumeration
+say the same thing, which is the cross-check roadmap stage 7 asks of a monotonicity result. -/
+theorem secureQ2_attackFound_false :
+    attackFound (Query.mk Explore.Gates.secureP { steps := 2, rounds := 0 }
+      [Goal.secrecy, Goal.agreement]) = false := by decide
+
+/-- Growing the bound keeps the transient-pair attack: the witness found at three events is still a
+permitted execution at four, so no re-search is needed to carry it upward. -/
+theorem transientQ4_boundedAttack :
+    boundedAttack (Query.mk ProtSat.ExprDomain.boundsP { steps := 4, rounds := 0 } [Goal.secrecy]) :=
+  boundedAttack_mono_bounds (by exact ⟨by decide, by decide⟩) transientQ_boundedAttack
+
 theorem emptyQ_wellFormed : (validate emptyQ).isEmpty = true := by decide
 
 /-- Selecting nothing is reported as such, never as safety. -/
@@ -849,6 +905,25 @@ theorem replayInjQ_verdict : ∃ x, analyze replayInjQ = Verdict.attack x :=
 theorem replayInjQ_boundedAttack : boundedAttack replayInjQ := by
   obtain ⟨x, hx⟩ := replayInjQ_verdict
   exact analyze_attack_sound replayInjQ hx
+
+/-- Growing the goal selection carries an attack upward: the injective violation is still a
+violation when the weaker agreement goal is selected alongside it. The converse direction,
+`boundedSafe_mono_goals`, is the one that saves work: proving the stronger selection proves the
+weaker one for free. -/
+theorem replayBothQ_boundedAttack :
+    boundedAttack (Query.mk replayOrderP replayOrderB [Goal.agreement, Goal.agreementInj]) :=
+  boundedAttack_mono_goals (fun g hg => by
+    have hg' : g = Goal.agreementInj := by
+      rw [List.mem_singleton] at hg
+      exact hg
+    subst hg'
+    exact List.Mem.tail _ (List.Mem.head _)) replayInjQ_boundedAttack
+
+/-- The enlarged selection is unsafe while the weaker one alone is safe at the same bound: the goal
+set is doing real work, not decorating the answer. -/
+theorem replayBothQ_attackFound_true :
+    attackFound (Query.mk replayOrderP replayOrderB [Goal.agreement, Goal.agreementInj]) = true :=
+  attackFound_of_boundedAttack _ replayBothQ_boundedAttack
 
 /-- The witness violates the injective goal specifically... -/
 theorem replayInjQ_witness_is_inj :
