@@ -1,0 +1,310 @@
+/-
+Copyright (c) 2026 Formally Verified Examples.
+Licensed under the MIT License. See the file LICENSE in the project root for
+license information.
+-/
+import ProtSat.Correspondence
+import ProtSat.Regressions
+import ProtSat.CheckedSafe
+
+/-!
+# ProtSat/AuthGap.lean - why this module exists
+
+The founding defect of this development is a naming defect that became a soundness defect:
+`ProtSat.Analyzer.analyze` answers whether the generated CNF has a model, and the CNF's violation
+clause (`ProtSat.Encode.violationLits`) demands one thing only - that a declared secret reaches the
+attacker. So `Verdict.encodingUnsat`, and every verdict built on it, is silent about executions that
+break authentication agreement without leaking a secret.
+
+`ProtSat/Query.lean` *labels* that gap: `goalEncoded`, `encodedGoals`, `unsupported` and the gate
+theorems refuse to hand a security verdict to a query whose selected goals the encoding cannot
+represent. `ProtSat/Regressions.lean` exhibits the data: a one-session, one-step protocol whose only
+possible violation is an agreement violation, which the analyser nevertheless reports as
+`Verdict.encodingUnsat`.
+
+This module turns the label into a theorem. For the protocol `Authentication.P` and the bounds
+`Authentication.B` of `Regressions`:
+
+* the secrecy reading is *proved safe* by the CNF route - `safe_for_secrecy`, derived from the
+  unsatisfiability of `encode Authentication.P Authentication.B` through the gap-free bridge
+  `Correspondence.boundedSafe_of_unsat_gapFree`, with all four side conditions discharged in this
+  file;
+* the agreement reading of the same model is *attacked* - `attacked_for_agreement`, from the
+  kernel-checked `AuthBreak` witness in `Regressions`;
+* both at once is `auth_gap_is_real`: same protocol, same bounds, safety for one goal and a genuine
+  bounded attack for the other.
+
+Every line below is a proposition about the definitions the tool actually uses, not a comment about
+them. And nothing here overclaims: the safety proved is a *secrecy* statement, and
+`why_the_formula_is_unsat` says out loud how thin its evidence is. The reason it cannot be promoted
+to a statement about agreement is `goal_hypothesis_is_needed`, which shows that the goal-selection
+hypothesis of `CheckedSafe.boundedSafeGoals_of_secrecy` is not decoration.
+-/
+
+namespace ProtSat.AuthGap
+
+open ProtSat Term Protocol Bounded Encode Encoding Complete Analyzer Query BoundedExec Represent
+  Regressions
+
+/-! ### The two readings of one protocol -/
+
+/-- The protocol of `Regressions.Authentication`: one session of one role that commits to a peer and
+a value. No secret is declared, so no execution of it can violate the secrecy goal, and its only
+`auths` tag is used by that commit, so the model is well-formed for either question. -/
+abbrev P : Protocol := Authentication.P
+
+/-- The bounds: a single event, no constructor-closure rounds. -/
+abbrev B : Bounds := Authentication.B
+
+/-- The secrecy reading: the same protocol and bounds, asking the one goal the encoding
+represents. -/
+def qs : Query := Query.mk P B [Goal.secrecy]
+
+/-- The agreement reading: the query of `Regressions.Authentication`, refused by the contract. -/
+abbrev qa : Query := Authentication.q
+
+/-- The secrecy query is well-formed: nothing about the model makes the question unanswerable, so
+what the CNF route says about it is not a refusal. -/
+theorem qs_wellFormed : WellFormed qs := by
+  show validate qs = []
+  decide
+
+/-- Every selected goal of `qs` is represented by the encoding, and something is selected: the two
+conditions the bridge needs in order to be allowed to speak about this query at all. -/
+theorem qs_goals : ∀ g ∈ qs.goals, goalEncoded g := by decide
+
+theorem qs_ne : qs.goals ≠ [] := by decide
+
+/-- The model declares no secret. Recorded because it is the whole reason the secrecy reading is
+easy, and `why_the_formula_is_unsat` below makes that precise. -/
+theorem no_secrets_declared : P.secrets = [] := rfl
+
+/-! ### The side conditions of the bridge -/
+
+/-- **The formula fact.** The analyser's `encodingUnsat` answer for this protocol *is* the statement
+that the generated CNF has no model: `Regressions.Authentication.analyze_encodingUnsat` says the
+solver returned `none`, and `DPLL.dpll_complete` turns that into `ProtSat.Unsat`. Nothing here
+re-runs the solver: the fact is inherited from the regression, which is itself a kernel check over
+the same formula. -/
+theorem unsat : ProtSat.Unsat (Encode.encode P B) :=
+  DPLL.dpll_complete (analyze_encodingUnsat_facts Authentication.analyze_encodingUnsat).2
+
+/-- **The bounds name the protocol's closed expressions.** Derived from the same verdict equation,
+through the two facts `analyze_encodingUnsat_facts` extracts from it and the Boolean test
+`univClosedBool_iff`. This is also why the analyser did not answer `boundsTooSmall`. -/
+theorem hU : univClosed (shapeOf P B) P :=
+  (univClosedBool_iff (shapeOf P B) P).mp
+    (analyze_encodingUnsat_facts Authentication.analyze_encodingUnsat).1
+
+/-- **The universe is subterm-closed**, so the attacker's rule instances are enumerated completely.
+Decidable, and decided here: no hypothesis is smuggled in. -/
+theorem hsub : univSub (shapeOf P B) := by
+  unfold univSub
+  decide
+
+/-- **The declared secrets are named by the bounds.** This protocol declares none, so both halves of
+`SecretsOK` are immediate: no store secret needs a slot, and there is no closed secret to place in
+the universe. -/
+theorem hsec : SecretsOK (shapeOf P B) P := by
+  refine ⟨fun q x h => ?_, fun s hs => ?_⟩
+  · exact absurd h (by simp [Authentication.P])
+  · exact absurd hs (by simp [Authentication.P, Protocol.closedSecretTerms])
+
+/-- **No representability gap.** The protocol cannot build a value the CNF's value domain does not
+name, so every bounded execution of it has a name in the formula. This is the decidable form of what
+used to be a twelve-item hypothesis about the runs, and it is what lets the bridge be applied with
+no assumption about executions at all. -/
+theorem gapFree : domainGap P B = false := by decide
+
+/-! ### 1. The CNF route proves safety - for secrecy -/
+
+/-- **`safe_for_secrecy`.** The CNF route, run on the secrecy reading of this protocol and these
+bounds, yields a bounded-security theorem: no execution the model permits, within these sessions,
+these domains, this universe and this one-event bound, violates the selected goal.
+
+The route is `Correspondence.boundedSafe_of_unsat_gapFree`: the unsatisfiability of `encode P B`
+plus the four side conditions discharged above. No `WithinBounds`, and no hypothesis about any
+particular execution. Read it together with `why_the_formula_is_unsat`: the derivation is genuine,
+and the evidence behind it is thin. -/
+theorem safe_for_secrecy :
+    boundedSafeGoals (Query.mk Authentication.P Authentication.B [Goal.secrecy]) :=
+  Correspondence.boundedSafe_of_unsat_gapFree gapFree hU hsub hsec unsat
+
+/-- The same statement in the name of the query, for the theorems below that reuse it. -/
+theorem safe_for_secrecy_qs : boundedSafeGoals qs := safe_for_secrecy
+
+/-- What `safe_for_secrecy` says in the public vocabulary: no execution the model permits within
+these bounds leaks a declared secret. The statement is true, and it says nothing about the commit
+that has no matching claim. -/
+theorem no_leak :
+    ¬ ∃ (tr : List Ev) (Cs : List Cfg), BoundedTrace P B tr Cs ∧ runsLeaks P Cs := by
+  intro h
+  obtain ⟨tr, Cs, hbt, hleak⟩ := h
+  exact safe_for_secrecy
+    ⟨Goal.secrecy, by decide, tr, Cs, hbt, by rw [violation_secrecy]; exact hleak⟩
+
+/-! ### 1b. How thin the evidence for that safety is -/
+
+/-- **The violation clause is the empty disjunction.** `violationLits` builds one literal per way a
+declared secret can become known; with no declared secret it builds none. Decided here rather than
+asserted. -/
+theorem why_the_formula_is_unsat : violationLits (shapeOf P B) P = [] := by decide
+
+set_option maxRecDepth 20000 in
+/-- Hence the generated CNF literally contains the empty clause, and is unsatisfiable before any
+solver looks at it: the UNSAT answer is a fact about a violation clause that cannot be stated, not a
+fact about the protocol's executions. -/
+theorem empty_clause_in_encode : ([] : List Lit) ∈ (Encode.encode P B).clauses := by decide
+
+/-- And the secrecy goal has no instances at all for this model, which is the semantic face of the
+same fact: `safe_for_secrecy` is true, and it is true for a reason the CNF route cannot distinguish
+from a protocol that really protects its secrets. -/
+theorem secrecy_goal_is_unviolable : ∀ (Cs : List Cfg), ¬ runsLeaks P Cs := by
+  intro Cs ⟨_C, _hC, h⟩
+  cases h with
+  | inl h =>
+      obtain ⟨s, hs, _⟩ := h
+      exact absurd hs (by simp [Authentication.P, Protocol.closedSecretTerms])
+  | inr h =>
+      obtain ⟨_q, _x, _v, hs, _h1, _h2⟩ := h
+      exact absurd hs (by simp [Authentication.P])
+
+/-! ### 2. The same protocol and bounds have a real authentication attack -/
+
+/-- **`attacked_for_agreement`.** The agreement reading of the very same model is not safe: the
+bounded run `Regressions.Authentication.tr` performs a commit with no matching claim anywhere, which
+is `AuthBreak`, hence a `boundedAttackGoals` witness for the selected goal. This is not a labelling
+choice - the witness is kernel-checked in `Regressions`. -/
+theorem attacked_for_agreement : ¬ boundedSafeGoals Authentication.q :=
+  fun h => h Authentication.hasAttack
+
+/-- The attack is a bounded attack of the public predicate as well: agreement failure is one of the
+two ways `Bounded.BoundedAttack` is violated, so the tool's own notion of "this model has an attack"
+is inhabited at these very bounds. -/
+theorem boundedAttack_exists : BoundedAttack P B := by
+  obtain ⟨g, hg, tr, Cs, hbt, hv⟩ := Authentication.hasAttack
+  have hgeq : g = Goal.agreement := by simpa [qa, Authentication.q] using hg
+  subst hgeq
+  exact ⟨tr, Cs, hbt, Or.inr ((violation_agreement P Cs tr).mp hv)⟩
+
+/-! ### 3. The headline -/
+
+/-- **The gap, as one theorem.** Same protocol, same bounds: the CNF route proves the secrecy query
+safe, and the agreement query has a genuine bounded attack. Anyone told "the formula is
+unsatisfiable, therefore the protocol is safe" is being told something false as stated, and this is
+the counterexample. -/
+theorem auth_gap_is_real :
+    boundedSafeGoals (Query.mk Authentication.P Authentication.B [Goal.secrecy]) ∧
+      ¬ boundedSafeGoals Authentication.q :=
+  ⟨safe_for_secrecy, attacked_for_agreement⟩
+
+/-- The same fact in the query names, so it can be read next to the answers in section 5. -/
+theorem auth_gap_is_real_qs : boundedSafeGoals qs ∧ ¬ boundedSafeGoals qa :=
+  ⟨safe_for_secrecy_qs, attacked_for_agreement⟩
+
+/-! ### 4. The goal hypothesis is doing real work -/
+
+/-- **`goal_hypothesis_is_needed`.** `CheckedSafe.boundedSafeGoals_of_secrecy` carries
+`hq : ∀ g ∈ q.goals, goalEncoded g`, and that hypothesis is not decoration: the statement obtained
+by dropping it is false. Instantiated at `Authentication.q`, it would say that safety for the
+secrecy reading of a query implies safety for the query itself - and here the secrecy reading is
+safe (`safe_for_secrecy`) while the query is attacked (`attacked_for_agreement`). -/
+theorem goal_hypothesis_is_needed :
+    ¬ (∀ q : Query, boundedSafeGoals (Query.mk q.protocol q.bounds [Goal.secrecy]) →
+        boundedSafeGoals q) := by
+  intro hall
+  exact attacked_for_agreement (hall qa safe_for_secrecy)
+
+/-- The witness form of the same fact: a query that is safe for its secrecy reading and attacked for
+itself, exhibited rather than negated. -/
+theorem goal_hypothesis_is_needed_witness :
+    ∃ q : Query, boundedSafeGoals (Query.mk q.protocol q.bounds [Goal.secrecy]) ∧
+      ¬ boundedSafeGoals q :=
+  ⟨qa, safe_for_secrecy, attacked_for_agreement⟩
+
+/-! ### 5. What the tool actually answers -/
+
+/-- The goal-selection gate passes for `qs`: nothing it selects is unsupported, because secrecy is
+the one goal the encoding represents. -/
+theorem qs_unsupported : unsupported qs = [] := by
+  simp [qs, unsupported, goalEncoded, encodedGoals]
+
+/-- The CNF route's answer for the secrecy reading: `encodingUnsat`. Note what this theorem is *not*
+- it is not `Result.boundedSafe`, which `Query.lean` records that nothing constructs from a solver
+answer. -/
+theorem cnf_answer_is_encodingUnsat :
+    analyzeQuery (Query.mk Authentication.P Authentication.B [Goal.secrecy]) =
+      Result.encodingUnsat := by
+  -- `qs` validates (`qs_wellFormed`), selects a goal (`qs_ne`) and selects nothing the encoding
+  -- cannot represent (`qs_unsupported`), so `analyzeQuery` reduces to the lifted analyser verdict.
+  show liftVerdict (analyze Authentication.P Authentication.B) = Result.encodingUnsat
+  exact congrArg liftVerdict Authentication.analyze_encodingUnsat
+
+/-- The contrast: the agreement reading is refused rather than answered. The tool does not call this
+query safe - it says the goal is not represented. The gap this module proves is therefore a gap in
+the *encoding*, which the contract is honest about, and not a gap in the contract. -/
+theorem agreement_answer_is_refused :
+    analyzeQuery Authentication.q = Result.unsupportedGoals [Goal.agreement] :=
+  Authentication.query_refused
+
+/-- And the unsatisfiability answer is not a security verdict, by the contract's own test: the
+`encodingUnsat` answer asserts a fact about a formula. -/
+theorem cnf_answer_is_not_security :
+    securityResult (analyzeQuery (Query.mk Authentication.P Authentication.B [Goal.secrecy])) =
+      false := by
+  rw [cnf_answer_is_encodingUnsat]
+  simp [securityResult]
+
+/-- The two answers side by side, with the semantic fact behind them: one is a formula fact the
+contract declines to call security, the other a refusal, and the protocol has a bounded attack. -/
+theorem the_tool_never_says_agreement_is_broken :
+    analyzeQuery (Query.mk Authentication.P Authentication.B [Goal.secrecy]) =
+      Result.encodingUnsat ∧
+      analyzeQuery Authentication.q = Result.unsupportedGoals [Goal.agreement] ∧
+      ¬ boundedSafeGoals Authentication.q :=
+  ⟨cnf_answer_is_encodingUnsat, agreement_answer_is_refused, attacked_for_agreement⟩
+
+end ProtSat.AuthGap
+
+/-!
+## What this proves and what it does not
+
+**Proved.**
+
+* `safe_for_secrecy` - the CNF route, through the gap-free bridge and four side conditions each
+  decided in this file (or derived from the analyser's own verdict), establishes
+  `boundedSafeGoals (Query.mk Authentication.P Authentication.B [Goal.secrecy])`.
+* `attacked_for_agreement` - the same protocol and bounds admit a bounded execution that violates
+  non-injective agreement, inherited from the kernel-checked `AuthBreak` witness in `Regressions`.
+* `auth_gap_is_real` - the two hold simultaneously. That is the review's headline, as a proposition
+  of the current code.
+* `goal_hypothesis_is_needed` - the goal-selection hypothesis of
+  `CheckedSafe.boundedSafeGoals_of_secrecy` cannot be dropped: the universal statement without it is
+  false, with `Authentication.q` as the counterexample.
+* `cnf_answer_is_encodingUnsat` and `agreement_answer_is_refused` - what the executable pipeline
+  answers for the two readings, and `cnf_answer_is_not_security` - that the first of those answers
+  is not labelled a security verdict by the contract.
+* `why_the_formula_is_unsat` and `empty_clause_in_encode` - *why* the answer came out UNSAT for this
+  model: the violation clause is the empty disjunction, so the formula is unsatisfiable before the
+  solver runs.
+
+**Not proved, and not claimed.**
+
+* It is *not* proved that the protocol is secure. `safe_for_secrecy` is a statement about the
+  secrecy goal: no permitted execution leaks a declared secret - and this protocol declares none
+  (`no_secrets_declared`, `secrecy_goal_is_unviolable`), which is exactly why that half is easy, why
+  the CNF is trivially unsatisfiable, and why none of it is evidence about agreement.
+* It is *not* proved that the CNF route can ever decide agreement. Turning the safety statement
+  above into a security statement about agreement requires agreement violation clauses in the
+  encoding - a literal per way a commit fails to be matched by a claim - and
+  `Encode.violationLits` contains no such clause. Until roadmap stage 4 adds them,
+  `goalEncoded Goal.agreement = false` and `analyzeQuery` keeps refusing this query, which is the
+  contract behaving correctly, not a fix to the encoding.
+* Nothing here weakens the existing bridges. `Query.boundedSafe_of_encodingUnsat_of_gapFree` and
+  `Correspondence.boundedSafe_of_unsat_gapFree` are used exactly as stated, with their hypotheses
+  discharged rather than bypassed. The point of this file is that they *cannot* be applied to the
+  agreement query, not that they were applied wrongly to the secrecy one.
+* The bounds are one event and zero closure rounds. The gap is not an artefact of that smallness -
+  the agreement attack is present at these bounds and the CNF is unsatisfiable at these bounds - but
+  no claim here extends to larger bounds or to unbounded security.
+-/
