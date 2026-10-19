@@ -19,7 +19,7 @@ set -u
 
 cd "$(dirname "$0")/.." || exit 1
 
-THEOREM_FLOOR=2740
+THEOREM_FLOOR=2880
 BUILD_BUDGET=1500
 DEMO_BUDGET=300
 
@@ -111,6 +111,10 @@ expect 'value domain: GAP' 'the under-approximation is reported where the univer
 expect 'INVALID MODEL' 'a malformed model is reported with diagnostics'
 expect 'checkCertificate = true' 'the independent certificate checker accepts the Lowe attack'
 expect 'checkCertificate = false' 'the independent certificate checker rejects the same script on NSL'
+expect 'refutation checked: true' 'a resolution refutation is checked independently of the solver'
+expect 'serialized refutation checked: true' 'the refutation survives serialization and is still checked'
+expect 'code decodes back to the same proof: true' 'the serialization round trip is executable'
+expect 'evidence bound to a different formula rejected: true' 'evidence transplanted to another formula is rejected'
 
 printf '%s\n' '-------------------------'
 printf '%d passed, %d failed\n' "$pass" "$fail"

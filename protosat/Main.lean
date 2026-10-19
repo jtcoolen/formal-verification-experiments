@@ -169,6 +169,19 @@ def main : IO Unit := do
   demoContract "a query that selects no goal" ProtSat.Reference.Contract.Gates.emptyQ
   demoContract "a model with a session naming a role that does not exist"
     ProtSat.Reference.Contract.Gates.badQ
+  IO.println "REFUTATION EVIDENCE (ProtSat/Resolution.lean + ProtSat/Serialize.lean): a safety"
+  IO.println "answer that does not require trusting, or re-running, the search. A resolution"
+  IO.println "refutation is checked line by line against the formula, and the same refutation"
+  IO.println "survives a trip through a byte stream and is still checked."
+  IO.println ("    refutation checked: "        ++ toString (Resolution.checkProof Resolution.demoF Resolution.demoP))
+  IO.println ("    serialized refutation checked: "        ++ toString (Serialize.checkCode Resolution.demoF (Resolution.demoP.length + 1)
+          (Serialize.proofCode Resolution.demoP)))
+  IO.println ("    code decodes back to the same proof: "        ++ toString (Serialize.proofOfCode (Resolution.demoP.length + 1)
+          (Serialize.proofCode Resolution.demoP) |>.isSome))
+  IO.println ("    evidence bound to a different formula rejected: "        ++ toString (! Resolution.checkAgainst Resolution.demoF
+          { clauses := Resolution.demoF_other.clauses, proof := Resolution.demoP }))
+  IO.println ("    truncated code rejected: "        ++ toString (! Serialize.checkCode Resolution.demoF 4 [0, 0, 0, 0, 3]))
+  IO.println ""
   IO.println "SOLVER SANITY CHECKS (all by the kernel, see ProtSat/DPLL.lean)"
   IO.println ("    demoUnit      isSome = " ++ toString ((dpll DPLL.demoUnit).isSome))
   IO.println ("    demoConflict  isSome = " ++ toString ((dpll DPLL.demoConflict).isSome))
