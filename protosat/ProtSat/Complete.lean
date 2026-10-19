@@ -3772,4 +3772,539 @@ theorem sat_leakAux (hok : RunOK sh P cfg ev) :
   · rw [if_neg hsec] at h4
     exact absurd h4 (by simp)
 
+/-- The freshness side condition of ProtSat.Rel.rFresh, recovered from a legal step. -/
+theorem Rel.fresh_used {P₁ : Protocol} {C C' : Cfg} {q : Nat} {x : Nat} {N : NonceName}
+    {m : Term} {d : NonceName} (h : Rel P₁ C (Ev.act q m d) C')
+    (hamt : P₁.actionAt q (pcOf C q) = some (Action.fresh x N)) : nonceUsed C d = false := by
+  cases h with
+  | rFresh _ _ hn => exact hn
+  | rRecv hq => exact absurd (hq.symm.trans hamt) (by simp)
+  | rAssign hq => exact absurd (hq.symm.trans hamt) (by simp)
+  | rSend hq => exact absurd (hq.symm.trans hamt) (by simp)
+  | rCheck hq => exact absurd (hq.symm.trans hamt) (by simp)
+  | rSecret hq => exact absurd (hq.symm.trans hamt) (by simp)
+  | rClaim hq => exact absurd (hq.symm.trans hamt) (by simp)
+  | rCommit hq => exact absurd (hq.symm.trans hamt) (by simp)
+
+/-- With a duplicate-free universe the value index of a message is its unique position. -/
+theorem uIdx_eq_of_valAt (hn : List.Nodup sh.U) {u : Nat} {t : Term} (hv : valAt sh u = some t) :
+    uIdx sh (some t) = u := by
+  have htU : t ∈ sh.U := by
+    show t ∈ sh.U
+    have h0 : rget sh.U u = some t := hv
+    exact rget_some_mem sh.U u t h0
+  have h1 : rget sh.U (ixOf t sh.U) = some t := rget_ixOf sh.U t htU
+  have h2 : ixOf t sh.U = u := rget_nodup_inj sh.U hn _ _ t h1 hv
+  show (if t ∈ sh.U then ixOf t sh.U else sh.U.length) = u
+  rw [if_pos htU]
+  exact h2
+
+/-- A nonce held by some session is used. -/
+theorem nonceUsed_of_store {C : Cfg} {r x : Nat} {N : NonceName}
+    (hr : r < C.sess.length) (h : readVar x (storeOf C r) = some (Term.nonce N)) :
+    nonceUsed C N = true := by
+  obtain ⟨st, hst⟩ := sessAt_lt hr
+  have hmem : st ∈ C.sess := by
+    unfold sessAt at hst
+    exact rget_some_mem C.sess r st hst
+  have hstore : storeOf C r = st.store := by
+    unfold storeOf
+    rw [hst]
+    simp
+  have h1 : Term.nonce N ∈ storeVals st.store := by
+    rw [← hstore]
+    exact readVar_mem_storeVals h
+  unfold nonceUsed
+  rw [Bool.or_eq_true, List.any_eq_true]
+  exact Or.inl ⟨st, hmem, List.contains_iff_mem.mpr h1⟩
+
+/-- A nonce the attacker knows is used. -/
+theorem nonceUsed_of_kn {C : Cfg} {N : NonceName} (h : Term.nonce N ∈ C.kn) :
+    nonceUsed C N = true := by
+  unfold nonceUsed
+  rw [Bool.or_eq_true]
+  exact Or.inr (List.contains_iff_mem.mpr h)
+
+/-- An unused nonce is neither stored nor known. -/
+theorem nonceUsed_false_store {C : Cfg} {r x : Nat} {N : NonceName}
+    (h : nonceUsed C N = false) (h2 : readVar x (storeOf C r) = some (Term.nonce N)) : False := by
+  by_cases hr : r < C.sess.length
+  · exact absurd (nonceUsed_of_store hr h2) (by simpa using h)
+  · have hlen : storeOf C r = [] := by
+      unfold storeOf sessAt
+      rw [rget_oob_ge (C.sess) r (Nat.not_lt.mp hr)]
+      simp
+    rw [hlen] at h2
+    simp [readVar, Expr.lookup] at h2
+
+/-- **Clause group 8 (knowledge is justified).**  A message the attacker knows after step i was
+either known before it, or is the conclusion of a deduction instance that fired at step i, or
+was published by a session that sent it: the propositional form of the requirement that the
+attacker cannot invent messages (specification section 2).  Without this group the solver could
+declare every universe message known, which is exactly the approximation the specification
+forbids. -/
+theorem sat_knSupport (hok : RunOK sh P cfg ev) (hsub : univSub sh) (hn : List.Nodup sh.U)
+    (hrel : ∀ i, Rel P (cfg i) (ev i) (cfg (i + 1))) :
+    Sat (assignOf sh P cfg ev) (knSupportClauses sh P) := by
+  intro cl hcl
+  unfold knSupportClauses cnfOf eachStep mapMsg at hcl
+  obtain ⟨i, hi, h2⟩ := List.mem_flatMap.mp hcl
+  obtain ⟨u, hu, heq⟩ := List.mem_map.mp h2
+  subst heq
+  have hi' : i < sh.steps := List.mem_range.mp hi
+  have huV : u < shVal sh := Nat.lt_succ_of_lt (List.mem_range.mp hu)
+  rcases bool_eq_cases (assignOf sh P cfg ev (vkn sh (i + 1) u)) with hk | hk
+  · -- the message is known after the step: it must be justified
+    have hvu : ∃ t, valAt sh u = some t ∧ t ∈ (cfg (i + 1)).kn := by
+      rw [assignOf_kn sh P cfg ev (Nat.succ_le_of_lt hi') huV, knHolds] at hk
+      cases h : valAt sh u with
+      | none => simp [h] at hk
+      | some t =>
+          simp only [h] at hk
+          exact ⟨t, rfl, of_decide_eq_true hk⟩
+    obtain ⟨t, hv, htm⟩ := hvu
+    have htU : t ∈ sh.U := runOK_knU sh P cfg ev hok (i + 1) t htm
+    have hut : uIdx sh (some t) = u := uIdx_eq_of_valAt sh hn hv
+    by_cases hki : t ∈ (cfg i).kn
+    · refine clause_eval_holds (pos (vkn sh i u))
+        (List.mem_append_left _ (List.Mem.tail _ (List.Mem.head _))) ?_
+      rw [pos_eval, assignOf_kn sh P cfg ev (Nat.le_of_lt hi') huV, knHolds, hv]
+      exact decide_eq_true hki
+    · rcases Rel.kn_step (hrel i) with heq | ⟨t', het, hkn⟩ |
+        ⟨q, t', m, d, a, x, het, hkn, hamt, heval⟩
+      · rw [heq] at htm
+        exact absurd htm hki
+      · -- a deduction step produced it
+        have ht' : t' = t := by
+          rw [hkn, List.mem_append, List.mem_singleton] at htm
+          rcases htm with h | h
+          · exact absurd h hki
+          · exact h.symm
+        have hone : OneStep (cfg i).kn t := by
+          have h2 := hrel i
+          rw [het, ht'] at h2
+          exact Rel.ded_oneStep h2
+        have hspec := dedIx_spec (dedIx_exists hsub (runOK_knU sh P cfg ev hok i) htU hone)
+        have hsel : assignOf sh P cfg ev
+            (evDed sh i (dedIx sh ((cfg i).kn) (uIdx sh (some t)))) = true := by
+          have hsev : shEv sh = 1 + shS sh + nInst sh := rfl
+          rw [evDed, assignOf_ev sh P cfg ev hi'
+            (by rw [hsev]; exact Nat.add_lt_add_left hspec.1 _)]
+          refine decide_eq_true ?_
+          have h2 : rdEv sh P cfg ev i =
+              1 + shS sh + dedIx sh ((cfg i).kn) (uIdx sh (some t)) := by
+            unfold rdEv
+            rw [het, ht']
+          rw [h2]
+        have hmem : pos (evDed sh i (dedIx sh ((cfg i).kn) (uIdx sh (some t)))) ∈
+            [neg (vkn sh (i + 1) u), pos (vkn sh i u)] ++ publisherLits sh P i u := by
+          rw [List.mem_append]
+          refine Or.inr ?_
+          unfold publisherLits
+          rw [List.mem_append]
+          refine Or.inr ?_
+          unfold litsInst
+          simp only [List.mem_flatMap]
+          refine ⟨dedIx sh ((cfg i).kn) (uIdx sh (some t)), List.mem_range.mpr hspec.1, ?_⟩
+          rw [instPublisher]
+          cases hinst : instAt sh (dedIx sh ((cfg i).kn) (uIdx sh (some t))) with
+          | none =>
+              have hx : dedInstOk sh ((cfg i).kn)
+                  (dedIx sh ((cfg i).kn) (uIdx sh (some t))) (uIdx sh (some t)) = true := hspec.2
+              rw [dedInstOk, hinst] at hx
+              simp at hx
+          | some ins =>
+              have h2 := hspec.2
+              simp only [dedInstOk, hinst] at h2
+              rw [Bool.and_eq_true] at h2
+              have hc : ins.concl = uIdx sh (some t) := of_decide_eq_true h2.1
+              have hmem2 : pos (evDed sh i (dedIx sh ((cfg i).kn) (uIdx sh (some t)))) ∈
+                  if ins.concl = u then
+                    [pos (evDed sh i (dedIx sh ((cfg i).kn) (uIdx sh (some t))))]
+                  else [] := by
+                rw [if_pos (by rw [hc, hut])]
+                exact List.Mem.head _
+              exact hmem2
+        exact clause_eval_holds
+          (pos (evDed sh i (dedIx sh ((cfg i).kn) (uIdx sh (some t))))) hmem hsel
+      · -- a send published it
+        have ht' : t' = t := by
+          rw [hkn, List.mem_append, List.mem_singleton] at htm
+          rcases htm with h | h
+          · exact absurd h hki
+          · exact h.symm
+        have hqS : q < sh.nS1 := (runOK_act sh P cfg ev hok i q m d het).1
+        have hq' : q < shS sh := by rw [shS]; omega
+        have hc : pcOf (cfg i) q < shPc sh := runOK_pc sh P cfg ev hok i q hqS
+        have hmemx : x ∈ allExprs P := mem_allExprs_send hamt
+        have hiff := assignOf_vpb_iff sh P cfg ev hok hi' hq' hc huV hamt
+        have hxe : rdXe sh P cfg ev i q (eIdx P x) = u := by
+          rw [rdXe_eIdx sh P cfg ev hmemx, heval, ht']
+          exact hut
+        have hA : assignOf sh P cfg ev (evAct sh i q) = true := by
+          rw [assignOf_evAct sh P cfg ev hi' hq']
+          refine decide_eq_true ?_
+          unfold rdEv
+          rw [het]
+        have hP : assignOf sh P cfg ev (vpc sh i q (pcOf (cfg i) q)) = true := by
+          rw [assignOf_pc sh P cfg ev (Nat.le_of_lt hi') hq' hc]
+          exact decide_eq_true rfl
+        have hX : assignOf sh P cfg ev (vxe sh i q (eIdx P x) u) = true := by
+          rw [assignOf_xe sh P cfg ev (Nat.le_of_lt hi') hq'
+            (runOK_eIdx sh P cfg ev hok x hmemx) huV]
+          exact decide_eq_true hxe
+        have hpub : assignOf sh P cfg ev (vpb sh i q (pcOf (cfg i) q) u) = true :=
+          hiff.mpr ⟨hA, hP, hX⟩
+        have hmem : pos (vpb sh i q (pcOf (cfg i) q) u) ∈
+            [neg (vkn sh (i + 1) u), pos (vkn sh i u)] ++ publisherLits sh P i u := by
+          rw [List.mem_append]
+          refine Or.inr ?_
+          unfold publisherLits
+          rw [List.mem_append]
+          refine Or.inl ?_
+          unfold litsSess litsPc
+          simp only [List.mem_flatMap]
+          refine ⟨q, List.mem_range.mpr hq', pcOf (cfg i) q, List.mem_range.mpr hc, ?_⟩
+          rw [sendPubLit, hamt]
+          exact List.Mem.head _
+        exact clause_eval_holds (pos (vpb sh i q (pcOf (cfg i) q) u)) hmem hpub
+  · exact clause_eval_holds (neg (vkn sh (i + 1) u)) (List.mem_append_left _ (List.Mem.head _))
+      (by simp [neg_eval, hk])
+
+/-- When the freshness literal of a fresh step is selected, the nonce it names is the nonce the
+event generated, and that nonce is unused in the current configuration. -/
+theorem fresh_selected (hok : RunOK sh P cfg ev)
+    (hrel : ∀ i, Rel P (cfg i) (ev i) (cfg (i + 1)))
+    (hi : i < sh.steps) (hq : q < shS sh) (hc : c < shPc sh)
+    (h : P.actionAt q c = some (Action.fresh xa Na))
+    (hg : Clause.eval (assignOf sh P cfg ev) (actGuard sh i q c) = false)
+    (hd : d < shD sh) (hrd : rget sh.D d = some N)
+    (hf : assignOf sh P cfg ev (vfr sh i q d) = true) :
+    nonceUsed (cfg i) N = false := by
+  obtain ⟨⟨m, dd, hevm⟩, hpcd⟩ := (actGuard_false sh P cfg ev hok hi hq hc).mp hg
+  have hpcq : pcOf (cfg i) q = c := hpcd
+  have h1 : rdFr sh P cfg ev i q = d := by
+    rw [assignOf_fr sh P cfg ev hi hq hd] at hf
+    exact of_decide_eq_true hf
+  have h2 : rdFr sh P cfg ev i q = ixOf dd sh.D := by simp [rdFr, hevm]
+  have hdeq : d = ixOf dd sh.D := h1.symm.trans h2
+  have h3 : rget sh.D (ixOf dd sh.D) = some N := by
+    rw [← hdeq]
+    exact hrd
+  have h4 : rget sh.D (ixOf dd sh.D) = some dd :=
+    rget_ixOf sh.D dd (runOK_act sh P cfg ev hok i q m dd hevm).2.2
+  have hdd : dd = N := Option.some.inj (h4.symm.trans h3)
+  have h2r : Rel P (cfg i) (Ev.act q m dd) (cfg (i + 1)) := by rw [← hevm]; exact hrel i
+  have h5 : nonceUsed (cfg i) dd = false := Rel.fresh_used h2r (by rw [hpcq]; exact h)
+  rw [hdd] at h5
+  exact h5
+
+/-- **Clause group 9 (freshness).**  The nonce a session generates may not already sit in some
+session's store, nor be known to the attacker: the propositional form of the side condition of
+ProtSat.Rel.rFresh (ProtSat.nonceUsed). -/
+theorem sat_fresh (hok : RunOK sh P cfg ev)
+    (hD : ∀ N ∈ sh.D, Term.nonce N ∈ sh.U)
+    (hrel : ∀ i, Rel P (cfg i) (ev i) (cfg (i + 1))) :
+    Sat (assignOf sh P cfg ev) (freshClauses sh P) := by
+  intro cl hcl
+  unfold freshClauses cnfOf eachStep eachSess eachPc at hcl
+  obtain ⟨i, hi, h2⟩ := List.mem_flatMap.mp hcl
+  obtain ⟨q, hq, h3⟩ := List.mem_flatMap.mp h2
+  obtain ⟨c, hc, h4⟩ := List.mem_flatMap.mp h3
+  have hi' : i < sh.steps := List.mem_range.mp hi
+  have hq' : q < shS sh := List.mem_range.mp hq
+  have hc' : c < shPc sh := List.mem_range.mp hc
+  unfold freshClausesAt at h4
+  cases h : P.actionAt q c with
+  | none =>
+      rw [h] at h4
+      exact absurd h4 (by simp)
+  | some act =>
+      cases act with
+      | fresh xa Na =>
+          rw [h] at h4
+          rw [List.mem_flatMap] at h4
+          obtain ⟨d, hd, h5⟩ := h4
+          have hd' : d < shD sh := List.mem_range.mp hd
+          rw [freshUseClauses] at h5
+          cases hrd : rget sh.D d with
+          | none =>
+              rw [hrd] at h5
+              exact absurd h5 (by simp)
+          | some N =>
+              rw [hrd] at h5
+              have hN : Term.nonce N ∈ sh.U := hD N (rget_some_mem sh.D d N hrd)
+              have hnU : uIdx sh (some (Term.nonce N)) < sh.U.length := uIdx_some_lt sh hN
+              rw [List.mem_append] at h5
+              rcases h5 with hstore | hknown
+              · -- a store slot may not already hold the nonce
+                rw [List.mem_flatMap] at hstore
+                obtain ⟨r, hr, h6⟩ := hstore
+                have hr' : r < shS sh := List.mem_range.mp hr
+                rw [List.mem_map] at h6
+                obtain ⟨y, hy, heq⟩ := h6
+                have hyV : y < shV sh := List.mem_range.mp hy
+                subst heq
+                rcases bool_eq_cases (Clause.eval (assignOf sh P cfg ev) (actGuard sh i q c))
+                    with hg | hg
+                · exact clause_eval_append_left_true _ _ _ hg
+                · rcases bool_eq_cases (assignOf sh P cfg ev (vfr sh i q d)) with hf | hf
+                  · have hused :=
+                      fresh_selected sh P cfg ev hok hrel hi' hq' hc' h hg hd' hrd hf
+                    refine clause_eval_append_right_true _ _ _
+                      (clause2_right _ _ _ (neg_lit _ _ ?_))
+                    rw [assignOf_st sh P cfg ev (Nat.le_of_lt hi') hr' hyV (uIdx_lt' sh _)]
+                    refine decide_eq_false ?_
+                    intro heq2
+                    have h7 : valAt sh (uIdx sh (some (Term.nonce N))) = some (Term.nonce N) :=
+                      valAt_uIdx_some sh hN
+                    have h8 : uIdx sh (readVar y (storeOf (cfg i) r)) =
+                        uIdx sh (some (Term.nonce N)) := heq2
+                    have hval : valAt sh (uIdx sh (readVar y (storeOf (cfg i) r))) =
+                        some (Term.nonce N) := by
+                      rw [h8]
+                      exact h7
+                    cases hrv : readVar y (storeOf (cfg i) r) with
+                    | none => simp [hrv] at hval
+                    | some v =>
+                        have hvU : v ∈ sh.U := by
+                          by_cases hrS : r < sh.nS1
+                          · exact runOK_storeU sh P cfg ev hok i r v hrS
+                              (readVar_mem_storeVals hrv)
+                          · have hlen : (cfg i).sess.length = sh.nS1 :=
+                              runOK_sessLen sh P cfg ev hok i
+                            have hempty : storeOf (cfg i) r = [] := by
+                              unfold storeOf sessAt
+                              rw [rget_oob_ge (cfg i).sess r (by omega)]
+                              rfl
+                            rw [hempty] at hrv
+                            simp [readVar, Expr.lookup] at hrv
+                        have h9 : uIdx sh (readVar y (storeOf (cfg i) r)) = uIdx sh (some v) := by
+                          rw [hrv]
+                        rw [h9, valAt_uIdx_some sh hvU] at hval
+                        have heqv : v = Term.nonce N := Option.some.inj hval
+                        subst heqv
+                        exact nonceUsed_false_store hused hrv
+                  · exact clause_eval_append_right_true _ _ _
+                      (clause2_left _ _ _ (by simp [neg_eval, hf]))
+              · -- the attacker may not already know the nonce
+                simp only [List.mem_singleton] at hknown
+                subst hknown
+                rcases bool_eq_cases (Clause.eval (assignOf sh P cfg ev) (actGuard sh i q c))
+                    with hg | hg
+                · exact clause_eval_append_left_true _ _ _ hg
+                · rcases bool_eq_cases (assignOf sh P cfg ev (vfr sh i q d)) with hf | hf
+                  · have hused :=
+                      fresh_selected sh P cfg ev hok hrel hi' hq' hc' h hg hd' hrd hf
+                    refine clause_eval_append_right_true _ _ _
+                      (clause2_right _ _ _ (neg_lit _ _ ?_))
+                    rw [assignOf_kn sh P cfg ev (Nat.le_of_lt hi') (uIdx_lt' sh _), knHolds,
+                      valAt_uIdx_some sh hN]
+                    refine decide_eq_false ?_
+                    intro hmem
+                    have h1 : nonceUsed (cfg i) N = true := nonceUsed_of_kn hmem
+                    rw [h1] at hused
+                    simp at hused
+                  · exact clause_eval_append_right_true _ _ _
+                      (clause2_left _ _ _ (by simp [neg_eval, hf]))
+      | _ =>
+          rw [h] at h4
+          exact absurd h4 (by simp)
+
+/-- **The secret hypothesis.**  The bounds must be able to name the declared secrets: every
+secret store variable has a store slot in the shape, and every closed secret message is a
+universe message.  Without this the violation clause of the encoding could not even mention the
+leak - the same kind of bound hypothesis specification section 4 asks for. -/
+def SecretsOK (sh : Shape) (P : Protocol) : Prop :=
+  (∀ q x, (Secret.store q x) ∈ P.secrets → x < shV sh) ∧
+    (∀ s ∈ P.closedSecretTerms, s ∈ sh.U)
+
+/-- Reading an in-range position of a run gives one of its configurations. -/
+theorem cfgAt_lt : ∀ (Cs : List Cfg) (i : Nat), i < Cs.length ->
+    ∃ C, C ∈ Cs ∧ cfgAt Cs i = C := by
+  intro Cs
+  induction Cs with
+  | nil => intro i h; exact absurd h (by simp)
+  | cons C rest ih =>
+      intro i h
+      cases i with
+      | zero => exact ⟨C, List.Mem.head _, cfgAt_head⟩
+      | succ k =>
+          have hlenC : (C :: rest).length = rest.length + 1 := rfl
+          rw [hlenC] at h
+          have hk : k < rest.length := by omega
+          have hne : rest ≠ [] := by
+            intro he
+            rw [he] at hk
+            simp at hk
+          obtain ⟨D, hD, hEq⟩ := ih k hk
+          exact ⟨D, List.mem_cons.mpr (Or.inr hD), by
+            rw [cfgAt_cons_succ hne k, hEq]⟩
+
+/-- **Clause group 11 (the violation).**  The violation clause is satisfied: the run really
+leaks, and the leak is named by one of the literals the clause offers. -/
+theorem sat_violation (hok : RunOK sh P cfg ev) (hsec : SecretsOK sh P)
+    (hleak : ∃ i, i ≤ sh.steps ∧ Leak P (cfg i)) :
+    Sat (assignOf sh P cfg ev) (violationClauses sh P) := by
+  intro cl hcl
+  rw [violationClauses, cnfOf, List.mem_singleton] at hcl
+  subst hcl
+  obtain ⟨i, hi, hleak'⟩ := hleak
+  rcases hleak' with ⟨s, hs, hkn⟩ | ⟨q, x, v, hsq, hread, hvkn⟩
+  · -- a closed declared secret is known
+    have hsU : s ∈ sh.U := hsec.2 s hs
+    set u := uIdx sh (some s) with hu_def
+    have huV : u < shVal sh := by rw [hu_def]; exact uIdx_lt' sh _
+    have hlen : u < sh.U.length := uIdx_some_lt sh hsU
+    have hval : valAt sh u = some s := valAt_uIdx_some sh hsU
+    have hlit : pos (vkn sh i u) ∈ violationLits sh P := by
+      unfold violationLits litsStep1
+      rw [List.mem_flatMap]
+      refine ⟨i, List.mem_range.mpr (Nat.lt_succ_of_le hi), ?_⟩
+      rw [List.mem_append]
+      refine Or.inl ?_
+      unfold closedLeakLits
+      rw [List.mem_filterMap]
+      refine ⟨u, List.mem_range.mpr hlen, ?_⟩
+      simp [hval, hs]
+    have htrue : Lit.eval (assignOf sh P cfg ev) (pos (vkn sh i u)) = true := by
+      rw [pos_eval, assignOf_kn sh P cfg ev hi huV, knHolds, hval]
+      exact decide_eq_true hkn
+    exact clause_eval_holds (pos (vkn sh i u)) hlit htrue
+  · -- a store secret leaks
+    obtain ⟨hxV, _⟩ := hsec
+    have hx : x < shV sh := hxV q x hsq
+    have hread' : readVar x (storeOf (cfg i) q) = some v := by
+      cases h : sessAt (cfg i) q with
+      | none => simp [h] at hread
+      | some st =>
+          have h2 : (sessAt (cfg i) q).map (fun st => readVar x st.store) =
+              some (readVar x st.store) := by simp [h]
+          rw [h2] at hread
+          have hst : storeOf (cfg i) q = st.store := by
+            unfold storeOf
+            rw [h]
+            simp
+          rw [hst]
+          exact Option.some.inj hread
+    have hqS : q < (cfg i).sess.length := by
+      by_contra e
+      have h2 : storeOf (cfg i) q = [] := by
+        unfold storeOf sessAt
+        rw [rget_oob_ge (cfg i).sess q (Nat.not_lt.mp e)]
+        simp
+      rw [h2] at hread'
+      simp [readVar, Expr.lookup] at hread'
+    have hqS' : q < sh.nS1 := by
+      have hlen : (cfg i).sess.length = sh.nS1 := runOK_sessLen sh P cfg ev hok i
+      rw [← hlen]
+      exact hqS
+    have hsecb : storeSecret sh P q x = true := by
+      unfold storeSecret
+      simp only [Bool.and_eq_true, decide_eq_true_eq]
+      exact ⟨by omega, hsq⟩
+    have hqS'' : q < shS sh := by rw [shS]; omega
+    have hvU : v ∈ sh.U := runOK_storeU sh P cfg ev hok i q v hqS'
+      (readVar_mem_storeVals hread')
+    set u := uIdx sh (some v) with hu_def
+    have huV : u < shVal sh := by rw [hu_def]; exact uIdx_lt' sh _
+    have hlen : u < sh.U.length := uIdx_some_lt sh hvU
+    have hrd : rdSt sh P cfg ev i q x = u := by
+      show uIdx sh (readVar x (storeOf (cfg i) q)) = uIdx sh (some v)
+      rw [hread']
+    have hkn : assignOf sh P cfg ev (vkn sh i u) = true := by
+      rw [assignOf_kn sh P cfg ev hi huV, knHolds, hu_def, valAt_uIdx_some sh hvU]
+      exact decide_eq_true hvkn
+    have hst : assignOf sh P cfg ev (vst sh i q x u) = true := by
+      rw [assignOf_st sh P cfg ev hi hqS'' hx huV]
+      exact decide_eq_true hrd
+    have hiff := assignOf_vau_iff sh P cfg ev hi hqS'' hx huV hsecb
+    have hvau : assignOf sh P cfg ev (vau sh i q x u) = true :=
+      hiff.mpr ⟨hst, hkn⟩
+    have hlit : pos (vau sh i q x u) ∈ violationLits sh P := by
+      unfold violationLits litsStep1
+      rw [List.mem_flatMap]
+      refine ⟨i, List.mem_range.mpr (Nat.lt_succ_of_le hi), ?_⟩
+      rw [List.mem_append]
+      refine Or.inr ?_
+      unfold storeLeakLits litsSess litsVar
+      refine List.mem_flatMap.mpr ⟨q, List.mem_range.mpr (by rw [shS]; omega),
+        List.mem_flatMap.mpr ⟨x, List.mem_range.mpr hx, ?_⟩⟩
+      unfold storeLeakLitsAt
+      rw [if_pos hsecb, List.mem_map]
+      exact ⟨u, List.mem_range.mpr hlen, rfl⟩
+    exact clause_eval_holds (pos (vau sh i q x u)) hlit hvau
+
+
+/-- An in-range read of a run's configuration list gives the configuration at that position. -/
+theorem cfgAt_eq_of_rget : ∀ (Cs : List Cfg) (i : Nat) (C : Cfg), rget Cs i = some C ->
+    cfgAt Cs i = C := by
+  intro Cs
+  induction Cs with
+  | nil => intro i C h; exact absurd h (by simp [rget])
+  | cons D rest ih =>
+      intro i C h
+      cases i with
+      | zero =>
+          have hDC : D = C := Option.some.inj h
+          subst hDC
+          exact cfgAt_head
+      | succ k =>
+          by_cases hne : rest = []
+          · subst hne
+            simp [rget] at h
+          · rw [cfgAt_cons_succ hne k]
+            exact ih k C (by simpa [rget] using h)
+
+/-- **Encoding completeness (specification 8B).**  Every valid bounded attack execution of the
+protocol is represented by a satisfying assignment of the generated CNF.
+
+The assignment is the characteristic function of the run (ProtSat.Complete.assignOf): a
+propositional variable is true exactly when the semantic fact it names holds.  The theorem is
+the converse of ProtSat.Encoding.encoding_sound (8A), and together they are the correspondence
+between symbolic protocol attacks and satisfying assignments of the formula: within the declared
+bounds the two statements are the same statement.
+
+The hypotheses are the bounds conditions of specification section 4, collected in
+ProtSat.Complete.RunOK (the run stays inside the shape), ProtSat.Encode.univClosed (the universe
+names the messages the protocol computes), ProtSat.Complete.univSub (the universe is closed under
+subterms, needed to enumerate the attacker's rule instances) and ProtSat.Complete.SecretsOK (the
+bounds can name the declared secrets).  None of them is a technicality: a run that leaves the
+universe has no finite name, and a violation the encoding cannot mention cannot be found. -/
+theorem encoding_complete {P : Protocol} {B : Bounds} {tr : List Ev} {Cs : List Cfg}
+    (hU : univClosed (shapeOf P B) P) (hsub : univSub (shapeOf P B))
+    (hsec : SecretsOK (shapeOf P B) P)
+    (hrun : Runs P (initCfg P) tr Cs) (hlen : tr.length ≤ B.steps)
+    (hleak : runsLeaks P Cs) (hbnd : WithinBounds P B (cfgAt Cs) (evAt tr)) :
+    Satisfiable (encode P B) := by
+  refine ⟨assignOf (shapeOf P B) P (cfgAt Cs) (evAt tr), ?_⟩
+  intro cl hcl
+  rw [encode, cnfOf, List.mem_flatMap] at hcl
+  obtain ⟨g, hg, hc⟩ := hcl
+  have hrel : ∀ i, Rel P (cfgAt Cs i) (evAt tr i) (cfgAt Cs (i + 1)) := (runs_rel hrun).2
+  have hcfg0 : cfgAt Cs 0 = initCfg P := ((runs_rel hrun).1).symm
+  have hleak' : ∃ i, i ≤ (shapeOf P B).steps ∧ Leak P (cfgAt Cs i) := by
+    obtain ⟨C, hC, hleakC⟩ := hleak
+    obtain ⟨i, hi, hrg⟩ := mem_rget Cs C hC
+    have hlenCs : Cs.length = tr.length + 1 := runs_length hrun
+    have hbnd : i ≤ (shapeOf P B).steps := by
+      have hsteps : (shapeOf P B).steps = B.steps := rfl
+      rw [hsteps]
+      omega
+    exact ⟨i, hbnd, by rw [cfgAt_eq_of_rget Cs i C hrg]; exact hleakC⟩
+  simp only [encodeGroups, List.mem_cons, List.not_mem_nil, or_false] at hg
+  rcases hg with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl
+  · exact sat_oneHot (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd hsub hrel cl hc
+  · exact sat_init (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd hcfg0 cl hc
+  · exact sat_frame (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd hrel cl hc
+  · exact sat_eval (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd cl hc
+  · exact sat_step (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd hrel cl hc
+  · exact sat_ded (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd hsub hrel cl hc
+  · exact sat_pubAux (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd cl hc
+  · exact sat_knSupport (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd hsub U_nodup hrel cl hc
+  · exact sat_fresh (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd
+      (fun N hN => nonces_subset_univ P B N hN) hrel cl hc
+  · exact sat_leakAux (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd cl hc
+  · exact sat_violation (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd hsec hleak' cl hc
+
 end ProtSat.Complete
