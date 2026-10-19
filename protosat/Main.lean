@@ -30,7 +30,8 @@ open ProtSat.DPLL (dpll)
 def showVerdict (P : Protocol) (v : Verdict) : String :=
   match v with
   | Verdict.boundsTooSmall => "BOUNDS TOO SMALL (univClosed fails: raise Bounds.rounds)"
-  | Verdict.safe => "SAFE within the declared bounds (no model of the CNF)"
+  | Verdict.encodingUnsat =>
+      "ENCODING UNSAT (no model of the generated CNF: no bounded *secret leak*; see ProtSat.Query)"
   | Verdict.attack c =>
       "ATTACK (" ++ toString c.steps.length ++ " events); certificate accepted: "
         ++ toString (checkCertificate P c)
@@ -57,6 +58,26 @@ def demoCert (name : String) (P : Protocol) (tr : List Ev) (expect : Bool) : IO 
   IO.println ("    trace: " ++ toString (certTrace c).length ++ " events replayed by the checker")
   IO.println ""
 
+/-- The contract view of the same models: a query names the goals it asks about, and the answer
+says what was actually established. See ProtSat/Query.lean. -/
+def demoQuery (name : String) (q : Query) : IO Unit := do
+  IO.println ("--- " ++ name)
+  IO.println ("    selected goals: " ++ toString (q.goals.length)
+    ++ "; validation diagnostics: " ++ toString ((validate q).length))
+  IO.println ("    answer: " ++ describe (analyzeQuery q))
+  IO.println ""
+
+/-- A model with a secret declaration that denotes nothing: the validator must say so rather
+than answer a question about a secret the model does not contain. -/
+def malformedP : Protocol :=
+  { roles := [{ acts := [Action.send 0 (Expr.var 0)] }]
+    sessions := [{ role := 0, self := 0, peer := 0 }]
+    agents := [0]
+    nonceDomain := []
+    compromised := []
+    secrets := [Secret.closed (Expr.var 0)]
+    auths := [] }
+
 def main : IO Unit := do
   IO.println "ProtSat: a proof-producing SAT-based protocol analyser, verified in Lean 4"
   IO.println "=========================================================================="
@@ -77,6 +98,22 @@ def main : IO Unit := do
   IO.println ""
   demoCert "5. Lowe attack on Needham-Schroeder (certificate)" NS.P NS.trace true
   demoCert "6. the same attack on Needham-Schroeder-Lowe (rejected)" NSL.P NSL.trace false
+  IO.println "THE QUERY CONTRACT (ProtSat/Query.lean): what each answer means"
+  IO.println ""
+  demoQuery "challenge-response, asking about secrecy"
+    (Query.mk Challenge.P Challenge.B [Goal.secrecy])
+  demoQuery "challenge-response, ALSO asking about agreement"
+    (Query.mk Challenge.P Challenge.B [Goal.secrecy, Goal.agreement])
+  demoQuery "replay protocol, asking about secrecy"
+    (Query.mk Replay.P Replay.B [Goal.secrecy])
+  demoQuery "the commit-only witness, asking about agreement"
+    (Query.mk Regressions.Authentication.P Regressions.Authentication.B [Goal.agreement])
+  demoQuery "the transient-pair witness, asking about secrecy"
+    (Query.mk Regressions.Bounds.P Regressions.Bounds.B [Goal.secrecy])
+  demoQuery "a model whose declared secret denotes nothing"
+    (Query.mk malformedP { steps := 2, rounds := 0 } [Goal.secrecy])
+  demoQuery "a query that selects no goal"
+    (Query.mk Challenge.P Challenge.B [])
   IO.println "SOLVER SANITY CHECKS (all by the kernel, see ProtSat/DPLL.lean)"
   IO.println ("    demoUnit      isSome = " ++ toString ((dpll DPLL.demoUnit).isSome))
   IO.println ("    demoConflict  isSome = " ++ toString ((dpll DPLL.demoConflict).isSome))

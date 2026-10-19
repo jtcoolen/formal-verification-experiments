@@ -14,3 +14,5 @@ import ProtSat.Complete
 import ProtSat.Certificate
 import ProtSat.Analyzer
 import ProtSat.Examples
+import ProtSat.Query
+import ProtSat.Regressions

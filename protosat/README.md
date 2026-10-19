@@ -3,8 +3,9 @@
 A symbolic (Dolev-Yao) protocol analyser written in **Lean 4 + Mathlib**, in which the
 central object of study is a *proved correspondence*:
 
-> a bounded execution of a protocol that violates a declared security property exists **if
-> and only if** the propositional formula compiled from that protocol is satisfiable.
+> a bounded execution of a protocol that **leaks a declared secret** exists **if and only if**
+> the propositional formula compiled from that protocol is satisfiable - provided the bounds can
+> name that execution (`ProtSat.Complete.WithinBounds`).
 
 The left-to-right direction is `ProtSat.Encoding.encoding_sound` (specification 8A); the
 right-to-left direction is `ProtSat.Complete.encoding_complete` (8B).  A satisfying
@@ -14,6 +15,41 @@ adversary deductions, and that trace is re-validated by an independent checker
 
 Everything is checked by the Lean kernel: no `sorry`, no `admit`, no user-declared axioms,
 no `native_decide`, no partial definitions.
+
+## Read this before believing a verdict
+
+The quoted correspondence is *not yet* the statement "the protocol is secure within its bounds",
+for two reasons that are proved rather than confessed - see
+[`VERIFICATION_PROGRESS.md`](VERIFICATION_PROGRESS.md) and `ProtSat/Regressions.lean`:
+
+1. **The formula asks about secrets only.** `Encode.violationLits` contains leak literals and
+   nothing else, while `Bounded.BoundedAttack` also counts a violation of non-injective
+   authentication agreement. `Regressions.Authentication` is a kernel-checked query with
+   `analyze P B = encodingUnsat` **and** `BoundedAttack P B`: an unsatisfiable CNF and an attack
+   at the same time.
+2. **Completeness is conditional on representability.** `Regressions.Bounds` is a kernel-checked
+   query with a bounded leak attack for which `WithinBounds` fails, because the protocol computes
+   `fst (pair x x)` and the intermediate pair is outside the finite universe. A permitted run can
+   have no name in the formula.
+
+`ProtSat/Query.lean` is the layer that keeps the two apart. A `Query` names the protocol, the
+bounds and the **selected goals**; `encodedGoals = [secrecy]` says what the CNF can currently
+represent a violation of; and `analyzeQuery` refuses - rather than answering - any query that
+selects a goal the encoding does not represent:
+
+```lean
+Regressions.Authentication.query_refused :
+    analyzeQuery q = Result.unsupportedGoals [Goal.agreement]
+Regressions.Authentication.not_security : securityResult (analyzeQuery q) = false
+Regressions.Bounds.hwb_fails :
+    ¬ (∀ tr Cs, BoundedTrace P B tr Cs -> WithinBounds P B (cfgAt Cs) (evAt tr))
+```
+
+The old `Verdict.safe` is now `Verdict.encodingUnsat`, which is what the solver theorem
+establishes. `Result.boundedSafe` exists in the contract and carries a `SafeEvidence`, and
+`analyzeQuery_ne_boundedSafe` proves that nothing produces it yet. The conditional bridge
+`boundedSafe_of_encodingUnsat` spells out exactly the hypotheses that stages 3 and 4 have to
+discharge.
 
 ---
 
@@ -212,16 +248,20 @@ solver.  Five accepted and three rejected example certificates are checked by `d
 
 | # | statement | Lean theorem | status |
 |---|---|---|---|
-| A | every model of the CNF decodes to a valid bounded attack | `Encoding.encoding_sound`, `encoding_sound_bounded` | proved |
-| B | every valid bounded attack yields a model of the CNF | `Complete.encoding_complete` | **proved** |
+| A | every model of the CNF decodes to a valid bounded execution that **leaks a declared secret** | `Encoding.encoding_sound`, `encoding_sound_bounded` | proved |
+| B | every valid bounded **leaking** execution that satisfies `WithinBounds` yields a model of the CNF | `Complete.encoding_complete` | **proved, with the hypotheses shown** |
 | C | every accepted certificate is a genuine trace | `Certificate.checkCertificate_sound` | proved |
 | D | solver SAT answer is a real model | `DPLL.dpll_sound` | proved |
 | E | solver UNSAT answer means unsatisfiable | `DPLL.dpll_complete` | proved |
 | F | analyser attack verdict gives a bounded attack | `Analyzer.analyze_attack_sound`, `analyze_attack_bounded` | proved |
-| G | analyser SAFE verdict means no bounded attack | `Analyzer.analyze_safe_sound`, `analyze_not_safe_of_attack` | **proved** |
+| G | analyser `encodingUnsat` verdict means no bounded **leaking** execution satisfying `WithinBounds` | `Analyzer.analyze_safe_sound`, `analyze_not_safe_of_attack` | **proved, and it is not a statement about `BoundedAttack`** |
 | H | termination of state construction, encoding, DPLL, checking | `Analyzer.shape_finite`, `encode_vocab_finite`, `dpll_none_iff_unsat`, `checkCertificate_eq_decide`, `analyze_verdict_cases` | **proved** |
 
-**8B is the converse, and it is the theorem that makes a SAFE verdict mean something.**
+**8B is the converse, and it is the theorem that would make a SAFE verdict mean something - except
+that its violation condition is `runsLeaks`, not `BoundedAttack`.** The gap is
+`Regressions.Authentication`; closing it means adding authentication violation clauses to
+`Encode.encode` and proving the Boolean monitor equivalent to the independently defined
+`ProtSat.Violation` (roadmap stage 4).
 Its proof is a construction: `Complete.assignOf` is the *characteristic function of the run* -
 a propositional variable is true exactly when the semantic fact it names holds - built from
 fifteen disjoint block tests over the positional codes (`Complete.asgPc`, `asgSt`, `asgXe`,
@@ -270,10 +310,15 @@ and the tenth is not enabled.
 
 ## 10. Guarantees, and what is not claimed
 
-* **Bounded, not unbounded.**  A SAFE verdict means: no attack inside `steps` events, the
-  declared sessions, and the message universe generated by `rounds` closure rounds.  It is
-  not a proof of protocol security.  (Specification 11 forbids the confusion; the README of
-  the classic result - that 2 sessions and 10 steps suffice to refute NS - is a reminder
+* **What a verdict is about.** `analyze` answers the question the CNF asks: no bounded execution
+  inside `steps` events, the declared sessions and the universe generated by `rounds` closure
+  rounds **leaks a declared secret** - and, for the completeness direction, only executions that
+  satisfy `WithinBounds`. Agreement violations are not in the formula
+  (`Regressions.Authentication`), and `Regressions.Bounds` shows a permitted leak the formula
+  cannot name. Use `ProtSat.analyzeQuery` to get an answer that says which of these it is.
+* **Bounded, not unbounded.** Even a genuine `boundedSafeGoals q` is a statement about the query's
+  sessions, domains and bounds, not a proof of protocol security. (Specification 11 forbids the
+  confusion; the classic result that 2 sessions and 10 steps suffice to refute NS is a reminder
   that small bounds are meaningful, not a claim of completeness over all runs.)
 * **Symbolic, not computational.**  Perfect cryptography: no reduction to a hardness
   assumption is claimed or possible here.
@@ -281,11 +326,13 @@ and the tenth is not enabled.
   `univClosed` is checked before any verdict is reported (`Verdict.boundsTooSmall` otherwise).
 * **The certificate is the evidence.**  Attack verdicts can be handed to a verifier that
   shares no code with the encoder or the solver.
-* **Solver completeness is load-bearing for SAFE** (there is no certificate to check):
-  `analyze_safe_sound` is 8B (a bounded attack would give a model) plus 8E (the solver's
-  `none` answer means there is no model).  Both directions of the correspondence are now
-  proved, so within the declared bounds "the solver found a model" and "the protocol has an
-  attack" are the same statement - which is the correspondence the project is about.
+* **Solver completeness is load-bearing for any safety claim** (there is no certificate to
+  check), and it is the weakest link today: `analyze_safe_sound` is 8B (a bounded *leak* would
+  give a model) plus 8E (the solver's `none` answer means there is no model). Because 8B's
+  violation condition is `runsLeaks` and its hypothesis list includes `WithinBounds`, "the solver
+  found no model" is not yet the same statement as "the protocol has no attack". Closing that
+  distance is the whole of roadmap stages 3-5; `ProtSat.Query` is what stops the gap from being
+  reported as safety in the meantime.
 * **No axioms beyond Lean's three.**  `lake env lean Axioms.lean` walks every theorem in the
   `ProtSat` namespace and reports any axiom other than `propext`, `Classical.choice`,
   `Quot.sound`.
@@ -308,7 +355,9 @@ and the tenth is not enabled.
 | `ProtSat/Complete.lean` | 4100 | 8B: the characteristic assignment of a run, all eleven clause groups, `encoding_complete` |
 | `ProtSat/DPLL.lean` | 1180 | the verified solver (8D, 8E) |
 | `ProtSat/Certificate.lean` | 937 | the independent checker (8C) |
-| `ProtSat/Analyzer.lean` | 380 | the pipeline, 8F, 8G and the 8H termination theorems |
+| `ProtSat/Analyzer.lean` | 393 | the pipeline, 8F, 8G and the 8H termination theorems |
+| `ProtSat/Query.lean` | 563 | the contract: `Query`, `Goal`, `Violation`, validator, `Result`, `analyzeQuery`, the gate theorems |
+| `ProtSat/Regressions.lean` | 338 | permanent kernel-checked witnesses for every open gap |
 | `ProtSat/Examples.lean` | 430 | the six protocols, certificates, executable results |
 
 ## 12. Reading it

@@ -15,7 +15,7 @@ import ProtSat.Complete
 
     analyze P B =  if the bounds are too small to state the question then boundsTooSmall
                    else match dpll (encode P B) with
-                     | none     => safe
+                     | none     => encodingUnsat
                      | some asg => attack (certOf P B asg)
 
 1. ProtSat.Encode.encode compiles the bounded executions of P into a CNF (section 5);
@@ -26,6 +26,12 @@ import ProtSat.Complete
    ProtSat.Certificate.checkCertificate re-validates it from scratch (section 7).
 
 ## What is guaranteed
+
+The pipeline is proved correct in both directions *about the CNF it generates*.  What the CNF
+asks is the bounded question "does some execution of at most B.steps events inside the universe
+univ P B leak a declared secret", so an `encodingUnsat` answer is a statement about leaks, not
+about the whole of `ProtSat.Bounded.BoundedAttack` (which also admits authentication-agreement
+violations).  ProtSat.Query is the layer that states which verdicts carry which security claim.
 
 * dpll_sound (8D) makes the model real;
 * encoding_sound (8A) makes the decoded run a genuine ProtSat.Rel execution that leaks;
@@ -179,13 +185,22 @@ theorem certOf_checked (hU : univClosed (shapeOf P B) P) (h : Sat a (encode P B)
 
 /-! ### The analyser -/
 
-/-- The answer of the analyser.  boundsTooSmall means the declared bounds do not even
-satisfy the closure hypothesis the encoding theorems need, so neither of the other verdicts
-would mean anything; safe means the solver proved the CNF unsatisfiable; attack carries a
-certificate that the independent checker accepts. -/
+/-- The answer of the low-level analyser.
+
+The names state exactly what each answer is, because the two are not the same claim:
+
+* `boundsTooSmall`: the declared bounds do not even satisfy the closure hypothesis the
+  encoding theorems need, so neither of the other answers would mean anything;
+* `encodingUnsat`: the solver proved that the *generated CNF* has no model.  This is a fact
+  about a Boolean formula.  It is **not** yet a security verdict: the violation clause of the
+  encoding (ProtSat.Encode.violationLits) demands a declared-secret leak, so an
+  `encodingUnsat` answer says nothing about executions that break authentication agreement
+  without leaking a secret.  See ProtSat.Query for the contract that keeps the two apart, and
+  ProtSat.Regressions.Authentication for a query where the two genuinely differ.
+* `attack c`: a certificate that the independent checker accepts. -/
 inductive Verdict : Type
   | boundsTooSmall : Verdict
-  | safe : Verdict
+  | encodingUnsat : Verdict
   | attack : Certificate -> Verdict
   deriving Repr
 
@@ -193,7 +208,7 @@ inductive Verdict : Type
 def analyze (P : Protocol) (B : Bounds) : Verdict :=
   if ! (univClosedBool (shapeOf P B) P) then Verdict.boundsTooSmall
   else match dpll (encode P B) with
-    | none => Verdict.safe
+    | none => Verdict.encodingUnsat
     | some asg => Verdict.attack (certOf P B (asgVal asg))
 
 /-- The two facts the attack verdict is made of, isolated so the case analysis over the
@@ -237,12 +252,17 @@ theorem analyze_attack_bounded {P : Protocol} {B : Bounds} {c : Certificate}
 
 open ProtSat.Complete
 
-/-- **Specification 8G (end-to-end bounded safety).**  If the analyser reports SAFE then the
-protocol has no bounded attack: there is no trace of at most B.steps steps that
-ProtSat.Operational accepts from the initial configuration and whose visited configurations
-leak a declared secret - provided the bounds can name such a run
-(ProtSat.Complete.WithinBounds) and cover the protocol's declarations
-(ProtSat.Encode.univClosed, ProtSat.Complete.univSub, ProtSat.Complete.SecretsOK).
+/-- **Specification 8G (end-to-end bounded *secrecy*).**  If the analyser reports
+`encodingUnsat` then there is no trace of at most B.steps steps that ProtSat.Operational accepts
+from the initial configuration and whose visited configurations **leak a declared secret** -
+provided the bounds can name such a run (ProtSat.Complete.WithinBounds) and cover the protocol's
+declarations (ProtSat.Encode.univClosed, ProtSat.Complete.univSub, ProtSat.Complete.SecretsOK).
+
+This is deliberately not stated as "the protocol has no bounded attack":
+ProtSat.Bounded.BoundedAttack also counts a violation of non-injective agreement, and the
+generated CNF has no clause for one.  The gap is ProtSat.Regressions.Authentication, and the
+contract that refuses to call `encodingUnsat` a security verdict for such a query is
+ProtSat.Query.analyzeQuery_unsupported_of_unencoded.
 
 The proof is the composition of the two halves of the correspondence: had such a run existed,
 ProtSat.Complete.encoding_complete (8B) would have produced a satisfying assignment of the
@@ -258,7 +278,7 @@ certificate checker, but a SAFE verdict is a statement about the secrecy violati
 asks for. -/
 theorem analyze_safe_sound {P : Protocol} {B : Bounds}
     (hU : univClosed (shapeOf P B) P) (hsub : univSub (shapeOf P B))
-    (hsec : SecretsOK (shapeOf P B) P) (h : analyze P B = Verdict.safe) :
+    (hsec : SecretsOK (shapeOf P B) P) (h : analyze P B = Verdict.encodingUnsat) :
     ¬ ∃ (tr : List Ev) (Cs : List Cfg),
         Runs P (initCfg P) tr Cs ∧ tr.length ≤ B.steps ∧ runsLeaks P Cs ∧
           WithinBounds P B (cfgAt Cs) (evAt tr) := by
@@ -289,7 +309,7 @@ theorem analyze_not_safe_of_attack {P : Protocol} {B : Bounds}
     (tr : List Ev) (Cs : List Cfg) (hrun : Runs P (initCfg P) tr Cs)
     (hlen : tr.length ≤ B.steps) (hleak : runsLeaks P Cs)
     (hbnd : WithinBounds P B (cfgAt Cs) (evAt tr)) :
-    analyze P B ≠ Verdict.safe := by
+    analyze P B ≠ Verdict.encodingUnsat := by
   intro hsafe
   exact (analyze_safe_sound hU hsub hsec hsafe) ⟨tr, Cs, hrun, hlen, hleak, hbnd⟩
 
@@ -359,7 +379,7 @@ theorem checkCertificate_eq_decide (P : Protocol) (c : Certificate) :
 analyser returns one of its three verdicts: the analysis is a decision procedure on the declared
 bounds, not a partial search. -/
 theorem analyze_verdict_cases (P : Protocol) (B : Bounds) :
-    analyze P B = Verdict.boundsTooSmall ∨ analyze P B = Verdict.safe ∨
+    analyze P B = Verdict.boundsTooSmall ∨ analyze P B = Verdict.encodingUnsat ∨
       ∃ c, analyze P B = Verdict.attack c := by
   by_cases hu : univClosedBool (shapeOf P B) P
   · rw [analyze]

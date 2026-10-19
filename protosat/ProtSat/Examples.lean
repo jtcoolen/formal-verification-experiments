@@ -138,20 +138,23 @@ theorem bounds_ok : univClosedBool (shapeOf P B) P = true := by decide
 -- The size of the generated CNF.
 #eval (nVarsAll (shapeOf P B), (encode P B).clauses.length)
 
--- **Executable result: SAFE within these bounds.**  The demo (lake exe protosatDemo) runs
+-- **Executable result: the generated CNF is unsatisfiable within these bounds**, i.e. no
+-- bounded execution inside the universe leaks the declared store secret.  The demo
+-- (lake exe protosatDemo) runs
 -- the whole pipeline - CNF construction, ProtSat.DPLL, verdict - and prints the timing.  The
 -- verdict is a computation, not a kernel-checked proposition: the reference solver is a
 -- simple list-based DPLL, so its UNSAT search is only feasible at these small bounds.
 theorem bounds_state_the_question : univClosed (shapeOf P B) P :=
   (univClosedBool_iff (shapeOf P B) P).mp bounds_ok
 
--- If the solver says none, the CNF is unsatisfiable: bounded safety, by 8E.
+-- If the solver says none, the CNF is unsatisfiable: by 8E that is a proof about the formula.
+-- Reading it as a security statement needs ProtSat.Query.boundedSafe_of_encodingUnsat.
 theorem safe_if_none (h : ProtSat.DPLL.dpll (encode P B) = none) : ProtSat.Unsat (encode P B) :=
   dpll_complete h
 
--- and then the analyser's verdict is safe.
+-- and then the analyser reports the encoding's unsatisfiability.
 theorem verdict_if_none (h : ProtSat.DPLL.dpll (encode P B) = none) :
-    analyze P B = Verdict.safe := by
+    analyze P B = Verdict.encodingUnsat := by
   rw [analyze, if_neg (by rw [bounds_ok]; simp), h]
 
 end Challenge
