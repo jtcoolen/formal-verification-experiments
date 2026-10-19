@@ -399,8 +399,12 @@ solver.  Five accepted and three rejected example certificates are checked by `d
 
 **8B is the converse, and it is the theorem that would make a SAFE verdict mean something - except
 that its violation condition is `runsLeaks`, not `BoundedAttack`.** The gap is
-`Regressions.Authentication`; closing it means adding authentication violation clauses to
-`Encode.encode` and proving the Boolean monitor equivalent to the independently defined
+`Regressions.Authentication`, and it is now a theorem rather than a remark:
+`AuthGap.auth_gap_is_real` proves `boundedSafeGoals` for the secrecy-only query and its negation
+for the agreement query over the *same* protocol and bounds, and
+`AuthGap.goal_hypothesis_is_needed` proves that no transfer between the two is possible without a
+goal-selection hypothesis. Closing the gap for real means adding authentication violation clauses
+to `Encode.encode` and proving the Boolean monitor equivalent to the independently defined
 `ProtSat.Violation` (roadmap stage 4).
 Its proof is a construction: `Complete.assignOf` is the *characteristic function of the run* -
 a propositional variable is true exactly when the semantic fact it names holds - built from
@@ -509,6 +513,7 @@ and the tenth is not enabled.
 | `ProtSat/Serialize.lean` | 336 |
 | `ProtSat/CheckedSafe.lean` | 152 | the evidence chain at query level: `boundedSafe_of_checkedCode`, `SafeEvidence` from a checked refutation |
 | `ProtSat/Sound.lean` | 380 | the soundness half: decoded values are universe values, `decoding_runsInUniverse`, and the two-sided `encoding_correct` |
+| `ProtSat/AuthGap.lean` | 310 | the authentication gap as a theorem: safe for secrecy and attacked for agreement at one protocol and one bound |
  refutations as a flat integer code: total decoder, round trip, injectivity, `checkCode_sound` |
 | `ProtSat/ExprDomain.lean` | 310 | finite per-expression domains: `evalDomain`, `eval_mem_evalDomain`, the transient pair handled |
 | `ProtSat/BoundedCert.lean` | 170 | `checkBounded`: certificates that carry their bounds, sound to `BoundedAttack` |
