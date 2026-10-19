@@ -308,4 +308,45 @@ external prover is handed, and the formula `checkProof` checks against is the sa
 theorem dimacs_demo :
     toDimacs demoF = "p cnf 3 4\n1 2 0\n1 -2 0\n-1 3 0\n-1 -3 0\n" := by decide
 
+/-! ### Binding the evidence to the formula it claims to refute -/
+
+/-- Refuting *a* formula is not enough: the evidence must refute the formula under discussion.
+`Evidence` carries the clause list it was produced against, and `checkAgainst` compares it with
+the target formula before checking a single resolution step, so stale or transplanted evidence
+fails rather than silently proving something else. The comparison is structural, not a digest:
+no collision-resistance assumption enters. Callers pass `encode P B`, which is what binds the
+evidence to a query. -/
+structure Evidence where
+  /-- The clauses the refutation was produced against. -/
+  clauses : List Clause
+  /-- The refutation itself. -/
+  proof : List Line
+  deriving Repr
+
+/-- Does this evidence refute `f`? -/
+def checkAgainst (f : CNF) (e : Evidence) : Bool :=
+  decide (e.clauses = f.clauses) && checkProof f e.proof
+
+/-- Accepted evidence refutes the formula. -/
+theorem checkAgainst_sound {f : CNF} (e : Evidence) (h : checkAgainst f e = true) :
+    ProtSat.Unsat f := by
+  rw [checkAgainst, Bool.and_eq_true] at h
+  exact checkProof_sound h.2
+
+/-- Well-formed evidence about the right formula is accepted. -/
+theorem evidence_accepted :
+    checkAgainst demoF { clauses := demoF.clauses, proof := demoP } = true := by decide
+
+/-- Evidence produced for a different formula is rejected, even though the refutation itself is
+perfectly valid - `checkProof demoF demoP` succeeds. The binding is what catches this. -/
+theorem evidence_wrong_formula :
+    checkAgainst demoF { clauses := demoF_other.clauses, proof := demoP } = false := by decide
+
+/-- Stale evidence: a truncated proof fails the gate too. -/
+theorem evidence_truncated :
+    checkAgainst demoF { clauses := demoF.clauses, proof := demoP.take 5 } = false := by decide
+
+/-- And the corresponding `checkProof` really does accept the full proof, so the rejection above
+is about the binding, not about the steps. -/
+theorem evidence_binding_is_what_rejects : checkProof demoF demoP = true := accepts_demo
 end ProtSat.Resolution

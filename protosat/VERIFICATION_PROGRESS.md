@@ -763,6 +763,17 @@ Still missing for the full `encoding_correct`: the direction
 complete bounded predicate - specifically that the decoded run satisfies `runsInUniverse`. The
 leak half of that conclusion is already proved; the universe half is not.
 
+### Evidence bound to the formula it refutes
+
+`Resolution.Evidence` pairs a refutation with the clause list it was produced against, and
+`checkAgainst f e` compares that list with `f` before checking a single resolution step. The
+comparison is structural, not a digest, so no collision-resistance assumption enters. Three
+kernel-decided gates show the binding does work `checkProof` alone cannot:
+`evidence_accepted` (right formula, full proof), `evidence_wrong_formula` (a valid refutation of
+a different formula is rejected, although `checkProof demoF demoP` succeeds), and
+`evidence_truncated` (stale, cut-off evidence is rejected). `checkAgainst_sound` proves that what
+is accepted really refutes the target. Callers pass `encode P B`, which ties evidence to a query.
+
 ## Log
 
 * 2026-10-19 (a) - baseline inspected; build green; three review witnesses promoted to permanent
@@ -874,6 +885,11 @@ leak half of that conclusion is already proved; the universe half is not.
   verdict equation), and `boundedSafe_of_refutation` (a checked resolution refutation implies
   `boundedSafeGoals`, so the solver is never consulted). Standard axioms only. Build green
   (1867 jobs), audit clean over 2842 theorems, 18/18 CI gates green.
+
+* 2026-10-19 (r) - `Resolution.Evidence` / `checkAgainst`: refutations bound to the
+  clause list they were produced against, with `checkAgainst_sound` and three decided gates
+  accepting well-formed evidence and rejecting transplanted and truncated evidence. Audit clean
+  over 2851 theorems, 18/18 CI gates green, build green (1867 jobs).
 
 * Next - stage 6: an independently checked UNSAT certificate, through Sat.Fmla.proof [] and
   not the reified forall-over-n-propositions form, so the solver answer stops being a
