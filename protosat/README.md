@@ -494,6 +494,11 @@ and the tenth is not enabled.
 | `ProtSat/Analyzer.lean` | 393 | the pipeline, 8F, 8G and the 8H termination theorems |
 | `ProtSat/Explore.lean` | 660 | complete bounded decision procedure by enumeration: `inBounds`, `candidates`, `stepB`, `frontier`, `explorer_correct`, kernel-checked gates |
 | `ProtSat/Contract.lean` | 689 | the goal-indexed contract over the repaired semantics: `boundedSafe q`, `attackFound_decides`, an analyser that issues `boundedSafe` with evidence, four kernel-checked verdict gates |
+| `ProtSat/Represent.lean` | 670 | the value domain a query needs: `Shape`, `domainGap`, the representability report the demo prints |
+| `ProtSat/Correspondence.lean` | 107 | the correspondence for every gap-free query: `encoding_complete_gapFree`, `boundedSafe_of_unsat_gapFree`, `boundedSafe_of_refutation` |
+| `ProtSat/Differential.lean` | 123 | the enumeration route and the CNF route used as each other's oracle; `encoding_correct` instantiated on two real protocols |
+| `ProtSat/Resolution.lean` | 351 | independently checkable UNSAT evidence: resolution refutations, `checkProof_sound`, kernel-checked rejection gates, evidence bound to its formula, DIMACS export |
+| `ProtSat/Serialize.lean` | 336 | refutations as a flat integer code: total decoder, round trip, injectivity, `checkCode_sound` |
 | `ProtSat/ExprDomain.lean` | 310 | finite per-expression domains: `evalDomain`, `eval_mem_evalDomain`, the transient pair handled |
 | `ProtSat/BoundedCert.lean` | 170 | `checkBounded`: certificates that carry their bounds, sound to `BoundedAttack` |
 | `ProtSat/Reference.lean` | 896 | the repaired reference semantics: allocation history, action-specific events, ordered role-aware agreement, credential provisioning, secret obligations |

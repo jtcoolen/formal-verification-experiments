@@ -891,9 +891,30 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   accepting well-formed evidence and rejecting transplanted and truncated evidence. Audit clean
   over 2851 theorems, 18/18 CI gates green, build green (1867 jobs).
 
-* Next - stage 6: an independently checked UNSAT certificate, through Sat.Fmla.proof [] and
-  not the reified forall-over-n-propositions form, so the solver answer stops being a
-  hypothesis and the measured kernel cost disappears. Then the xe stride flip onto Shape.V
-  (szXe, szAxe, vxe, axe, xeOh, f1, f2, evalGate, evalLeafGate), after which domainGap is no
-  longer a restriction on the protocol and Residual is empty. Then stage 7: NS/NSL
-  authentication instrumentation with honest-execution witnesses.
+* 2026-10-19 (s) - stage 6 second installment: `ProtSat/Serialize.lean`. Refutation evidence now
+  survives a file boundary. A refutation is coded as a flat list of integers - a four-number header
+  per line, DIMACS-style literals, a 0 terminator - with a *total* decoder (malformed input yields
+  `none`, never a panic and never a partial function). Proved: `litOfCode_litCode`, `readLits_map`,
+  `lineOfCode_lineCode`, the whole round trip `proofOfCode_proofCode` (one unit of fuel per line,
+  plus one), `proofCode_inj` (distinct proofs have distinct codes, so a digest can name a cached
+  artifact without standing in for the proof), and `checkCode_sound`: a code that passes the checker
+  refutes the formula, with no solver and no search in the path. `checkCode_iff_checkProof` makes the
+  two directions exact. Five decided gates: the demo refutation is accepted through its code, an
+  unknown tag, a truncated code, a missing-terminator line and a corrupted proof are all rejected.
+  Build green (1869 jobs), audit clean over 2896 theorems.
+
+* 2026-10-19 (t) - the demo and CI now exercise the evidence path end to end: a new
+  `REFUTATION EVIDENCE` section prints a checked refutation, the same refutation serialized and
+  re-checked, the round trip, and a rejection of evidence transplanted to another formula. CI runs
+  22 gates (four new) with the theorem floor raised to 2880. Build green, audit clean.
+* Next - stage 6 is nearly closed: the checker (`Resolution`), the binding of evidence to its
+  formula (`checkAgainst`), and the serialization (`Serialize`) are proved; what is missing is a
+  PROVER, so that a safety answer arrives with a refutation instead of being re-run in the kernel.
+  `ProtSat/Refute.lean` is the next file: a saturating resolution engine whose output
+  `checkProof` accepts (`refute_sound`), plus the completeness half. Then the xe stride flip onto
+  `Shape.V` (szXe, szAxe, vxe, axe, xeOh, f1, f2, evalGate, evalLeafGate), after which `domainGap`
+  is no longer a restriction on the protocol and `Residual` is empty. Then the two open halves of
+  the correspondence: `encoding_sound` returning `runsInUniverse` for the decoded run, and
+  agreement violations in the CNF at all - until that is done a CNF `boundedSafe` is a statement
+  about secrecy only, which is why the label says `encodingUnsat`. Then stage 7: NS/NSL
+  authentication instrumentation with honest-execution witnesses..
