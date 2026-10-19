@@ -276,6 +276,49 @@ accepted certificate gave `Attack` plus a length inequality rather than `Bounded
   old checker and rejected by the bounded one. `too_long_rejected` is the step bound biting on the
   same certificate.
 
+## The explorer is in: a complete bounded decision procedure (`ProtSat/Explore.lean`)
+
+This is the piece that finally makes a SAFE verdict mean something. Over the repaired semantics:
+
+```lean
+Explore.explorer_correct        : explorerAttack P B = true <-> BoundedAttack P B
+Explore.boundedSafe_of_explorer : explorerAttack P B = false -> BoundedSafe P B
+```
+
+`explorerAttack` enumerates executions: `candidates` offers every event the semantics can use at a
+bounded configuration, `stepB` filters to successors that stay inside `univ P B` and the nonce domain,
+and `frontier P B k x` lists the nodes reachable in exactly `k` such steps. `isPrefix_of_mem_frontier`
+says every enumerated node is a bounded run; `frontier_complete` says every bounded run is enumerated
+at its own length. Neither direction mentions an encoding, a representability condition, or a solver -
+the gap that `Regressions.Bounds` exposed in the CNF does not exist here, because the bound is on
+configurations and not on expression intermediates.
+
+Kernel-checked gates (`decide`, whole file builds in seconds):
+
+| Gate | Meaning |
+|---|---|
+| `secure_honest_run`, `secure_obligation_and_publication` | non-vacuity: the run reaches the generation, the declaration and the publication, and the obligation is taken while the secret stays out of reach |
+| `secure_explorer_finds_nothing`, `secure_bounded_safe` | a genuine `BoundedSafe` verdict, proved by exhaustion |
+| `transient_pair_attack_found`, `transient_pair_bounded_attack` | the leak the CNF loses is found here |
+| `auth_explorer_finds_the_break`, `auth_bounded_attack` | authentication is decidable by this procedure; it is not expressible in the CNF at all |
+| `zero_step_is_safe` | the empty-execution edge case behaves |
+
+**Honest scope notes.**
+
+* The verdict is over the *repaired* semantics (`ProtSat.Reference`), not the old
+  `ProtSat.Operational` that `ProtSat.Query`'s `boundedAttackGoals` is stated against. Wiring the
+  explorer into the `Query` contract - so that `analyzeQuery` can return `Result.boundedSafe` with a
+  `SafeEvidence` - means moving the contract's goal-indexed predicates onto the repaired semantics,
+  which is the next decision to make deliberately rather than in passing.
+* `auth_explorer_finds_the_break` is worth reading carefully: the attacker lets the committing session
+  run and the claiming session idle, which really is an unmatched commit under a trace semantics where
+  sessions are only as live as the network lets them be. The roadmap's note that "a universal
+  honest-progress theorem is not an appropriate requirement" cuts both ways - a protocol whose
+  agreement property depends on the peer's claim having been *scheduled* needs an explicit liveness or
+  progress assumption in the query, not in the checker.
+* Cost is exponential in `B.steps`. The gate models enumerate 130-258 nodes; this is a reference
+  procedure, not a scalable one, and roadmap stage 8 is where proved refinements belong.
+
 ## Log
 
 * 2026-10-19 (a) - baseline inspected; build green; three review witnesses promoted to permanent
