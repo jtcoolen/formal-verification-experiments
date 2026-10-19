@@ -971,6 +971,29 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   410 CNF variables -> 59 s to elaborate the module; 648 -> 215 s; 850 -> did not finish in 600 s.
   The two-principal variant was built and every condition checked except that last replay.
   Build green (1877 jobs), audit clean over 3056 theorems, 22/22 CI gates green.
+* 2026-10-19 (z) - stage 6, the hard half: `Refute.refute_complete`. The engine is not just a sound
+  way to make evidence, it is a PROVER: `Unsat f -> ∃ k p, refutationOf f k = some p`, with fuel
+  `(varsOf f).length` - one saturation round per variable. Route: Davis-Putnam elimination
+  `dpElim f v` (non-tautological v-free clauses plus all resolvents on v), `dpElim_sat` both ways
+  (the classic two-assignment lifting: if neither setting of v works, the resolvent of the two
+  falsified clauses is a v-free clause of `dpElim f v` that the lifted model also falsifies),
+  `elimAll_sat`, `elimAll_varFree`, and a coverage lemma that every clause elimination derives is a
+  line the saturation derives. The tautology trap is handled where it belongs - tautological
+  parents are dropped, which is exactly what makes every resolvent v-free, and the resolvent the
+  lifting argument needs is automatically non-taut because the assignment falsifies it. Consequence:
+  `refute_iff : Unsat f <-> ∃ k p, refutationOf f k = some p ∧ checkProof f p = true` - the checker
+  and the engine agree exactly, so the evidence format loses nothing - and
+  `not_refutable_of_satisfiable`, the engine cannot lie. `boundedSafe_of_refutation` composes the
+  engine with `CheckedSafe`, and `demo_refutation_round_trip` decides that the engine's own output
+  survives serialization and is still accepted: producer on both ends of the byte boundary.
+
+  Measured, and stated in the file rather than hidden: naive saturation is a theorem, not a solver.
+  On the guarded protocol's real CNF (291 clauses, 659 literal occurrences), `saturate 1` gives 1150
+  lines and does not find the empty clause; `saturate 2` gives 37167 lines and still does not; those
+  two rounds took 18m51s to evaluate. So there is no closed `decide` gate on a protocol-sized
+  formula yet - that needs subsumption, unit propagation and polarity pivoting, or a DPLL that emits
+  resolution proofs directly. `boundedSafe_of_refutation` is the explicit-hypothesis form.
+  Build green, audit clean over 3109 theorems, 24/24 CI gates green.
 * Next - stage 6 is nearly closed: the checker (`Resolution`), the binding of evidence to its
   formula (`checkAgainst`), and the serialization (`Serialize`) are proved, and a checked code now
   reaches `boundedSafeGoals q` (`CheckedSafe.boundedSafe_of_checkedCode`). What is missing is a
