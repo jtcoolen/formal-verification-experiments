@@ -19,7 +19,7 @@ set -u
 
 cd "$(dirname "$0")/.." || exit 1
 
-THEOREM_FLOOR=2550
+THEOREM_FLOOR=2740
 BUILD_BUDGET=1500
 DEMO_BUDGET=300
 
@@ -105,6 +105,9 @@ expect 'witness re-checked without the search: true' 'attack certificates replay
 expect 'ENCODING UNSAT' 'the CNF answer is labelled as a formula fact'
 expect 'UNSUPPORTED GOALS' 'a goal the encoding cannot represent is refused'
 expect 'NO GOALS SELECTED' 'an empty goal set is refused'
+expect 'REPRESENTABILITY OF THE VALUE DOMAIN' 'the value-domain report is printed'
+expect 'value domain: complete' 'a query whose domain names every computed value says so'
+expect 'value domain: GAP' 'the under-approximation is reported where the universe cannot name a computed value'
 expect 'INVALID MODEL' 'a malformed model is reported with diagnostics'
 expect 'checkCertificate = true' 'the independent certificate checker accepts the Lowe attack'
 expect 'checkCertificate = false' 'the independent certificate checker rejects the same script on NSL'

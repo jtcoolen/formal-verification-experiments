@@ -601,4 +601,47 @@ theorem transient_representability_is_a_computation :
       exprBOn boundsP (shapeOf boundsP {steps := 3, rounds := 1}) [transientStore] = true :=
   ⟨transient_exprB_fails, transient_exprB_holds_at_rounds1⟩
 
+/-! ### The gap, as something the tool can report -/
+
+/-- **The representability gap of a query**, computed: does the protocol build a value the CNF's
+value domain cannot name? `false` means `RunOK.exprB` holds for every run of the query, so the
+completeness theorem loses nothing by assuming it. `true` means the assumption is doing real work,
+and the enumeration route (`Reference.Contract`) is the one that answers the question. This turns
+"WithinBounds silently narrows the question" into a reported fact. -/
+def domainGap (P : Protocol) (B : Bounds) : Bool :=
+  !(List.all (allExprs P) fun e => storesInU (univOf P B) e)
+
+/-- A concrete unnameable value implies the gap is reported. -/
+theorem domainGap_of_unnameable {P : Protocol} {B : Bounds} {e : Expr} (he : e ∈ allExprs P)
+    {s : List (Var × Term)} (h : storeIn (univOf P B) s)
+    (hout : ∃ t, Expr.eval e s = some t ∧ t ∉ univOf P B) : domainGap P B = true := by
+  obtain ⟨t, hne, hnot⟩ := hout
+  have hmem := eval_mem_evalDomain e h
+  rw [hne] at hmem
+  unfold domainGap
+  cases hcase : (allExprs P).all (fun e => storesInU (univOf P B) e) with
+  | true =>
+      rw [List.all_eq_true] at hcase
+      have h1 := hcase e he
+      rw [storesInU, List.all_eq_true] at h1
+      have h2 := h1 (some t) hmem
+      rw [inside] at h2
+      exact absurd (of_decide_eq_true h2) hnot
+  | false => rfl
+
+/-- The transient-pair query reports the gap: the intermediate pair is built from a received
+message, so no closure bound names it (`no_bound_discharges_exprB`). -/
+theorem domainGap_transient : domainGap boundsP boundsB = true := by decide
+
+/-- A protocol that only moves received messages around reports none, and does so with an empty
+nonce domain: nothing here needs a fresh value, which is roadmap stage 2's gate read on the old
+route. -/
+def plainP : Protocol :=
+  { roles := [{ acts := [Action.recv 0 0, Action.send 0 (Expr.var 0)] }],
+    sessions := [{ role := 0, self := 0, peer := 0 }],
+    agents := [0], nonceDomain := [], compromised := [],
+    secrets := [Secret.closed (Expr.var 0)], auths := [] }
+
+theorem domainGap_plain : domainGap plainP { steps := 2, rounds := 1 } = false := by decide
+
 end ProtSat.Represent

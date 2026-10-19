@@ -67,6 +67,18 @@ def demoQuery (name : String) (q : Query) : IO Unit := do
   IO.println ("    answer: " ++ describe (analyzeQuery q))
   IO.println ""
 
+/-- Whether the CNF value domain can name every value the protocol computes at these bounds.
+A gap means the RunOK.exprB hypothesis is doing real work: the CNF answer is an
+under-approximation there, and the enumeration route is the one that answers exactly. -/
+def demoGap (name : String) (P : Protocol) (B : Bounds) : IO Unit := do
+  IO.println ("--- " ++ name)
+  IO.println ("    value domain: " ++
+    (if Represent.domainGap P B then
+      "GAP - the protocol computes a value the universe cannot name; the CNF route is an under-approximation here, the enumeration route is exact"
+    else
+      "complete - every value the protocol computes is named by the universe at these bounds"))
+  IO.println ""
+
 /-- The same question answered by exhaustive enumeration over the repaired semantics: this route can
 also decide authentication. See ProtSat/Contract.lean. -/
 def demoContract (name : String) (q : Query) : IO Unit := do
@@ -129,6 +141,14 @@ def main : IO Unit := do
     (Query.mk malformedP { steps := 2, rounds := 0 } [Goal.secrecy])
   demoQuery "a query that selects no goal"
     (Query.mk Challenge.P Challenge.B [])
+  IO.println "REPRESENTABILITY OF THE VALUE DOMAIN (ProtSat/Represent.lean): can the CNF name"
+  IO.println "every value the protocol computes at these bounds? Where it cannot, the completeness"
+  IO.println "hypothesis is doing real work and the verdict is an under-approximation."
+  IO.println ""
+  demoGap "challenge-response" Challenge.P Challenge.B
+  demoGap "the transient-pair witness" Regressions.Bounds.P Regressions.Bounds.B
+  demoGap "a protocol that only forwards what it receives" Represent.plainP
+    { steps := 2, rounds := 1 }
   IO.println "THE ENUMERATION CONTRACT (ProtSat/Contract.lean): the repaired semantics decided by"
   IO.println "exhaustive enumeration. This route represents the authentication violation too, so it"
   IO.println "can produce the bounded-safety verdict the CNF route still owes."

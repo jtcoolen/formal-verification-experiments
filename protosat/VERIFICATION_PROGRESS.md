@@ -554,7 +554,50 @@ tr Cs` reverts any hypothesis mentioning the configuration index and the substit
 and `List.mem_append` on `closeOne`'s five-component list is left-nested, so a five-way `rcases`
 needs the pattern `(((hU | hpair) | pencS) | pencA) | hhash`.
 
+## Stage 4, third installment: the second value domain exists, and the gap is reported (`Shape.V`, `domainGap`)
+
+The first installment proved that no bound discharges `exprB` and that a value domain can; the
+second reduced `WithinBounds` to three named conditions. This one builds the place the domain goes.
+
+* `Shape` gains `V : List Term` - the **nameable** domain, distinct from `U`, the **persistent** one.
+  `shapeOf` sets `V := univ P B`, so the generated CNF is unchanged; a grep confirms nothing outside
+  `Encode.lean` and `Represent.lean` reads `V`, `shValX`, `uIdxX` or `valAtX`, which is the
+  machine-checked version of "this installment broke nothing".
+* `ShapePrefix sh := ∃ W, sh.V = sh.U ++ W` is the invariant that makes the two domains
+  compatible: `ixOf_append_left`, `ixOf_V_eq_ixOf_U` and `uIdxX_eq_uIdx_of_mem` say a universe
+  message keeps its number, so the cross-family clauses that compare an expression index with a
+  store, knowledge or delivery index keep working when `V` grows. That transport lemma is the reason
+  the flip is a stride change rather than a re-encoding.
+* `valAtX_uIdxX_of_nameable` is the read-back property with **no admissibility hypothesis** - the
+  lemma that replaces `admissible_valAt_uIdx` at the six `exprB` sites. `Represent` now states it
+  where it matters: `eval_valAtX_uIdxX`, `stepEval1_valAtX_uIdxX`, `stepEval2_valAtX_uIdxX` (the
+  `rdXe_unary`/`rdXe_binary` content), `exprBOnX_shapeX` (decidable over a store list), and
+  `transient_valAtX_uIdxX` naming the intermediate the old gate clipped.
+* `shapeX` is redefined the right way round: `U` stays the universe `BoundedTrace` bounds and `V`
+  becomes `exprVals`. The two roles the roadmap said were conflated are now two fields.
+* `Represent.domainGap P B` computes whether the protocol can build a value the universe cannot
+  name. `domainGap_of_unnameable` proves a concrete unnameable value forces the flag; the demo
+  prints it for three queries - `challenge-response` and the transient-pair witness report GAP, a
+  protocol that only forwards what it receives reports complete, and does so with an empty nonce
+  domain. Three new CI gates assert all three lines appear, and the theorem floor moved to 2740.
+
+That is the last piece of stage 4 that does not require touching the clause generator: the narrowing
+hypothesis is now reported by the tool instead of being silently assumed, and the shape has
+somewhere to put the domain that discharges it. What remains is the flip itself - pointing the `xe
+family at `shValX`/`uIdxX` and `shapeOf` at `exprVals` - after which `exprB` leaves `Residual` too.
+
 ## Log
+
+* 2026-10-19 (l) - stage 4 third installment: `Shape.V` plus the extended-domain interface in
+  `Encode.lean` (`ShapePrefix`, `shValX`, `valAtX`, `uIdxX`, `uIdxX_eq_uIdx_of_mem`,
+  `valAtX_uIdxX_of_nameable`), `Represent.shapeX` redefined so `U` is persistent and `V` is
+  nameable, the gate-equation read-back lemmas, and `Represent.domainGap` reported by the demo.
+  CI now runs 18 gates (three new ones on the representability report) with the theorem floor at
+  2740. Build green (1859 jobs), audit clean over 2752 theorems.
+* Next - the `xe` stride flip: `szXe`, `szAxe`, `vxe`, `axe`, `xeOh`, `f1`, `f2`, `evalGate`,
+  `evalLeafGate` onto `shValX`/`uIdxX`/`valAtX`, `shapeOf` onto `exprVals`, then delete `exprB`
+  from `RunOK`. Blast radius ~65 declarations, ~40 mechanical; the five hardcoded `sh.U.length`
+  sites in `Clauses.lean` (281, 429, 437, 455, 461) split into universe and extended indices.
 
 * 2026-10-19 (k) - stage 4 second installment: `ProtSat/BoundedExec.lean` (52 declarations) derives
   ten of the twelve `RunOK` conditions from `BoundedTrace` plus the existing protocol theorems,
