@@ -697,6 +697,32 @@ pipeline reports an attack for it, so the verdict is a discrimination, not a con
 hypothesis, because kernel replay of the solver does not scale; that is the gap
 `ProtSat/Resolution.lean` is built to close by checking evidence instead of re-running search.
 
+## The correspondence, instantiated (`ProtSat/Differential.lean`)
+
+Stage 5 asks for `encoding_correct`: `Satisfiable (encode q) <-> BoundedAttack q`. The full
+statement, for every protocol and every goal, is out of reach here (agreement violations are still
+absent from the formula, and the gapped class still needs the stride flip). What is now proved is
+the same equivalence *instantiated on two real protocols*, in both directions:
+
+```lean
+theorem guard_correct : Satisfiable (encode Guard GB) <-> boundedAttackGoals qg
+theorem leak_correct  : Satisfiable (encode Leak GB)  <-> boundedAttackGoals ql
+```
+
+* `guard_correct` is the case where neither side holds: the CNF has no model (the kernel-checked
+  `dpll = none` from `EndToEnd`), and the enumeration over the repaired semantics independently
+  finds no violation (`Contract.attackFound qg = false`, `decide`). Two unrelated procedures, same
+  answer - the differential oracle the roadmap asks for.
+* `leak_correct` is the substantive direction. A one-step run that publishes the declared key is
+  built by hand (`L_runs`, from `Rel.rSend`), shown to stay in the universe (`L_univ`), turned into
+  `boundedAttackGoals` - and then `Complete.encoding_complete` produces a satisfying assignment
+  **with no `WithinBounds` hypothesis**, because `withinBounds_of_bounded` derived it from the
+  public bound plus `domainGap = false`. That is completeness actually applied, not just stated.
+
+Both depend only on `propext, Classical.choice, Quot.sound`. The leaky and guarded protocols differ
+in one expression, so the pair also shows the pipeline discriminates rather than answering
+constantly.
+
 ## Log
 
 * 2026-10-19 (a) - baseline inspected; build green; three review witnesses promoted to permanent
@@ -793,6 +819,13 @@ hypothesis, because kernel replay of the solver does not scale; that is the gap
   Well-formedness, gap-freeness and the solver answer are all `decide`d; `Leak` shows the same
   pipeline reports an attack for a one-expression change, so the verdict discriminates.
   Build green (1863 jobs), audit clean over 2816 theorems, 18/18 CI gates green.
+
+* 2026-10-19 (p) - `ProtSat/Differential.lean`: the enumeration route and the CNF route
+  used as each other oracle, and `encoding_correct` instantiated on two real protocols -
+  `guard_correct` (neither side holds; both procedures independently say safe) and `leak_correct
+  ` (a hand-built leaking run yields a satisfying assignment via `encoding_complete` with no
+  `WithinBounds` hypothesis, discharged by `withinBounds_of_bounded`). All three standard axioms
+  only. Build green (1865 jobs, 11 s), audit clean over 2836 theorems, 18/18 CI gates green.
 
 * Next - stage 6: an independently checked UNSAT certificate, through Sat.Fmla.proof [] and
   not the reified forall-over-n-propositions form, so the solver answer stops being a

@@ -22,6 +22,7 @@ import ProtSat.Represent
 import ProtSat.BoundedExec
 import ProtSat.EndToEnd
 import ProtSat.Resolution
+import ProtSat.Differential
 import ProtSat.BoundedCert
 import ProtSat.Explore
 import ProtSat.Contract
