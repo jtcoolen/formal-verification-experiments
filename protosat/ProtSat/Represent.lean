@@ -491,4 +491,58 @@ theorem exprB_holds_at_X_for_deep_store (r : Nat) :
       subst hpeq
       exact hash_seed_iter_mem r)
 
+/-! ### The condition, decided on a concrete run -/
+
+/-- **The decidable form of `exprB` over an explicit list of stores.** Given the stores a run
+actually uses, admissibility of every table expression in each of them is a finite check: no
+quantification over positions, sessions or executions is left. -/
+def exprBOn (P : Protocol) (sh : Shape) (stores : List (List (Var × Term))) : Bool :=
+  stores.all fun s => (allExprs P).all fun e => admissible sh (Expr.eval e s)
+
+/-- If the listed stores cover every store the run uses, the finite check is `RunOK.exprB`. -/
+theorem exprB_of_exprBOn {P : Protocol} {sh : Shape} {cfg : Nat → Cfg}
+    (stores : List (List (Var × Term))) (h : exprBOn P sh stores = true)
+    (hcover : ∀ i q, ∃ s ∈ stores, storeOf (cfg i) q = s) :
+    ∀ i q e, e ∈ allExprs P → admissible sh (Expr.eval e (storeOf (cfg i) q)) = true := by
+  intro i q e he
+  obtain ⟨s, hs, hEq⟩ := hcover i q
+  unfold exprBOn at h
+  rw [List.all_eq_true] at h
+  have h1 := h s hs
+  rw [List.all_eq_true] at h1
+  rw [hEq]
+  exact h1 e he
+
+/-- The check passes at the extended domain for *every* list of universe-valued stores: this is
+`exprB_of_exprVals` in the decidable form. -/
+theorem exprBOn_shapeX {P : Protocol} {B : Bounds}
+    (stores : List (List (Var × Term))) (h : ∀ s ∈ stores, storeIn (univOf P B) s) :
+    exprBOn P (shapeX P B) stores = true := by
+  unfold exprBOn
+  rw [List.all_eq_true]
+  intro s hs
+  rw [List.all_eq_true]
+  intro e he
+  exact exprB_of_exprVals he (h s hs)
+
+/-- The transient-pair run fails the check at the bound of `Regressions.Bounds` - the same fact
+`not_withinBounds` extracts from the `WithinBounds` hypothesis, now as a computation. -/
+theorem transient_exprB_fails :
+    exprBOn boundsP (shapeOf boundsP boundsB) [transientStore] = false := by decide
+
+/-- **And it passes one closure round later.** The transient-pair counterexample is representable
+by the CNF at `rounds := 1`: the intermediate pair is then a universe message. So representability
+is decidable on a witness, and for this protocol it is *satisfied* at a slightly larger bound - what
+`no_bound_discharges_exprB` says is that no bound satisfies it *uniformly over every
+universe-valued store*, which is the difference between a bound and a domain. -/
+theorem transient_exprB_holds_at_rounds1 :
+    exprBOn boundsP (shapeOf boundsP {steps := 3, rounds := 1}) [transientStore] = true := by
+  decide
+
+/-- The same run, one round apart, in one line: the tool can check which situation it is in. -/
+theorem transient_representability_is_a_computation :
+    exprBOn boundsP (shapeOf boundsP boundsB) [transientStore] = false ∧
+      exprBOn boundsP (shapeOf boundsP {steps := 3, rounds := 1}) [transientStore] = true :=
+  ⟨transient_exprB_fails, transient_exprB_holds_at_rounds1⟩
+
 end ProtSat.Represent

@@ -474,6 +474,14 @@ message any table expression denotes in a universe-valued store - assembled from
 | `ixOf_exprVals`, `length_univ_le` | the extension is index-preserving on `U`, so store, knowledge and delivery groups keep their numbering |
 | `no_bound_discharges_exprB` | the negative result above |
 | `exprB_holds_at_X_for_deep_store` | one line: the store that breaks admissibility over `U` is admissible over `exprVals`, at the same bound |
+| `exprBOn`, `exprB_of_exprBOn` | the condition as a **finite computation** over the stores a run uses, equivalent to the `RunOK` field when the list covers them |
+| `transient_exprB_fails`, `transient_exprB_holds_at_rounds1` | and decided on the witness: the transient-pair run fails it at `Regressions.Bounds`' bound and **passes it one closure round later**, so that run is representable by the CNF at `rounds := 1` |
+
+The last two lines are the half of stage 4's gate that the negative result cannot give: representability
+is not only a question the tool can answer about a concrete execution, it is *true* of the execution
+`Regressions.Bounds` exhibited, once the declared closure bound is one round larger. What
+`no_bound_discharges_exprB` rules out is the uniform reading - "for every universe-valued store" -
+which is the difference between a bound the user can raise and a domain the compiler must name.
 
 **Not done.** `exprVals` is not yet wired into `Shape`. The CNF still has one value stride
 (`shVal sh = sh.U.length + 1`) shared by every family, so the encoding is unchanged and
