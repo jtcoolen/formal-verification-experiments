@@ -44,9 +44,16 @@ for two reasons that are proved rather than confessed - see
     answer; `ProtSat/Resolution.lean` replaces it with evidence: a resolution refutation is checked
     by a linear walk (`checkProof_sound`), truncated, corrupted, out-of-range and wrong-formula
     evidence is rejected by `decide`, and `encodingUnsat_of_proof` reaches the verdict without
-    running the solver. The prover that emits refutations for large instances is not wired up - the
-    reference DPLL emits none and no LRAT solver is installed here - so the checker stands ready and
-    the gap is named, not hidden.
+    running the solver. `ProtSat/Serialize.lean` lets that evidence leave the process that made
+    it: a refutation is a flat list of integers with a total decoder, a proved round trip
+    (`proofOfCode_proofCode`) and proved injectivity (`proofCode_inj`), so a code identifies its
+    proof exactly and `checkCode_sound` turns bytes back into a formula fact.
+    `ProtSat/CheckedSafe.lean` closes the chain at the level of a query:
+    `boundedSafe_of_checkedCode` gives `boundedSafeGoals q` from an accepted code, with the
+    goal-selection hypothesis stated rather than assumed, and it builds a `SafeEvidence` -
+    something nothing could construct before. The prover that emits refutations for large
+    instances is not wired up: the reference DPLL emits none and no LRAT solver is installed
+    here, so the checker stands ready and the gap is named, not hidden.
 
 `ProtSat/Query.lean` is the layer that keeps the two apart. A `Query` names the protocol, the
 bounds and the **selected goals** (`secrecy`, `agreement`, `agreementInj`);
@@ -498,7 +505,9 @@ and the tenth is not enabled.
 | `ProtSat/Correspondence.lean` | 107 | the correspondence for every gap-free query: `encoding_complete_gapFree`, `boundedSafe_of_unsat_gapFree`, `boundedSafe_of_refutation` |
 | `ProtSat/Differential.lean` | 123 | the enumeration route and the CNF route used as each other's oracle; `encoding_correct` instantiated on two real protocols |
 | `ProtSat/Resolution.lean` | 351 | independently checkable UNSAT evidence: resolution refutations, `checkProof_sound`, kernel-checked rejection gates, evidence bound to its formula, DIMACS export |
-| `ProtSat/Serialize.lean` | 336 | refutations as a flat integer code: total decoder, round trip, injectivity, `checkCode_sound` |
+| `ProtSat/Serialize.lean` | 336 |
+| `ProtSat/CheckedSafe.lean` | 152 | the evidence chain at query level: `boundedSafe_of_checkedCode`, `SafeEvidence` from a checked refutation |
+ refutations as a flat integer code: total decoder, round trip, injectivity, `checkCode_sound` |
 | `ProtSat/ExprDomain.lean` | 310 | finite per-expression domains: `evalDomain`, `eval_mem_evalDomain`, the transient pair handled |
 | `ProtSat/BoundedCert.lean` | 170 | `checkBounded`: certificates that carry their bounds, sound to `BoundedAttack` |
 | `ProtSat/Reference.lean` | 896 | the repaired reference semantics: allocation history, action-specific events, ordered role-aware agreement, credential provisioning, secret obligations |
