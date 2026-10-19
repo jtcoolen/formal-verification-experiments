@@ -381,7 +381,7 @@ solver.  Five accepted and three rejected example certificates are checked by `d
 | # | statement | Lean theorem | status |
 |---|---|---|---|
 | A | every model of the CNF decodes to a valid bounded execution that **leaks a declared secret** | `Encoding.encoding_sound`, `encoding_sound_bounded` | proved |
-| B | every valid bounded **leaking** execution that satisfies `WithinBounds` yields a model of the CNF | `Complete.encoding_complete` | **proved, with the hypotheses shown** |
+| B | every valid bounded **leaking** execution that satisfies `WithinBounds` yields a model of the CNF; for a gap-free query `WithinBounds` is itself a theorem of the bound (`BoundedExec.withinBounds_of_bounded`), and the correspondence is instantiated in both directions on two real protocols (`Differential.guard_correct`, `Differential.leak_correct`) | `Complete.encoding_complete`, `Differential.leak_sat` | **proved, with the hypotheses shown** |
 | C | every accepted certificate is a genuine trace | `Certificate.checkCertificate_sound` | proved |
 | D | solver SAT answer is a real model | `DPLL.dpll_sound` | proved |
 | E | solver UNSAT answer means unsatisfiable | `DPLL.dpll_complete` | proved |
