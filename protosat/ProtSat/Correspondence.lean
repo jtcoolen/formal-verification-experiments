@@ -39,10 +39,12 @@ every transition and the bounds from the certificate alone, independently of the
 solver. So false positives are excluded by the certificate checker and false negatives by the
 theorems below.
 
-What is still missing for the full `encoding_correct`: the direction
-`Satisfiable (encode P B) -> boundedAttackGoals q` needs `encoding_sound` to return the complete
-bounded predicate, i.e. that the *decoded* run stays inside the universe. The leak half of its
-conclusion is proved (`Encoding.encoding_sound`); the `runsInUniverse` half is not.
+The other direction is closed in `ProtSat/Sound.lean`: `decoding_runsInUniverse` proves the
+decoded run stays inside the universe, so `encoding_sound` now yields the *complete* bounded
+predicate and `Sound.encoding_correct` states the equivalence both ways for a gap-free query.
+What still bounds it is the goal, not the direction: `Encode.violationLits` names leak literals
+only, so the CNF route speaks about secrecy, and a query selecting agreement is refused rather
+than answered.
 -/
 
 namespace ProtSat.Correspondence
