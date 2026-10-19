@@ -155,6 +155,56 @@ Still open in stage 2: role parameterisation by `self`/`peer` inside role expres
 name principals literally), the dataflow/read-before-binding check, and renaming invariance for
 canonical nonce names.
 
+## Next increment, designed and partially prototyped: the exhaustive explorer
+
+The headline goal is a verdict that *is* the security statement, for both goals. The SAT route needs
+a new variable family inside `Complete.lean`/`Encoding.lean` (every block-range lemma in
+`Complete.lean` is stated against `nVarsAll`, so a new block ripples through thousands of lines).
+The repaired semantics makes a cheaper route available: `Reference.stepOf` is a total deterministic
+function on a finite state, so **enumerate the executions**.
+
+Design (prototyped, not yet merged - the file was removed rather than committed half-proved):
+
+```lean
+namespace ProtSat.Reference.Explore        -- inside Reference so Cfg/Ev resolve unambiguously
+
+def inBounds (P : Protocol) (B : Bounds) (C : Cfg) : Prop      -- kn, oblig, stores in univ; alloc in domain
+def inBoundsBool (P : Protocol) (B : Bounds) (C : Cfg) : Bool  -- decidable twin, with inBoundsBool_iff
+def candidates (P : Protocol) (B : Bounds) (C : Cfg) : List Ev -- idle, ded per U, recv per (q,U),
+                                                               -- generate per (q,D), act per q
+def stepB (P B C e) := (stepOf P C e).filter (inBoundsBool P B) -- the *bounded* step
+def nodes (P : Protocol) (B : Bounds) : Nat -> Cfg -> List (List Ev x List Cfg)  -- (trace, visited)
+def explorerAttack (P : Protocol) (B : Bounds) : Bool
+
+theorem candidates_complete : Rel P C e C' -> inBounds P B C -> inBounds P B C' -> e in candidates P B C
+theorem bounded_of_mem_nodes : (tr, Cs) in nodes P B n C -> inBounds P B C ->
+                                Runs P C tr Cs /\ tr.length = n /\ boundedCfgs P B Cs
+theorem mem_nodes_of_bounded : the converse
+theorem explorer_correct : explorerAttack P B = true <-> BoundedAttack P B
+theorem boundedSafe_of_explorer : explorerAttack P B = false -> BoundedSafe P B
+```
+
+Why this is the right next theorem: the bound it enforces is on **stored and known messages**, not on
+the intermediate values a protocol expression computes. That is exactly the difference exposed by
+`Regressions.Bounds` - the transient `pair x x` leaves the universe while every configuration stays
+inside it - so the explorer is complete where the CNF is only an under-approximation.
+
+Practical notes from the prototype, to save the next pass the iterations:
+
+* Put the module inside `namespace ProtSat.Reference.Explore`. `ProtSat.Cfg` and `ProtSat.Ev`
+  (the old semantics) shadow `Reference.Cfg`/`Reference.Ev` for any file in `namespace ProtSat`.
+* `Action`'s constructor order is `fresh, send, recv, assign, check, secret, claim, commit`; a
+  `cases act with` block must follow *that* order, not the order of the match arms in `actStep`.
+* `matches` is a reserved word; the auth-matching predicate is `claimMatches`.
+* Reasoning about `stepOf` works with `simp [stepOf, hact, hm] at h` followed by `subst h`;
+  `rw [if_pos ...]` inside an unreduced `match` fails.
+* `Bool.or_eq_true` is an equation, so use `Bool.or_eq_true_iff.mp/.mpr`; `decide_eq_true` goes
+  Prop -> `decide p = true`, `of_decide_eq_true` the other way.
+* `Option.filter_eq_some_iff` makes the bounded-step lemmas two-liners.
+* `nodes` needs `termination_by` stated over the right argument, and the `match stepB ... with`
+  inside it is what the equation compiler struggled with; using `extend` as a separate
+  `def` (or `decreasing_by`) resolves it.
+
 ## Log
 
 * 2026-10-19 (a) - baseline inspected; build green; three review witnesses promoted to permanent
@@ -166,7 +216,9 @@ canonical nonce names.
   credential provisioning and persistent secret obligations; twelve kernel-checked gate theorems
   that each reverse a `Regressions` witness. Build green (1847 jobs), audit clean over 2313
   theorems.
-* Next - stage 3: one public `BoundedExecution` predicate over the repaired semantics, per-expression
+* 2026-10-19 (c) - repo housekeeping: `tmp/`, `scratch/` and `output/pdf/` untracked (kept on disk).
+  Explorer prototyped and deliberately withdrawn rather than merged with holes; design recorded above.
+* Next - the explorer (above), then stage 3: one public `BoundedExecution` predicate over the repaired semantics, per-expression
   `EvalDomain` construction (so `fst (pair x x)` is representable even when the pair is outside
   `U`), and deriving the compiler's representability conditions from the public bound instead of
   assuming them.
