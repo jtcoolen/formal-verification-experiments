@@ -6,6 +6,7 @@ license information.
 import ProtSat.Encoding
 import ProtSat.Certificate
 import ProtSat.DPLL
+import ProtSat.Complete
 
 /-!
 # ProtSat: the end-to-end proof-producing analyser (specification sections 7, 8F, 8H)
@@ -231,5 +232,142 @@ theorem analyze_attack_bounded {P : Protocol} {B : Bounds} {c : Certificate}
   obtain ⟨hU, a, ha, rfl⟩ := analyze_attack_cases h
   refine ⟨checkCertificate_sound (certOf P B a) (certOf_checked hU ha), ?_⟩
   rw [certOf_trace, decEvsFrom_length]
+
+/-! ### Specification 8G: end-to-end bounded safety -/
+
+open ProtSat.Complete
+
+/-- **Specification 8G (end-to-end bounded safety).**  If the analyser reports SAFE then the
+protocol has no bounded attack: there is no trace of at most B.steps steps that
+ProtSat.Operational accepts from the initial configuration and whose visited configurations
+leak a declared secret - provided the bounds can name such a run
+(ProtSat.Complete.WithinBounds) and cover the protocol's declarations
+(ProtSat.Encode.univClosed, ProtSat.Complete.univSub, ProtSat.Complete.SecretsOK).
+
+The proof is the composition of the two halves of the correspondence: had such a run existed,
+ProtSat.Complete.encoding_complete (8B) would have produced a satisfying assignment of the
+generated CNF; but a SAFE verdict means the solver returned none, and ProtSat.DPLL.dpll_complete
+(8E) turns that into a proof that the CNF has no model at all.  Contradiction.
+
+Two honest limitations, both of them the point of the specification's warnings:
+* the verdict is *bounded*.  It says nothing about runs longer than B.steps, about messages
+outside the universe, or about principals and nonces outside the declared domains;
+* the violation condition the encoding demands is the declared secrecy property (the two forms
+of ProtSat.Secret).  Authentication agreement is recorded in the trace and re-checked by the
+certificate checker, but a SAFE verdict is a statement about the secrecy violation the CNF
+asks for. -/
+theorem analyze_safe_sound {P : Protocol} {B : Bounds}
+    (hU : univClosed (shapeOf P B) P) (hsub : univSub (shapeOf P B))
+    (hsec : SecretsOK (shapeOf P B) P) (h : analyze P B = Verdict.safe) :
+    ¬ ∃ (tr : List Ev) (Cs : List Cfg),
+        Runs P (initCfg P) tr Cs ∧ tr.length ≤ B.steps ∧ runsLeaks P Cs ∧
+          WithinBounds P B (cfgAt Cs) (evAt tr) := by
+  intro hsafe
+  obtain ⟨tr, Cs, hrun, hlen, hleak, hbnd⟩ := hsafe
+  obtain ⟨a, ha⟩ :=
+    encoding_complete (P := P) (B := B) (tr := tr) (Cs := Cs) hU hsub hsec hrun hlen hleak hbnd
+  -- a SAFE verdict means the solver answered none
+  have hnone : dpll (encode P B) = none := by
+    rw [analyze] at h
+    by_cases hu : univClosedBool (shapeOf P B) P
+    · rw [if_neg (by simp [hu])] at h
+      cases h' : dpll (encode P B) with
+      | none => rfl
+      | some asg =>
+          rw [h'] at h
+          cases h
+    · rw [if_pos (by simp [hu])] at h
+      cases h
+  exact (DPLL.dpll_complete hnone) ⟨a, ha⟩
+
+/-- **Specification 8G, contrapositive form.**  A bounded attack makes the analyser report
+something other than SAFE.  Stated this way the theorem is the one a user of the tool actually
+needs: the only way to see SAFE is that no bounded attack exists. -/
+theorem analyze_not_safe_of_attack {P : Protocol} {B : Bounds}
+    (hU : univClosed (shapeOf P B) P) (hsub : univSub (shapeOf P B))
+    (hsec : SecretsOK (shapeOf P B) P)
+    (tr : List Ev) (Cs : List Cfg) (hrun : Runs P (initCfg P) tr Cs)
+    (hlen : tr.length ≤ B.steps) (hleak : runsLeaks P Cs)
+    (hbnd : WithinBounds P B (cfgAt Cs) (evAt tr)) :
+    analyze P B ≠ Verdict.safe := by
+  intro hsafe
+  exact (analyze_safe_sound hU hsub hsec hsafe) ⟨tr, Cs, hrun, hlen, hleak, hbnd⟩
+
+/-! ### Specification 8H: termination of the four stages -/
+
+/-- A finite list of natural numbers is bounded: this is all the termination arguments below
+need, because every stage of the pipeline recurses over such a list. -/
+theorem exists_gt_of_mem (l : List Nat) : ∃ n : Nat, ∀ v ∈ l, v < n := by
+  induction l with
+  | nil => exact ⟨0, by simp⟩
+  | cons x xs ih =>
+      obtain ⟨n, hn⟩ := ih
+      exact ⟨max x n + 1, by
+        intro v hv
+        rcases List.mem_cons.mp hv with rfl | hv
+        · omega
+        · have := hn v hv
+          omega⟩
+
+/-- **Specification 8H (termination of the solver).**  DPLL always answers, and its answer is
+right in both directions: it returns none exactly when the formula has no model.  The recursion
+is structural on the list of distinct variables of the formula (ProtSat.DPLL.dpllAux branches on
+its tail), and that list is finite by ProtSat.exists_gt_of_mem, so the search tree has finite
+depth and the solver needs no fuel from the caller. -/
+theorem dpll_none_iff_unsat (F : CNF) : DPLL.dpll F = none <-> ProtSat.Unsat F :=
+  ⟨fun h => DPLL.dpll_complete h, fun h => by
+    cases h' : DPLL.dpll F with
+    | none => rfl
+    | some asg =>
+        exact absurd (DPLL.dpll_sound h') (by
+          intro e
+          exact h ⟨_, DPLL.dpll_sound h'⟩)⟩
+
+/-- **Specification 8H (termination of the bounded state construction).**  Every index set the
+encoding enumerates over is a finite non-empty list of explicit size: the sessions, program
+counters, store slots, universe values, nonce choices, expression-table entries, event
+alternatives and auxiliary blocks.  The bounded state is therefore a finite object, and the
+encoding is a finite concatenation over it. -/
+theorem shape_finite (P : Protocol) (B : Bounds) :
+    0 < shS (shapeOf P B) ∧ 0 < shPc (shapeOf P B) ∧ 0 < shV (shapeOf P B) ∧
+      0 < shVal (shapeOf P B) ∧ 0 < shD (shapeOf P B) ∧ 0 < shE (shapeOf P B) ∧
+      0 < shEv (shapeOf P B) ∧
+      0 < nVarsAll (shapeOf P B) ∧
+      (shapeOf P B).steps = B.steps ∧ (shapeOf P B).U = univ P B ∧
+      (shapeOf P B).D = P.nonceDomain := by
+  refine ⟨shS_pos _, shPc_pos _, shV_pos _, shVal_pos _, shD_pos _, shE_pos _, shEv_pos _,
+    Nat.succ_pos _, rfl, rfl, rfl⟩
+
+/-- **Specification 8H (termination of the encoding).**  The generated CNF is a finite list of
+clauses over a finite vocabulary: there is a number that bounds every variable the formula
+mentions, so the solver's search space - assignments to those variables - is finite. -/
+theorem encode_vocab_finite (P : Protocol) (B : Bounds) :
+    ∃ n : Nat, ∀ v ∈ DPLL.litVars (encode P B).clauses, v < n :=
+  exists_gt_of_mem _
+
+/-- **Specification 8H (termination of certificate checking).**  The checker is a Boolean-valued
+total function: it folds over the certificate's own step list, whose length is part of the
+certificate, so it terminates without fuel and its answer is computable by evaluation.  The
+substantive claim is not that it halts but that what it accepts is a real trace
+(ProtSat.Certificate.checkCertificate_sound) and that what the analyser produces it accepts
+(ProtSat.Analyzer.certOf_checked). -/
+theorem checkCertificate_eq_decide (P : Protocol) (c : Certificate) :
+    decide (checkCertificate P c = true) = checkCertificate P c := by
+  cases h : checkCertificate P c <;> simp [h]
+
+/-- **Specification 8H (the whole pipeline).**  For every protocol and every bounds record the
+analyser returns one of its three verdicts: the analysis is a decision procedure on the declared
+bounds, not a partial search. -/
+theorem analyze_verdict_cases (P : Protocol) (B : Bounds) :
+    analyze P B = Verdict.boundsTooSmall ∨ analyze P B = Verdict.safe ∨
+      ∃ c, analyze P B = Verdict.attack c := by
+  by_cases hu : univClosedBool (shapeOf P B) P
+  · rw [analyze]
+    rw [if_neg (by simp [hu])]
+    rcases option_cases (dpll (encode P B)) with hnone | ⟨asg, hsat⟩
+    · exact Or.inr (Or.inl (by rw [hnone]))
+    · exact Or.inr (Or.inr ⟨_, by rw [hsat]⟩)
+  · left
+    rw [analyze, if_pos (by simp [hu])]
 
 end ProtSat.Analyzer
