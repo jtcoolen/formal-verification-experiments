@@ -213,13 +213,30 @@ solver.  Five accepted and three rejected example certificates are checked by `d
 | # | statement | Lean theorem | status |
 |---|---|---|---|
 | A | every model of the CNF decodes to a valid bounded attack | `Encoding.encoding_sound`, `encoding_sound_bounded` | proved |
-| B | every valid bounded attack yields a model of the CNF | `Complete.encoding_complete` | in progress |
+| B | every valid bounded attack yields a model of the CNF | `Complete.encoding_complete` | **proved** |
 | C | every accepted certificate is a genuine trace | `Certificate.checkCertificate_sound` | proved |
 | D | solver SAT answer is a real model | `DPLL.dpll_sound` | proved |
 | E | solver UNSAT answer means unsatisfiable | `DPLL.dpll_complete` | proved |
 | F | analyser attack verdict gives a bounded attack | `Analyzer.analyze_attack_sound`, `analyze_attack_bounded` | proved |
-| G | analyser SAFE verdict means no bounded attack | `Analyzer.analyze_safe_sound` | depends on B |
-| H | termination of state construction, encoding, DPLL, checking | structural recursion throughout + `DPLL.propagate_noUnit`, `DPLL.assign_length_lt`, `Operational.runs_length` | proved by the kernel |
+| G | analyser SAFE verdict means no bounded attack | `Analyzer.analyze_safe_sound`, `analyze_not_safe_of_attack` | **proved** |
+| H | termination of state construction, encoding, DPLL, checking | `Analyzer.shape_finite`, `encode_vocab_finite`, `dpll_none_iff_unsat`, `checkCertificate_eq_decide`, `analyze_verdict_cases` | **proved** |
+
+**8B is the converse, and it is the theorem that makes a SAFE verdict mean something.**
+Its proof is a construction: `Complete.assignOf` is the *characteristic function of the run* -
+a propositional variable is true exactly when the semantic fact it names holds - built from
+fifteen disjoint block tests over the positional codes (`Complete.asgPc`, `asgSt`, `asgXe`,
+`asgAu` and friends) and the readers `rdPc`, `rdSt`, `rdXe`, `rdDl`, `rdFr`, `rdEv`,
+`dedIx` that say what the run selects.  `encoding_complete` then proves each of the eleven
+clause groups is satisfied by that assignment (`sat_oneHot`, `sat_init`, `sat_frame`,
+`sat_eval`, `sat_step`, `sat_ded`, `sat_pubAux`, `sat_knSupport`, `sat_fresh`,
+`sat_leakAux`, `sat_violation`), and concatenates them with `sat_encodeGroup`.  The
+hypotheses it needs are the bounds conditions of specification section 4, collected in
+`Complete.RunOK` (twelve clauses: the run stays inside the shape, its expressions denote
+universe messages, the shape's strides cover the protocol's variables and expression table)
+plus `univSub` (the universe is subterm-closed, so every rule instance the attacker could use
+is enumerated) and `SecretsOK` (the bounds can name the declared secrets).  None of them is
+ceremonial: a run that leaves the universe has no finite name, and a violation the encoding
+cannot mention cannot be found.
 
 The chain behind 8A is worth spelling out, because it is where the work is:
 `rel_agrees` (every decoded step is a `Rel` transition and the five-component `Agrees`
@@ -264,8 +281,11 @@ and the tenth is not enabled.
   `univClosed` is checked before any verdict is reported (`Verdict.boundsTooSmall` otherwise).
 * **The certificate is the evidence.**  Attack verdicts can be handed to a verifier that
   shares no code with the encoder or the solver.
-* **Solver completeness is load-bearing for SAFE** (there is no certificate to check), which
-  is why 8E is proved and why 8G waits on 8B.
+* **Solver completeness is load-bearing for SAFE** (there is no certificate to check):
+  `analyze_safe_sound` is 8B (a bounded attack would give a model) plus 8E (the solver's
+  `none` answer means there is no model).  Both directions of the correspondence are now
+  proved, so within the declared bounds "the solver found a model" and "the protocol has an
+  attack" are the same statement - which is the correspondence the project is about.
 * **No axioms beyond Lean's three.**  `lake env lean Axioms.lean` walks every theorem in the
   `ProtSat` namespace and reports any axiom other than `propext`, `Classical.choice`,
   `Quot.sound`.
@@ -285,10 +305,10 @@ and the tenth is not enabled.
 | `ProtSat/Encode.lean` | 690 | variable layout, positional codes, injectivity, decoders |
 | `ProtSat/Clauses.lean` | 747 | the eleven clause groups and `encode` |
 | `ProtSat/Encoding.lean` | 3600 | 8A: satisfying assignment -> genuine bounded attack |
-| `ProtSat/Complete.lean` | 450 | 8B groundwork: run-by-position bridge, WithinBounds, block ranges |
+| `ProtSat/Complete.lean` | 4100 | 8B: the characteristic assignment of a run, all eleven clause groups, `encoding_complete` |
 | `ProtSat/DPLL.lean` | 1180 | the verified solver (8D, 8E) |
 | `ProtSat/Certificate.lean` | 937 | the independent checker (8C) |
-| `ProtSat/Analyzer.lean` | 250 | the pipeline and 8F |
+| `ProtSat/Analyzer.lean` | 380 | the pipeline, 8F, 8G and the 8H termination theorems |
 | `ProtSat/Examples.lean` | 430 | the six protocols, certificates, executable results |
 
 ## 12. Reading it

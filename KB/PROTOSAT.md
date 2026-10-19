@@ -596,3 +596,73 @@ close hv with 'rw [assignOf_pc ...]; exact decide_eq_true h9' where h9 : rdPc sh
 defeq display confusion, and remember that a failing 'have ... := by' makes every following
 tactic in the bullet target the leftover goal - that is why the error messages look absurd.
 Everything else (groups 1 and 2) is done and committed.
+
+---
+
+## Round 8 (this session): 8B COMPLETED, plus 8G and 8H — all required theorems proved
+
+### What was proved
+* **8B `Complete.encoding_complete`** — the converse correspondence. Complete.lean grew from
+  2466 to ~4100 lines. Clause groups proved this session: 4 `sat_eval` (Tseitin gates via
+  `fwdClausesOn_complete`/`fwd2ClausesOn_complete` + the gate equations `rdXe_unary/binary/var/const`),
+  5 `sat_step` (all 13 step-clause families; needs the new `Rel.act_shapes` inversion,
+  `Rel.act_keep`, `Rel.act_data`/`ActData`, `actGuard_prefix_stepClausesAt`,
+  `stepClausesAt_act_sat`), 6 `sat_ded`, 7 `sat_pubAux`, 8 `sat_knSupport`, 9 `sat_fresh`,
+  10 `sat_leakAux`, 11 `sat_violation`, then `encoding_complete` itself.
+* **8G `Analyzer.analyze_safe_sound`** (+ `analyze_not_safe_of_attack`): SAFE ⇒ no bounded
+  leaking run within bounds. = 8B + 8E.
+* **8H**: `dpll_none_iff_unsat` (solver always answers, correctly both ways),
+  `shape_finite` (every index set is a finite non-empty list), `encode_vocab_finite`
+  (finitely many variables ⇒ finite search space), `checkCertificate_eq_decide`,
+  `analyze_verdict_cases` (the pipeline returns exactly one verdict).
+
+### Hypothesis changes to RunOK (now a structure with 12 named fields)
+Converted from a 8-way conjunction to a `structure` (accessors are now projections:
+`h.knU`, `h.exprB`, …). New fields: `varsB` (protocol expr vars < shV), `eIdxB` (expr table
+< shE), `writtenB` (action-written vars < shV), `pcActB` (a position with an action has room
+for c+1). All four are theorems at `shapeOf P B` (`lt_shV_of_mem`, `eIdx_lt`,
+`lt_shV_of_written`, `lt_shPc_succ`) but are hypotheses for a general shape.
+Extra hypotheses of 8B itself: `univSub sh` (needed by `dedInstsOf_complete`),
+`List.Nodup sh.U` (needed by `sat_knSupport` to identify a value index with `uIdx`;
+provable via `U_nodup`), `∀ N ∈ sh.D, Term.nonce N ∈ sh.U` (`sat_fresh`; via
+`nonces_subset_univ`), `SecretsOK sh P` (`sat_violation`: secret store vars < shV and closed
+secrets ∈ U; the second half via `secrets_subset_univ`).
+
+### Lean traps hit this session (additions to the catalogue)
+* `omega` does not unfold definitions: `shVal sh = sh.U.length + 1` must be supplied as a
+  `rfl` hypothesis first.
+* `decide (a && b)` vs `decide a && decide b`: `&&` over Props elaborates to nested
+  `decide`; normalize with `simp only [Bool.and_eq_true, decide_eq_true_eq]` (as a *simp*
+  set — `rw` fails with "motive is not type correct" because the Decidable instance depends
+  on the term).
+* `rw` cannot reduce an inline `match` whose scrutinee was rewritten: use
+  `simp only [heq] at h` (simp does iota reduction), or cast with `have h' : T := h`.
+* `rcases h : e with a | b` where `a` shadows a constructor name in scope (e.g. `act` from
+  `Ev.act`) silently mis-binds; use `cases h : e with | some a => … | none => …`.
+* `cases h : e` substitutes in the *goal* only; hypotheses keep the old form and must be
+  rewritten explicitly.
+* `refine (lemma … ?_) cl h4` — a `?_` inside a term-mode `by` block is not a tactic goal;
+  build the membership as a separate `have`.
+* `Bool.eq_false_iff`/`not_or` loops in `simp only`; case-split with `bool_eq_cases` instead.
+* Nested `∃ x ∈ l, p x` needs `List.mem_flatMap.mpr ⟨x, hx, …⟩` explicitly — anonymous
+  constructors fail when the expected type is `List.Mem` (two constructors).
+* `sat_andNDef` is an `iff` with two implications about the aux variable; feeding it from an
+  `↔` characterisation of the conjunction is the clean pattern.
+
+### Verification (this session, all literal outputs)
+* `lake build ProtSat` → "Build completed successfully (927 jobs)" (several times).
+* `lake env lean Axioms.lean` → "theorems audited in ProtSat.*: 1944 / OK - every theorem
+  depends only on propext, Classical.choice, Quot.sound (no sorryAx, no user-declared axioms)".
+* `lake exe protosatDemo` → all six examples as before (Lowe accepted, NSL rejected, solver
+  sanity true/false/false/true).
+* Commits: 7db08e1 (group 4), f8e0ef7 (group 5), 5cde471 (groups 6/7/10), ba03999 (groups
+  8/9/11 + encoding_complete), 4bcf1c9 (8G/8H).
+
+### Remaining polish items (none block the specification)
+* `univSub (shapeOf P B)` is still a hypothesis of 8B; the pieces exist
+  (`subtermClosureL_closed`, `subtermClosureL` of `univ` = iterate closeOne) but the
+  closeOne-preservation lemma is unwritten. Same for the `SecretsOK` first component.
+* `ProtSat/Theory.lean` (raw syntax + convergent rewriter) is still absent; spec §1 is
+  satisfied via the constructor/destructor laws in Attacker.lean + the Expr semantics.
+* Complete.lean has linter warnings (unused `hok`/`hsub` in a few group lemmas, deprecated
+  `if_pos`/`if_neg` names).
