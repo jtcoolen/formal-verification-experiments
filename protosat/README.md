@@ -30,7 +30,11 @@ for two reasons that are proved rather than confessed - see
 2. **Completeness is conditional on representability.** `Regressions.Bounds` is a kernel-checked
    query with a bounded leak attack for which `WithinBounds` fails, because the protocol computes
    `fst (pair x x)` and the intermediate pair is outside the finite universe. A permitted run can
-   have no name in the formula.
+   have no name in the formula. Two things are now proved about that gap rather than assumed:
+    `Represent.no_bound_discharges_exprB` shows *no* closure bound removes it (the condition asks the
+    universe to be closed under pairing), and `BoundedExec.withinBounds_of_residual` shows it is one
+    of only two real conditions among the twelve `WithinBounds` ones - the other being the dummy
+    fields of `Ev.act` - since the remaining ten follow from the public bound alone.
 
 `ProtSat/Query.lean` is the layer that keeps the two apart. A `Query` names the protocol, the
 bounds and the **selected goals** (`secrecy`, `agreement`, `agreementInj`);
@@ -127,8 +131,11 @@ sound, `answer_checkWitness` that a produced witness passes it).
 Scope, stated plainly. This is a *reference* procedure (exponential in `B.steps`; the gate models
 enumerate 130-258 nodes). `Contract.boundedSafe` and `Query.boundedSafeGoals` are deliberately
 different propositions over different semantics, and nothing bridges them: the CNF route still owes
-its own `boundedSafe`, and `Query.boundedSafe_of_encodingUnsat` still needs the representability
-hypothesis. The `BOUNDED SAFE` gate has no `claim`/`commit` actions, so its authentication half
+its own `boundedSafe`. `Query.boundedSafe_of_encodingUnsat` needs the representability hypothesis;
+`Query.boundedSafe_of_encodingUnsat_of_residual` needs only two named conditions - the dummy fields an
+`Ev.act` carries and expression representability - because `ProtSat/BoundedExec.lean` proves the
+other ten `WithinBounds` conditions follow from the public bound alone, and
+`BoundedExec.residual_not_derivable` proves those two do not. The `BOUNDED SAFE` gate has no `claim`/`commit` actions, so its authentication half
 is vacuous - a *safe* authentication example with a causal binding between claim and commit is
 roadmap stage 7, and `Gates.authQ_verdict` (one event: schedule the commit, block the claim) is the
 reminder that agreement needs a progress assumption before it means what a reader assumes it means.

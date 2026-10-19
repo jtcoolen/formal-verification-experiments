@@ -4,6 +4,7 @@ Licensed under the MIT License. See the file LICENSE in the project root for
 license information.
 -/
 import ProtSat.Analyzer
+import ProtSat.BoundedExec
 
 /-!
 # ProtSat: the verification contract (roadmap stage 1)
@@ -560,6 +561,32 @@ theorem boundedSafe_of_encodingUnsat {q : Query}
   rw [violation_secrecy] at hv
   exact analyze_safe_sound hU hsub hsec (analyze_of_analyzeQuery_encodingUnsat h)
     ⟨tr, Cs, hbt.1, hbt.2.1, hv, hwb tr Cs hbt⟩
+
+/-- **The bridge with the residual hypothesis.** `WithinBounds` has twelve conditions; ten of
+them are theorems about the public bound (`ProtSat/BoundedExec.lean`), and only two remain: the
+dummy fields of an action event and expression representability. Stating the bridge in terms of
+`BoundedExec.Residual` is therefore a strict weakening of `boundedSafe_of_encodingUnsat`: whatever
+is known about a query's bounded executions now has to be assumed about two named properties, each
+with a documented repair site, instead of about the whole bundle. -/
+theorem boundedSafe_of_encodingUnsat_of_residual {q : Query}
+    (hq : ∀ g ∈ q.goals, goalEncoded g) (hne : q.goals ≠ [])
+    (hU : univClosed (shapeOf q.protocol q.bounds) q.protocol)
+    (hsub : univSub (shapeOf q.protocol q.bounds))
+    (hsec : SecretsOK (shapeOf q.protocol q.bounds) q.protocol)
+    (hres : ∀ (tr : List Ev) (Cs : List Cfg), BoundedTrace q.protocol q.bounds tr Cs →
+        BoundedExec.Residual q.protocol q.bounds tr Cs)
+    (h : analyzeQuery q = Result.encodingUnsat) : boundedSafeGoals q :=
+  boundedSafe_of_encodingUnsat hq hne hU hsub hsec
+    (fun tr Cs hbt => BoundedExec.withinBounds_of_residual hbt (hres tr Cs hbt)) h
+
+/-- The residual is not vacuously satisfiable in the old semantics: `BoundedExec.residual_not_derivable`
+exhibits a bounded execution of a concrete query with no `Residual`, so this hypothesis - like the
+one it replaces - is a real condition, not a formality. -/
+theorem residual_is_a_real_condition :
+    ¬ (∀ (tr : List Ev) (Cs : List Cfg),
+        BoundedTrace BoundedExec.P0 BoundedExec.B0 tr Cs →
+          BoundedExec.Residual BoundedExec.P0 BoundedExec.B0 tr Cs) :=
+  BoundedExec.residual_not_derivable
 
 /-! ### Display -/
 

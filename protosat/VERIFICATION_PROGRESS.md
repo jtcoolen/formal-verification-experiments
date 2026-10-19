@@ -505,7 +505,55 @@ must re-audit axioms on whatever it produces. ProtSat `Lit`/`Clause`/`CNF` map o
 `Sat.Literal`/`Clause`/`Fmla` index-preservingly (`BVar` is already 0-based), with DIMACS text
 needing `±(v+1)`.
 
+## Stage 4, second installment: what the public bound already implies (`ProtSat/BoundedExec.lean`)
+
+`encoding_complete` assumes `WithinBounds` - twelve unnamed conditions - and the bridge in
+`Query` assumes them for every bounded execution at once. Roadmap stage 4 asks that the compiler
+conditions *follow* from the public bound. They mostly do, and this module says exactly how far.
+
+| `RunOK` field | status |
+|---|---|
+| `knU`, `storeU` | the public bound *is* these two (`knU_of_bounded`, `storeU_of_bounded`) |
+| `sessLen`, `pcB`, `varB` | preserved along the run: `cfgOK_init`, `cfgOK_step`, `cfgOK_at` |
+| `varsB`, `eIdxB`, `writtenB`, `pcActB` | theorems about the protocol, never about the run |
+| `dedU` | derived: a deduction event adds its conclusion to the *next* configuration, which the bound puts inside the universe (`dedU_of_bounded`) |
+| `actB` | **two thirds of it derived**: `lt_nS1_of_act` proves the acting session is an instantiated one (`roleAt` reads `P.sessions`, so `actionAt q c ≠ none → q < sessions.length`). The `m` and `d` fields are **not derivable** |
+| `exprB` | **not derivable from any bound** (`Represent.no_bound_discharges_exprB`) |
+
+`withinBounds_of_residual` therefore replaces the twelve with `BoundedExec.Residual`: the delivered
+message of an action event, the nonce choice of an action event, and expression representability.
+`Query.boundedSafe_of_encodingUnsat_of_residual` is the bridge with that hypothesis - a strict
+weakening of the one it sits beside.
+
+**The residual is proved to be real, in both directions.** `dummyCert` is the
+`Regressions.Bounds` execution with the two events whose actions ignore the delivered message
+carrying `pair (agent 0) (agent 0)`, which is outside the universe: `dummy_bounded` says it is a
+bounded execution, `dummy_not_actM` says `actB` fails for it, and `residual_not_derivable` puts the
+two together - no hypothesis about bounds can discharge it. `canonicalCert` is the same run with the
+labeling the run actually uses, and `canonical_actM_actD` shows both dummy-field conditions hold for
+it. So the residue is not "some runs are unrepresentable" but "the old event type carries fields
+that mean nothing", which is precisely what roadmap stage 2 removed in `ProtSat/Reference.lean` -
+where a deterministic action event carries no fields at all.
+
+Two facts worth keeping from the plumbing: `Runs` inductions in this codebase must be stated over the
+*position* (`cfgOK_at`), not over membership in the visited list - `induction` on `Runs P (initCfg P)
+tr Cs` reverts any hypothesis mentioning the configuration index and the substitution then fails;
+and `List.mem_append` on `closeOne`'s five-component list is left-nested, so a five-way `rcases`
+needs the pattern `(((hU | hpair) | pencS) | pencA) | hhash`.
+
 ## Log
+
+* 2026-10-19 (k) - stage 4 second installment: `ProtSat/BoundedExec.lean` (52 declarations) derives
+  ten of the twelve `RunOK` conditions from `BoundedTrace` plus the existing protocol theorems,
+  names the remaining two as `Residual`, proves the acting-session index bound (`lt_nS1_of_act`),
+  exhibits the dummy-field run that no bound can admit (`residual_not_derivable`) and the canonical
+  run that does (`canonical_actM_actD`), and adds
+  `Query.boundedSafe_of_encodingUnsat_of_residual`. Build green (1859 jobs), audit clean over 2725
+  theorems, 15/15 CI gates green.
+* Next - wire `Represent.exprVals` into `Shape` and the `xe` family so `exprB` leaves `Residual`
+  too; then the `actB` residue disappears by moving `encoding_complete` onto the repaired event
+  type, which is the last thing standing between `encodingUnsat` and a real `boundedSafe` on the
+  CNF route.
 
 * 2026-10-19 (a) - baseline inspected; build green; three review witnesses promoted to permanent
   regressions in `ProtSat/Regressions.lean`; `ProtSat/Query.lean` added (contract, validator,
