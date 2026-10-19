@@ -1,4 +1,0 @@
-import VerifiedLL1.Classical
-#print axioms VerifiedLL1.Grammar.ll1Check_iff_classicalLL1
-#print axioms VerifiedLL1.leftDerives_head_of_derives
-#print axioms VerifiedLL1.classical_word_first

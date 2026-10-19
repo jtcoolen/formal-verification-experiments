@@ -8,3 +8,8 @@ ll1/Bench/Tmp*.lean
 ll1/bench-results-*/
 ll1/bench*-results/*
 !ll1/bench*-results/summary.txt
+
+# local scratch and generated artifacts (kept on disk, not tracked)
+tmp/
+scratch/
+output/pdf/
