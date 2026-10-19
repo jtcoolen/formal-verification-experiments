@@ -51,6 +51,37 @@ establishes. `Result.boundedSafe` exists in the contract and carries a `SafeEvid
 `boundedSafe_of_encodingUnsat` spells out exactly the hypotheses that stages 3 and 4 have to
 discharge.
 
+### The route that does give a verdict: exhaustive enumeration
+
+Adding authentication clauses to the CNF means a new variable family inside `Complete.lean`, whose
+block-range lemmas are all stated against `nVarsAll`. There is a second route, and it is now proved:
+`ProtSat/Reference.lean` is a finite deterministic transition system, so its bounded executions can
+be enumerated. `ProtSat/Explore.lean` does that and proves the answer *is* the security statement:
+
+`@lean
+Explore.explorer_correct        : explorerAttack P B = true <-> BoundedAttack P B
+Explore.boundedSafe_of_explorer : explorerAttack P B = false -> BoundedSafe P B
+`@
+
+No encoding, no representability hypothesis and no solver appears in either direction, and both goals
+`ProtSat.Query` distinguishes are covered. The gates are kernel-checked by `decide`:
+
+* `Gates.secure_bounded_safe` - a genuine `BoundedSafe` verdict, with `secure_honest_run` and
+  `secure_obligation_and_publication` showing the run reaches the events it claims about;
+* `Gates.transient_pair_bounded_attack` - the leak `Regressions.Bounds` shows the CNF loses;
+* `Gates.auth_bounded_attack` - an authentication break the CNF cannot express at all.
+
+Scope, stated plainly: this is a *reference* procedure (exponential in `B.steps`; the gate models
+enumerate 130-258 nodes), and its `BoundedAttack` is the repaired semantics' - `ProtSat.Query`'s
+goal-indexed predicates are still stated over `ProtSat.Operational`, which is what the CNF targets.
+Moving the contract onto the repaired semantics, so `analyzeQuery` can issue `Result.boundedSafe`
+with its `SafeEvidence`, is the next deliberate step rather than an incidental one.
+
+Also new: `ProtSat/ExprDomain.lean` gives each expression its own finite domain (`evalDomain`,
+`eval_mem_evalDomain`), which is what makes the transient-pair run representable at all, and
+`ProtSat/BoundedCert.lean` extends the certificate checker to verify the bounds
+(`checkBounded_sound : checkBounded P B c = true -> BoundedAttack P B`).
+
 ---
 
 ## Build and run
@@ -356,6 +387,10 @@ and the tenth is not enabled.
 | `ProtSat/DPLL.lean` | 1180 | the verified solver (8D, 8E) |
 | `ProtSat/Certificate.lean` | 937 | the independent checker (8C) |
 | `ProtSat/Analyzer.lean` | 393 | the pipeline, 8F, 8G and the 8H termination theorems |
+| `ProtSat/Explore.lean` | 660 | complete bounded decision procedure by enumeration: `inBounds`, `candidates`, `stepB`, `frontier`, `explorer_correct`, kernel-checked gates |
+| `ProtSat/ExprDomain.lean` | 310 | finite per-expression domains: `evalDomain`, `eval_mem_evalDomain`, the transient pair handled |
+| `ProtSat/BoundedCert.lean` | 170 | `checkBounded`: certificates that carry their bounds, sound to `BoundedAttack` |
+| `ProtSat/Reference.lean` | 896 | the repaired reference semantics: allocation history, action-specific events, ordered role-aware agreement, credential provisioning, secret obligations |
 | `ProtSat/Query.lean` | 563 | the contract: `Query`, `Goal`, `Violation`, validator, `Result`, `analyzeQuery`, the gate theorems |
 | `ProtSat/Regressions.lean` | 338 | permanent kernel-checked witnesses for every open gap |
 | `ProtSat/Examples.lean` | 430 | the six protocols, certificates, executable results |
