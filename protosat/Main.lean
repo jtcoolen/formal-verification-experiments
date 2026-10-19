@@ -67,6 +67,21 @@ def demoQuery (name : String) (q : Query) : IO Unit := do
   IO.println ("    answer: " ++ describe (analyzeQuery q))
   IO.println ""
 
+/-- The same question answered by exhaustive enumeration over the repaired semantics: this route can
+also decide authentication. See ProtSat/Contract.lean. -/
+def demoContract (name : String) (q : Query) : IO Unit := do
+  IO.println ("--- " ++ name)
+  IO.println ("    selected goals: " ++ toString q.goals.length
+    ++ "; validation diagnostics: " ++ toString ((validate q).length))
+  let v := ProtSat.Reference.Contract.analyze q
+  IO.println ("    answer: " ++ ProtSat.Reference.Contract.describe v)
+  match v with
+  | ProtSat.Reference.Contract.Verdict.attack x =>
+      IO.println ("    witness re-checked without the search: "
+        ++ toString (ProtSat.Reference.Contract.checkWitness q x))
+  | _ => pure ()
+  IO.println ""
+
 /-- A model with a secret declaration that denotes nothing: the validator must say so rather
 than answer a question about a secret the model does not contain. -/
 def malformedP : Protocol :=
@@ -114,6 +129,18 @@ def main : IO Unit := do
     (Query.mk malformedP { steps := 2, rounds := 0 } [Goal.secrecy])
   demoQuery "a query that selects no goal"
     (Query.mk Challenge.P Challenge.B [])
+  IO.println "THE ENUMERATION CONTRACT (ProtSat/Contract.lean): the repaired semantics decided by"
+  IO.println "exhaustive enumeration. This route represents the authentication violation too, so it"
+  IO.println "can produce the bounded-safety verdict the CNF route still owes."
+  IO.println ""
+  demoContract "secure model, both goals selected" ProtSat.Reference.Contract.Gates.secureQ
+  demoContract "commit-only authentication model, asking about agreement"
+    ProtSat.Reference.Contract.Gates.authQ
+  demoContract "transient-pair model, asking about secrecy"
+    ProtSat.Reference.Contract.Gates.transientQ
+  demoContract "a query that selects no goal" ProtSat.Reference.Contract.Gates.emptyQ
+  demoContract "a model with a session naming a role that does not exist"
+    ProtSat.Reference.Contract.Gates.badQ
   IO.println "SOLVER SANITY CHECKS (all by the kernel, see ProtSat/DPLL.lean)"
   IO.println ("    demoUnit      isSome = " ++ toString ((dpll DPLL.demoUnit).isSome))
   IO.println ("    demoConflict  isSome = " ++ toString ((dpll DPLL.demoConflict).isSome))

@@ -20,3 +20,4 @@ import ProtSat.Reference
 import ProtSat.ExprDomain
 import ProtSat.BoundedCert
 import ProtSat.Explore
+import ProtSat.Contract

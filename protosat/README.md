@@ -71,11 +71,43 @@ No encoding, no representability hypothesis and no solver appears in either dire
 * `Gates.transient_pair_bounded_attack` - the leak `Regressions.Bounds` shows the CNF loses;
 * `Gates.auth_bounded_attack` - an authentication break the CNF cannot express at all.
 
-Scope, stated plainly: this is a *reference* procedure (exponential in `B.steps`; the gate models
-enumerate 130-258 nodes), and its `BoundedAttack` is the repaired semantics' - `ProtSat.Query`'s
-goal-indexed predicates are still stated over `ProtSat.Operational`, which is what the CNF targets.
-Moving the contract onto the repaired semantics, so `analyzeQuery` can issue `Result.boundedSafe`
-with its `SafeEvidence`, is the next deliberate step rather than an incidental one.
+`ProtSat/Contract.lean` puts the query contract on top of that procedure, over the *repaired*
+semantics: `goalViolation P g` selects `traceLeaks` for secrecy and the ordered role-aware
+`authBreak` for agreement, `boundedAttack q` says a *selected* goal fails on some permitted
+execution, and `boundedSafe q` is the statement a SAFE verdict is supposed to mean. The enumeration
+is proved to decide exactly that question:
+
+`lean
+Contract.attackFound_decides : attackFound q = true <-> boundedAttack q
+Contract.analyze_boundedSafe_sound : analyze q = boundedSafe e -> boundedSafe q
+Contract.analyze_attack_sound : analyze q = attack x -> boundedAttack q
+Contract.checkWitness_sound     : checkWitness q x = true -> boundedAttack q
+`
+
+and the analyser *produces* safety evidence instead of withholding it. All four verdicts are
+instantiated on models that already carry permanent witnesses:
+
+* `Gates.secureQ_verdict` - `boundedSafe` with its `SafeEvidence`, on a model whose honest
+  execution is proved to reach the generation, the declaration and the publication;
+* `Gates.authQ_verdict` - the authentication attack the CNF route refuses to ask about
+  (`Gates.authQ_cnf_refused` shows it answering `unsupportedGoals` instead);
+* `Gates.transientQ_verdict` - the leak `Regressions.Bounds` proves the CNF cannot name;
+* `Gates.emptyQ_verdict` and `Gates.badQ_verdict` - selecting nothing, and a malformed model,
+  neither of which can be mistaken for security.
+
+An `attack` verdict is a certificate, not a claim: `analyze_attack_certificate` shows the named
+execution is a bounded run that violates a selected goal, and `checkWitness` re-checks exactly that
+as a `Bool` computation without re-running the search (`checkWitness_sound` proves the re-check is
+sound, `answer_checkWitness` that a produced witness passes it).
+
+Scope, stated plainly. This is a *reference* procedure (exponential in `B.steps`; the gate models
+enumerate 130-258 nodes). `Contract.boundedSafe` and `Query.boundedSafeGoals` are deliberately
+different propositions over different semantics, and nothing bridges them: the CNF route still owes
+its own `boundedSafe`, and `Query.boundedSafe_of_encodingUnsat` still needs the representability
+hypothesis. The `BOUNDED SAFE` gate has no `claim`/`commit` actions, so its authentication half
+is vacuous - a *safe* authentication example with a causal binding between claim and commit is
+roadmap stage 7, and `Gates.authQ_verdict` (one event: schedule the commit, block the claim) is the
+reminder that agreement needs a progress assumption before it means what a reader assumes it means.
 
 Also new: `ProtSat/ExprDomain.lean` gives each expression its own finite domain (`evalDomain`,
 `eval_mem_evalDomain`), which is what makes the transient-pair run representable at all, and
@@ -347,6 +379,10 @@ and the tenth is not enabled.
   satisfy `WithinBounds`. Agreement violations are not in the formula
   (`Regressions.Authentication`), and `Regressions.Bounds` shows a permitted leak the formula
   cannot name. Use `ProtSat.analyzeQuery` to get an answer that says which of these it is.
+  `ProtSat.Reference.Contract.analyze` answers the question instead, by exhaustive enumeration over
+  the repaired semantics: its `boundedSafe` verdict carries `boundedSafe q` as evidence, for every
+  goal the query selected, with no representability hypothesis - at the cost of a search that is
+  exponential in the bound and a reference model, not the CNF's.
 * **Bounded, not unbounded.** Even a genuine `boundedSafeGoals q` is a statement about the query's
   sessions, domains and bounds, not a proof of protocol security. (Specification 11 forbids the
   confusion; the classic result that 2 sessions and 10 steps suffice to refute NS is a reminder
@@ -388,6 +424,7 @@ and the tenth is not enabled.
 | `ProtSat/Certificate.lean` | 937 | the independent checker (8C) |
 | `ProtSat/Analyzer.lean` | 393 | the pipeline, 8F, 8G and the 8H termination theorems |
 | `ProtSat/Explore.lean` | 660 | complete bounded decision procedure by enumeration: `inBounds`, `candidates`, `stepB`, `frontier`, `explorer_correct`, kernel-checked gates |
+| `ProtSat/Contract.lean` | 689 | the goal-indexed contract over the repaired semantics: `boundedSafe q`, `attackFound_decides`, an analyser that issues `boundedSafe` with evidence, four kernel-checked verdict gates |
 | `ProtSat/ExprDomain.lean` | 310 | finite per-expression domains: `evalDomain`, `eval_mem_evalDomain`, the transient pair handled |
 | `ProtSat/BoundedCert.lean` | 170 | `checkBounded`: certificates that carry their bounds, sound to `BoundedAttack` |
 | `ProtSat/Reference.lean` | 896 | the repaired reference semantics: allocation history, action-specific events, ordered role-aware agreement, credential provisioning, secret obligations |

@@ -319,6 +319,52 @@ Kernel-checked gates (`decide`, whole file builds in seconds):
 * Cost is exponential in `B.steps`. The gate models enumerate 130-258 nodes; this is a reference
   procedure, not a scalable one, and roadmap stage 8 is where proved refinements belong.
 
+## The contract, decided: goal-indexed safety with evidence (`ProtSat/Contract.lean`)
+
+This is the piece that closes the objective's gap for the enumeration route. `ProtSat.Query` states
+the contract over the *old* semantics because that is what the CNF is proved against, so its
+`analyzeQuery` can never issue `Result.boundedSafe`
+(`ProtSat.analyzeQuery_ne_boundedSafe`). `ProtSat.Reference.Contract` states the same contract
+shape over the *repaired* semantics and then actually discharges it: 53 theorems, whole module
+compiles in about five seconds including its `decide` calls over the enumeration, and
+`lake exe protosatDemo` now prints a real `BOUNDED SAFE` line and re-checks each attack witness
+without re-running the search.
+
+Naming note: the module lives in the namespace `ProtSat.Reference.Contract`, not `ProtSat.Contract`.
+The old semantics is declared directly in `ProtSat`, so inside `namespace ProtSat.Contract` the names
+`Cfg` and `Ev` resolve to the *old* configuration and event types while the `ProtSat.Reference`
+functions want the new ones. Nesting the contract under `ProtSat.Reference` makes the unqualified
+names mean the repaired ones. That is a trap worth knowing about, so it is documented in the module
+header.
+
+| Declaration | Meaning |
+|---|---|
+| `goalViolation P g`, `goalViolationBool P g`, `goalViolationBool_iff` | which executions violate goal `g`, over the repaired semantics: `traceLeaks` for secrecy, the ordered role-aware `authBreak` for agreement, each with its proved monitor |
+| `boundedAttackFor q g`, `boundedAttack q`, `boundedSafe q` | the query-indexed statement: some *selected* goal is violated by some execution the query permits; `boundedSafe q` is "no permitted execution violates any selected goal" - the meaning SAFE was always supposed to have |
+| `nodeViolatesQuery q`, `attackFound q`, `findAttack q` | the executable question restricted to the goals the query selected, and its witness |
+| `boundedAttack_of_attackFound`, `attackFound_of_boundedAttack`, `attackFound_decides` | **soundness and completeness of the enumeration for the query's own goals**, both directions, with no encoding, representability or solver hypothesis |
+| `analyze_attack_certificate`, `checkWitness q x`, `checkWitness_sound`, `answer_checkWitness` | the `attack` verdict is a certificate: the named node is a bounded run violating a selected goal, and a `Bool` re-check confirms it without re-running the search |
+| `SafeEvidence`, `Verdict`, `answer`, `analyze` | the verdict type (`invalidModel`, `noGoals`, `attack`, `boundedSafe`) and the analyser whose `boundedSafe` case is *produced by a proof* rather than withheld |
+| `analyze_attack_sound`, `analyze_boundedSafe_sound`, `analyze_correct`, `analyze_exclusive` | an `attack` verdict means `boundedAttack q`; a `boundedSafe` verdict means `boundedSafe q`; for a well-formed query with a selected goal the answer is the right one, and exactly one of the two security answers is produced |
+| `analyze_ne_security_of_invalid`, `analyze_ne_security_of_noGoals`, `analyze_ne_attack_of_boundedSafe` | the stage-1 acceptance gate restated for this analyser: a malformed model and an empty goal set cannot produce a security verdict |
+| `Gates.secureQ_verdict`, `authQ_verdict`, `transientQ_verdict`, `emptyQ_verdict`, `badQ_verdict` | all four verdicts instantiated on models that already carry permanent witnesses elsewhere: bounded safety on the explorer's secure model, the authentication attack the CNF refuses to ask about, the transient-pair leak the CNF's `WithinBounds` excludes, no goals, and a malformed model |
+| `Gates.authQ_cnf_refused` | the same query on the CNF route returns `unsupportedGoals`, so the two answers can be compared directly |
+
+**Honest scope notes.**
+
+* `Contract.boundedSafe` and `Query.boundedSafeGoals` are deliberately *different* propositions,
+  over the repaired and the old semantics respectively, and each `SafeEvidence` carries its own.
+  Nothing bridges them, and that is the point: the CNF route must not inherit a security label from a
+  proof about a different model. `Query.boundedSafe_of_encodingUnsat` still needs the
+  representability hypothesis that `Regressions.Bounds` shows is not implied.
+* The `BOUNDED SAFE` gate selects both goals on a model with no `claim`/`commit` actions, so its
+  authentication half holds vacuously. The non-vacuity work of roadmap stage 7 - a *safe*
+  authentication example whose honest execution reaches the commit through a value the attacker cannot
+  fabricate - is still open. `Gates.authQ_verdict` (a one-event attack: schedule the commit, block the
+  claim) is the reminder that agreement claims need an explicit progress assumption, or a causal binding
+  between claim and commit, before they mean what a reader assumes they mean.
+* Cost is exponential in `B.steps`, same as the explorer's.
+
 ## Log
 
 * 2026-10-19 (a) - baseline inspected; build green; three review witnesses promoted to permanent
@@ -340,6 +386,11 @@ Kernel-checked gates (`decide`, whole file builds in seconds):
   (`inBounds`, `candidates_complete`, `stepB`, `Node`, `isPrefix`, `extend`, `frontier`,
   `run_snoc`); it was withdrawn again at the completeness direction rather than committed with holes.
   The remaining obstacle is stated precisely below.
+* 2026-10-19 (e) - `ProtSat/Contract.lean`: the goal-indexed contract over the repaired
+  semantics with `attackFound_decides` (sound and complete, no encoding hypothesis) and an analyser
+  that issues `boundedSafe` with evidence; `analyze_attack_certificate` and `checkWitness` make an
+  `attack` verdict re-checkable without the search; five kernel-checked verdict gates; demo extended
+  with the enumeration contract. Build green (1855 jobs), audit clean over 2521 theorems.
 * Next - the explorer (above), then stage 3's `BoundedExecution` unification, then per-expression
   `EvalDomain` construction (so `fst (pair x x)` is representable even when the pair is outside
   `U`), and deriving the compiler's representability conditions from the public bound instead of
