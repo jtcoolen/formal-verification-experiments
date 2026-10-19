@@ -639,4 +639,22 @@ theorem zero_step_is_safe : explorerAttack authP { steps := 0, rounds := 0 } = f
 
 end Gates
 
+/-! ### Producing the witness -/
+
+/-- Every node the explorer inspects is a bounded prefix whose trace fits the bound. -/
+theorem prefix_of_mem_allNodes {P : Protocol} {B : Bounds} {n : Nat} {x : Node}
+    (h : x ∈ allNodes P B n) : isPrefix P B x ∧ x.tr.length ≤ n := by
+  classical
+  rw [allNodes, List.mem_flatMap] at h
+  obtain ⟨k, hk, hy⟩ := h
+  obtain ⟨hpre, hlen⟩ := isPrefix_of_mem_frontier (isPrefix_initNode P B) hy
+  refine ⟨hpre, ?_⟩
+  rw [hlen]
+  simp only [initNode, List.length_nil, Nat.zero_add]
+  exact Nat.le_of_lt_succ (List.mem_range.mp hk)
+
+/-- The first violating node the enumeration finds, if any. -/
+def findViolation (P : Protocol) (B : Bounds) : Option Node :=
+  (allNodes P B B.steps).find? (nodeViolates P)
+
 end ProtSat.Reference.Explore
