@@ -585,8 +585,24 @@ one it replaces - is a real condition, not a formality. -/
 theorem residual_is_a_real_condition :
     ¬ (∀ (tr : List Ev) (Cs : List Cfg),
         BoundedTrace BoundedExec.P0 BoundedExec.B0 tr Cs →
-          BoundedExec.Residual BoundedExec.P0 BoundedExec.B0 tr Cs) :=
-  BoundedExec.residual_not_derivable
+          BoundedExec.Residual BoundedExec.P0 BoundedExec.B0 tr Cs) := fun hall =>
+  BoundedExec.exprB_not_derivable
+    (fun tr Cs hbt i q e he => (hall tr Cs hbt).exprB i q e he)
+
+/-- **The bridge with no execution hypothesis.** For a query whose value domain reports no gap -
+  decidable from the protocol and the bounds alone - every bounded execution is representable, so
+  an unsatisfiable encoding is a bounded-security theorem about the *protocol*, not about a
+  bundle of assumptions on its runs. This is roadmap stage 4 gate met for the gap-free class;
+  `Represent.domainGap` is the check that says whether a query is in it. -/
+theorem boundedSafe_of_encodingUnsat_of_gapFree {q : Query}
+    (hq : ∀ g ∈ q.goals, goalEncoded g) (hne : q.goals ≠ [])
+    (hU : univClosed (shapeOf q.protocol q.bounds) q.protocol)
+    (hsub : univSub (shapeOf q.protocol q.bounds))
+    (hsec : SecretsOK (shapeOf q.protocol q.bounds) q.protocol)
+    (hgap : Represent.domainGap q.protocol q.bounds = false)
+    (h : analyzeQuery q = Result.encodingUnsat) : boundedSafeGoals q :=
+  boundedSafe_of_encodingUnsat hq hne hU hsub hsec
+    (fun tr Cs hbt => BoundedExec.withinBounds_of_bounded hbt hgap) h
 
 /-! ### Display -/
 

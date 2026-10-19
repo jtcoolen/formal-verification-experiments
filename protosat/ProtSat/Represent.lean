@@ -644,4 +644,28 @@ def plainP : Protocol :=
 
 theorem domainGap_plain : domainGap plainP { steps := 2, rounds := 1 } = false := by decide
 
+/-- **The seventh condition, from the query.** When no gap is reported, every table expression
+is admissible in every universe-valued store - so RunOK.exprB holds for *every* run of the query
+and stops being a hypothesis about the execution. Together with
+`BoundedExec.withinBounds_of_bounded` this is roadmap stage 4 gate: the compiler representability
+condition follows from the public bound plus a decidable property of the query. -/
+theorem exprB_of_domainGap_false {P : Protocol} {B : Bounds} {cfg : Nat → Cfg}
+    (hgap : domainGap P B = false)
+    (hstore : ∀ i q, storeIn (univOf P B) (storeOf (cfg i) q))
+    (i q : Nat) (e : Expr) (he : e ∈ allExprs P) :
+    admissible (shapeOf P B) (Expr.eval e (storeOf (cfg i) q)) = true := by
+  have hall : (allExprs P).all (fun e => storesInU (univOf P B) e) = true := by
+    unfold domainGap at hgap
+    cases h2 : (allExprs P).all (fun e => storesInU (univOf P B) e) with
+    | true => rfl
+    | false => simp_all
+  rw [List.all_eq_true] at hall
+  have h1 := hall e he
+  rw [storesInU, List.all_eq_true] at h1
+  have h2 := h1 (Expr.eval e (storeOf (cfg i) q)) (eval_mem_evalDomain e (hstore i q))
+  have hU : (shapeOf P B).U = univOf P B := rfl
+  rw [← hU] at h2
+  rw [inside_admissible] at h2
+  exact h2
+
 end ProtSat.Represent

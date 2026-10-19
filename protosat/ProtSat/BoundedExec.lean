@@ -6,6 +6,7 @@ license information.
 import ProtSat.Complete
 import ProtSat.ExprDomain
 import ProtSat.Certificate
+import ProtSat.Represent
 
 /-!
 # ProtSat: what the public bound already implies (roadmap stage 4, second installment)
@@ -403,20 +404,91 @@ theorem dedU_of_bounded {P : Protocol} {B : Bounds} {tr : List Ev} {Cs : List Cf
 
 /-! ### The residual, and the assembly -/
 
-/-- The conditions the public bound does not imply. Both are about the *event*, not the
-configuration: the old event type Ev.act q m d carries a delivered message and a nonce choice that
-the rules for send, assign, check, secret, claim and commit quantify over freely, so they may name
-anything - even when the run itself stays inside the universe. Roadmap stage 2 removes them by
-making events action-specific; until the CNF route moves, they are the residue of WithinBounds. -/
+/-- The condition the public bound still does not imply. It used to be three: the delivered message
+and the nonce choice of an action event were demanded unconditionally, which no bound can give
+because six of the eight action rules quantify those fields freely. RunOK.actB now bounds them
+*where the action reads them*, which the public bound does imply (actB_of_bounded), so the residual
+is expression representability alone - discharged by a gap-free query
+(Represent.exprB_of_domainGap_false) or by the extended value domain (Represent.shapeX). -/
 structure Residual (P : Protocol) (B : Bounds) (tr : List Ev) (Cs : List Cfg) : Prop where
-  /-- The delivered message of an action event, when the event is a dummy-field one. -/
-  actM : ∀ i q m d, evAt tr i = Ev.act q m d → m ∈ (shapeOf P B).U
-  /-- The nonce choice of an action event, when the event is a dummy-field one. -/
-  actD : ∀ i q m d, evAt tr i = Ev.act q m d → d ∈ (shapeOf P B).D
-  /-- RunOK.exprB, undischarged because no finite universe is closed under the protocol
-    constructors (Represent.no_bound_discharges_exprB). -/
+  /-- RunOK.exprB, undischarged by the bound alone because no finite universe is closed under the
+    protocol constructors (Represent.no_bound_discharges_exprB). -/
   exprB : ∀ i q e, e ∈ allExprs P →
     admissible (shapeOf P B) (Expr.eval e (storeOf (cfgAt Cs i) q)) = true
+
+/-- The only rule that reads the delivered message is `rRecv`, and it reads it as a message the
+attacker already knows. -/
+theorem kn_of_rel_act_recv {P : Protocol} {C C' : Cfg} {q : Nat} {a : Agent} {x : Var}
+    {m : Term} {d : NonceName} (h : Rel P C (Ev.act q m d) C')
+    (hact : P.actionAt q (pcOf C q) = some (Action.recv a x)) : m ∈ C.kn := by
+  cases h with
+  | rRecv _ hm => exact hm
+  | rFresh h _ _ => exact absurd hact (by rw [h]; simp)
+  | rSend h _ => exact absurd hact (by rw [h]; simp)
+  | rAssign h _ => exact absurd hact (by rw [h]; simp)
+  | rCheck h _ _ => exact absurd hact (by rw [h]; simp)
+  | rSecret h => exact absurd hact (by rw [h]; simp)
+  | rClaim h => exact absurd hact (by rw [h]; simp)
+  | rCommit h => exact absurd hact (by rw [h]; simp)
+
+/-- The only rule that reads the nonce choice is `rFresh`, and it reads it from the declared
+domain. -/
+theorem domain_of_rel_act_fresh {P : Protocol} {C C' : Cfg} {q : Nat} {x : Var} {N : NonceName}
+    {m : Term} {d : NonceName} (h : Rel P C (Ev.act q m d) C')
+    (hact : P.actionAt q (pcOf C q) = some (Action.fresh x N)) : d ∈ P.nonceDomain := by
+  cases h with
+  | rFresh _ hd _ => exact hd
+  | rSend h _ => exact absurd hact (by rw [h]; simp)
+  | rRecv h _ => exact absurd hact (by rw [h]; simp)
+  | rAssign h _ => exact absurd hact (by rw [h]; simp)
+  | rCheck h _ _ => exact absurd hact (by rw [h]; simp)
+  | rSecret h => exact absurd hact (by rw [h]; simp)
+  | rClaim h => exact absurd hact (by rw [h]; simp)
+  | rCommit h => exact absurd hact (by rw [h]; simp)
+
+/-- **The two residual fields are the two no rule reads.** Where a rule does read one, the public
+bound already bounds it: a receive delivers a known message, a generation picks a domain nonce. So
+`Residual.actM` and `Residual.actD` are not missing facts about the execution - they are artefacts
+of an event type that stores fields the transition ignores. -/
+theorem actM_of_recv {P : Protocol} {B : Bounds} {tr : List Ev} {Cs : List Cfg}
+    (hbt : BoundedTrace P B tr Cs) (i q : Nat) {a : Agent} {x : Var} {m : Term} {d : NonceName}
+    (he : evAt tr i = Ev.act q m d)
+    (hact : P.actionAt q (pcOf (cfgAt Cs i) q) = some (Action.recv a x)) :
+    m ∈ (shapeOf P B).U := by
+  have hrel : Rel P (cfgAt Cs i) (Ev.act q m d) (cfgAt Cs (i + 1)) := by
+    rw [← he]
+    exact (runs_rel hbt.1).2 i
+  exact knU_of_bounded hbt i (kn_of_rel_act_recv hrel hact)
+
+theorem actD_of_fresh {P : Protocol} {B : Bounds} {tr : List Ev} {Cs : List Cfg}
+    (hbt : BoundedTrace P B tr Cs) (i q : Nat) {x : Var} {N : NonceName} {m : Term}
+    {d : NonceName} (he : evAt tr i = Ev.act q m d)
+    (hact : P.actionAt q (pcOf (cfgAt Cs i) q) = some (Action.fresh x N)) :
+    d ∈ (shapeOf P B).D := by
+  have hrel : Rel P (cfgAt Cs i) (Ev.act q m d) (cfgAt Cs (i + 1)) := by
+    rw [← he]
+    exact (runs_rel hbt.1).2 i
+  exact domain_of_rel_act_fresh hrel hact
+
+/-- **RunOK.actB, from the public bound.** The acting session is instantiated; a delivered
+message is bounded where the action reads it (a receive takes a message the attacker knows, and
+the bound puts known messages in the universe); a nonce choice is bounded where the action reads
+it (the generation rule already demands it from the declared domain). -/
+theorem actB_of_bounded {P : Protocol} {B : Bounds} {tr : List Ev} {Cs : List Cfg}
+    (hbt : BoundedTrace P B tr Cs) (i q : Nat) {m : Term} {d : NonceName}
+    (he : evAt tr i = Ev.act q m d) :
+    q < (shapeOf P B).nS1 ∧
+      (readsDelivery P q (pcOf (cfgAt Cs i) q) -> m ∈ (shapeOf P B).U) ∧
+      (readsNonce P q (pcOf (cfgAt Cs i) q) -> d ∈ (shapeOf P B).D) := by
+  refine ⟨?_, ?_, ?_⟩
+  · have hrel : Rel P (cfgAt Cs i) (Ev.act q m d) (cfgAt Cs (i + 1)) := by
+      rw [← he]
+      exact (runs_rel hbt.1).2 i
+    exact lt_nS1_of_act hrel
+  · rintro ⟨a, x, hact⟩
+    exact actM_of_recv hbt i q he hact
+  · rintro ⟨x, N, hact⟩
+    exact actD_of_fresh hbt i q he hact
 
 /-- The twelve conditions, now with ten of them theorems. -/
 theorem withinBounds_of_residual {P : Protocol} {B : Bounds} {tr : List Ev} {Cs : List Cfg}
@@ -424,7 +496,7 @@ theorem withinBounds_of_residual {P : Protocol} {B : Bounds} {tr : List Ev} {Cs 
     WithinBounds P B (cfgAt Cs) (evAt tr) := by
   refine ⟨fun i t ht => knU_of_bounded hbt i ht,
     fun i q v hq => storeU_of_bounded hbt i q hq,
-    ?_,
+    fun i q m d he => actB_of_bounded hbt i q he,
     fun i t he => dedU_of_bounded hbt i he,
     fun i q hq => pcB_of_bounded hbt i q hq,
     fun i q x hq => varB_of_bounded hbt i q x hq,
@@ -432,10 +504,16 @@ theorem withinBounds_of_residual {P : Protocol} {B : Bounds} {tr : List Ev} {Cs 
     fun i => sessLen_of_bounded hbt i,
     varsB_of_protocol P B, eIdxB_of_protocol P B, writtenB_of_protocol P B,
     fun q c hne => pcActB_of_protocol P B q c hne⟩
-  intro i q m d he
-  have hrel := (runs_rel hbt.1).2 i
-  rw [he] at hrel
-  exact ⟨lt_nS1_of_act hrel, hres.actM i q m d he, hres.actD i q m d he⟩
+
+/-- **Roadmap stage 4, gate.** For a query whose value domain reports no gap, every bounded
+execution satisfies WithinBounds: the compiler representability conditions are theorems about the
+public bound and the query, not hypotheses about the run. -/
+theorem withinBounds_of_bounded {P : Protocol} {B : Bounds} {tr : List Ev} {Cs : List Cfg}
+    (hbt : BoundedTrace P B tr Cs) (hgap : Represent.domainGap P B = false) :
+    WithinBounds P B (cfgAt Cs) (evAt tr) :=
+  withinBounds_of_residual hbt
+    ⟨fun i q e he =>
+      Represent.exprB_of_domainGap_false hgap (fun i q => storeIn_of_bounded hbt i q) i q e he⟩
 
 /-! ### The residual is a real gap, not a formality -/
 
@@ -490,17 +568,6 @@ theorem dummy_not_actM :
   have hnot : Term.pair (Term.agent 0) (Term.agent 0) ∉ (shapeOf P0 B0).U := by decide
   have hmem := hall 1 0 (Term.pair (Term.agent 0) (Term.agent 0)) 0 h2
   exact hnot hmem
-
-/-- **The residual cannot be discharged from the bound.** There is a bounded execution with no
-`Residual`. This is the honest content of the gap: the old event type is the problem, and the
-repaired semantics in `ProtSat/Reference.lean` - where a deterministic action carries no fields at
-all - is where it goes away. -/
-theorem residual_not_derivable :
-    ¬ (∀ (tr : List Ev) (Cs : List Cfg), BoundedTrace P0 B0 tr Cs →
-        Residual P0 B0 tr Cs) := by
-  intro hall
-  exact dummy_not_actM
-    (hall (certTrace dummyCert) (certCfgs dummyCert) dummy_bounded).actM
 
 /-- The gap is not vacuous in the other direction either: the *canonical* labelling of the same run
 satisfies the two dummy-field conditions, so the residual excludes only the arbitrary labelings. -/
@@ -570,60 +637,6 @@ theorem canonical_actM_actD :
 
 /-! ### What the two residual fields really are -/
 
-/-- The only rule that reads the delivered message is `rRecv`, and it reads it as a message the
-attacker already knows. -/
-theorem kn_of_rel_act_recv {P : Protocol} {C C' : Cfg} {q : Nat} {a : Agent} {x : Var}
-    {m : Term} {d : NonceName} (h : Rel P C (Ev.act q m d) C')
-    (hact : P.actionAt q (pcOf C q) = some (Action.recv a x)) : m ∈ C.kn := by
-  cases h with
-  | rRecv _ hm => exact hm
-  | rFresh h _ _ => exact absurd hact (by rw [h]; simp)
-  | rSend h _ => exact absurd hact (by rw [h]; simp)
-  | rAssign h _ => exact absurd hact (by rw [h]; simp)
-  | rCheck h _ _ => exact absurd hact (by rw [h]; simp)
-  | rSecret h => exact absurd hact (by rw [h]; simp)
-  | rClaim h => exact absurd hact (by rw [h]; simp)
-  | rCommit h => exact absurd hact (by rw [h]; simp)
-
-/-- The only rule that reads the nonce choice is `rFresh`, and it reads it from the declared
-domain. -/
-theorem domain_of_rel_act_fresh {P : Protocol} {C C' : Cfg} {q : Nat} {x : Var} {N : NonceName}
-    {m : Term} {d : NonceName} (h : Rel P C (Ev.act q m d) C')
-    (hact : P.actionAt q (pcOf C q) = some (Action.fresh x N)) : d ∈ P.nonceDomain := by
-  cases h with
-  | rFresh _ hd _ => exact hd
-  | rSend h _ => exact absurd hact (by rw [h]; simp)
-  | rRecv h _ => exact absurd hact (by rw [h]; simp)
-  | rAssign h _ => exact absurd hact (by rw [h]; simp)
-  | rCheck h _ _ => exact absurd hact (by rw [h]; simp)
-  | rSecret h => exact absurd hact (by rw [h]; simp)
-  | rClaim h => exact absurd hact (by rw [h]; simp)
-  | rCommit h => exact absurd hact (by rw [h]; simp)
-
-/-- **The two residual fields are the two no rule reads.** Where a rule does read one, the public
-bound already bounds it: a receive delivers a known message, a generation picks a domain nonce. So
-`Residual.actM` and `Residual.actD` are not missing facts about the execution - they are artefacts
-of an event type that stores fields the transition ignores. -/
-theorem actM_of_recv {P : Protocol} {B : Bounds} {tr : List Ev} {Cs : List Cfg}
-    (hbt : BoundedTrace P B tr Cs) (i q : Nat) {a : Agent} {x : Var} {m : Term} {d : NonceName}
-    (he : evAt tr i = Ev.act q m d)
-    (hact : P.actionAt q (pcOf (cfgAt Cs i) q) = some (Action.recv a x)) :
-    m ∈ (shapeOf P B).U := by
-  have hrel : Rel P (cfgAt Cs i) (Ev.act q m d) (cfgAt Cs (i + 1)) := by
-    rw [← he]
-    exact (runs_rel hbt.1).2 i
-  exact knU_of_bounded hbt i (kn_of_rel_act_recv hrel hact)
-
-theorem actD_of_fresh {P : Protocol} {B : Bounds} {tr : List Ev} {Cs : List Cfg}
-    (hbt : BoundedTrace P B tr Cs) (i q : Nat) {x : Var} {N : NonceName} {m : Term}
-    {d : NonceName} (he : evAt tr i = Ev.act q m d)
-    (hact : P.actionAt q (pcOf (cfgAt Cs i) q) = some (Action.fresh x N)) :
-    d ∈ (shapeOf P B).D := by
-  have hrel : Rel P (cfgAt Cs i) (Ev.act q m d) (cfgAt Cs (i + 1)) := by
-    rw [← he]
-    exact (runs_rel hbt.1).2 i
-  exact domain_of_rel_act_fresh hrel hact
-
 /-- **And the unconditional form is not merely unprovable, it is false for a whole class of
 protocols.** With an empty nonce domain, `actB` demands `d ∈ []` of every action event - including
 sends, checks and claims, which generate nothing. Any run in which a session acts is therefore
@@ -640,5 +653,24 @@ theorem actB_vacuous_with_empty_nonce_domain {P : Protocol} {B : Bounds} {tr : L
   have hd' : d ∈ P.nonceDomain := hd
   rw [hD] at hd'
   exact absurd hd' (by simp)
+
+/-- **The residual is genuinely not implied by the bound.** The transient-pair run stores a universe
+message and computes a pair the universe cannot name, so expression representability fails for a
+bounded execution. This is the hypothesis the extended value domain (Represent.shapeX) exists to
+discharge, and the only one left after actB became conditional. -/
+theorem exprB_not_derivable :
+    ¬ (∀ (tr : List Ev) (Cs : List Cfg), BoundedTrace P0 B0 tr Cs →
+        ∀ i q e, e ∈ allExprs P0 →
+          admissible (shapeOf P0 B0) (Expr.eval e (storeOf (cfgAt Cs i) q)) = true) := by
+  intro hall
+  have h1 := hall (certTrace canonicalCert) (certCfgs canonicalCert) canonical_bounded 1 0
+    (Expr.pair (Expr.var 0) (Expr.var 0)) (by decide)
+  have hstore : storeOf (cfgAt (certCfgs canonicalCert) 1) 0 = [(0, Term.agent 0)] := by decide
+  have heval : Expr.eval (Expr.pair (Expr.var 0) (Expr.var 0))
+      (storeOf (cfgAt (certCfgs canonicalCert) 1) 0) =
+      some (Term.pair (Term.agent 0) (Term.agent 0)) := by rw [hstore]; decide
+  have hnot : Term.pair (Term.agent 0) (Term.agent 0) ∉ (shapeOf P0 B0).U := by decide
+  rw [heval] at h1
+  exact hnot (by simpa [admissible] using h1)
 
 end ProtSat.BoundedExec

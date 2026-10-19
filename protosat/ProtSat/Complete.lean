@@ -167,6 +167,18 @@ theorem runs_rel {P : Protocol} {C0 : Cfg} {tr : List Ev} {Cs : List Cfg}
 
 /-! ### The boundedness hypothesis -/
 
+/-- Does the action at session q, program counter c read the delivered message? Exactly the
+receive action: of the eight action kinds only recv uses the m field of Ev.act q m d, so only
+there does the encoding need a name for it. -/
+def readsDelivery (P : Protocol) (q c : Nat) : Prop :=
+  ∃ a x, P.actionAt q c = some (Action.recv a x)
+
+/-- Does the action at session q, program counter c read the nonce choice? Exactly the fresh
+action: only fresh uses the d field, and the operational rule already demands d ∈ P.nonceDomain
+there. -/
+def readsNonce (P : Protocol) (q c : Nat) : Prop :=
+  ∃ x N, P.actionAt q c = some (Action.fresh x N)
+
 /-- **The run stays inside the shape** (the general form, stated for an arbitrary shape).
 Twelve conditions, all of them instances of "the bounds can name what the run does":
 
@@ -204,8 +216,14 @@ structure RunOK (sh : Shape) (P : Protocol) (cfg : Nat → Cfg) (ev : Nat → Ev
   knU : ∀ i t, t ∈ (cfg i).kn → t ∈ sh.U
   /-- 2. -/
   storeU : ∀ i q v, q < sh.nS1 → v ∈ storeVals (storeOf (cfg i) q) → v ∈ sh.U
-  /-- 3. -/
-  actB : ∀ i q m d, ev i = Ev.act q m d → q < sh.nS1 ∧ m ∈ sh.U ∧ d ∈ sh.D
+  /-- 3. The acting session is an instantiated one, and the two event fields are bounded *where
+  they are read*: only a receive uses the delivered message and only a generation uses the nonce
+  choice, so the other six action rules are not asked to name a value they ignore. Unlike the
+  unconditional demand it replaces, this one follows from the public bound
+  (ProtSat.BoundedExec.actM_of_recv, actD_of_fresh). -/
+  actB : ∀ i q m d, ev i = Ev.act q m d → q < sh.nS1 ∧
+    (readsDelivery P q (pcOf (cfg i) q) -> m ∈ sh.U) ∧
+    (readsNonce P q (pcOf (cfg i) q) -> d ∈ sh.D)
   /-- 4. -/
   dedU : ∀ i t, ev i = Ev.ded t → t ∈ sh.U
   /-- 5. -/
@@ -1453,7 +1471,18 @@ theorem runOK_storeU (h : RunOK sh P cfg ev) : ∀ i q v, q < sh.nS1 →
     v ∈ storeVals (storeOf (cfg i) q) → v ∈ sh.U := h.storeU
 
 theorem runOK_act (h : RunOK sh P cfg ev) : ∀ i q m d, ev i = Ev.act q m d →
-    q < sh.nS1 ∧ m ∈ sh.U ∧ d ∈ sh.D := h.actB
+    q < sh.nS1 ∧ (readsDelivery P q (pcOf (cfg i) q) -> m ∈ sh.U) ∧
+      (readsNonce P q (pcOf (cfg i) q) -> d ∈ sh.D) := h.actB
+
+/-- The delivered message is a universe message when the action reads it. -/
+theorem runOK_act_mU (h : RunOK sh P cfg ev) {i q : Nat} {m : Term} {d : NonceName}
+    (he : ev i = Ev.act q m d) (hr : readsDelivery P q (pcOf (cfg i) q)) : m ∈ sh.U :=
+  (h.actB i q m d he).2.1 hr
+
+/-- The nonce choice is in the domain when the action reads it. -/
+theorem runOK_act_dD (h : RunOK sh P cfg ev) {i q : Nat} {m : Term} {d : NonceName}
+    (he : ev i = Ev.act q m d) (hr : readsNonce P q (pcOf (cfg i) q)) : d ∈ sh.D :=
+  (h.actB i q m d he).2.2 hr
 
 theorem runOK_dedU (h : RunOK sh P cfg ev) : ∀ i t, ev i = Ev.ded t → t ∈ sh.U := h.dedU
 
@@ -1951,12 +1980,11 @@ theorem rdFr_lt (hok : RunOK sh P cfg ev) (hq : q < shS sh) :
       exact Nat.succ_pos _
   | act q' m d =>
       by_cases hq : q' = q
-      · have hd : d ∈ sh.D := (runOK_act sh P cfg ev hok i q' m d h).2.2
-        have h1 : rdFr sh P cfg ev i q = ixOf d sh.D := by unfold rdFr; rw [h]; exact if_pos hq
+      · have h1 : rdFr sh P cfg ev i q = ixOf d sh.D := by unfold rdFr; rw [h]; exact if_pos hq
         rw [h1]
         have hs : shD sh = sh.D.length + 1 := rfl
         rw [hs]
-        exact Nat.lt_succ_of_lt (ixOf_lt sh.D d hd)
+        exact Nat.lt_of_le_of_lt (ixOf_le sh.D d) (Nat.lt_succ_self _)
       · have h1 : rdFr sh P cfg ev i q = 0 := by unfold rdFr; rw [h]; exact if_neg hq
         rw [h1]
         exact Nat.succ_pos _
@@ -3069,8 +3097,6 @@ theorem stepClausesAt_act_sat (hok : RunOK sh P cfg ev)
     exact (runOK_act sh P cfg ev hok i q m d hevm).1
   have hrel' : Rel P (cfg i) (Ev.act q m d) (cfg (i + 1)) := by rw [← hevm]; exact hrel i
   have hpcq : pcOf (cfg i) q = c := hpcd
-  have hdU : d ∈ sh.D := (runOK_act sh P cfg ev hok i q m d hevm).2.2
-  have hmU : m ∈ sh.U := (runOK_act sh P cfg ev hok i q m d hevm).2.1
   have hrdFr : rdFr sh P cfg ev i q = ixOf d sh.D := by simp [rdFr, hevm]
   have hrdDl : rdDl sh P cfg ev i q = uIdx sh (some m) := by simp [rdDl, hevm]
   cases h : P.actionAt q c with
@@ -3144,7 +3170,7 @@ theorem stepClausesAt_act_sat (hok : RunOK sh P cfg ev)
                   have hlen : sh.D.length ≤ dn := rget_none_length sh.D dn h5'
                   have hlt : rdFr sh P cfg ev i q < sh.D.length := by
                     rw [hrdFr]
-                    exact ixOf_lt sh.D d hdU
+                    exact ixOf_lt sh.D d (runOK_act_dD sh P cfg ev hok hevm ⟨x, N, by rw [hpcq]; exact h⟩)
                   have hne : rdFr sh P cfg ev i q ≠ dn := by
                     intro he
                     omega
@@ -3166,7 +3192,7 @@ theorem stepClausesAt_act_sat (hok : RunOK sh P cfg ev)
                         rw [← h1] at h5'
                         rw [hrdFr] at h5'
                         exact h5'
-                      rw [rget_ixOf sh.D d hdU] at h2
+                      rw [rget_ixOf sh.D d (runOK_act_dD sh P cfg ev hok hevm ⟨x, N, by rw [hpcq]; exact h⟩)] at h2
                       exact Option.some.inj h2
                     have hrd' : rdSt sh P cfg ev (i + 1) q x = uIdx sh (some (Term.nonce N')) := by
                       show uIdx sh (readVar x (storeOf (cfg (i + 1)) q)) = _
@@ -3180,7 +3206,7 @@ theorem stepClausesAt_act_sat (hok : RunOK sh P cfg ev)
               subst hdummy
               have hlt : rdFr sh P cfg ev i q < sh.D.length := by
                 rw [hrdFr]
-                exact ixOf_lt sh.D d hdU
+                exact ixOf_lt sh.D d (runOK_act_dD sh P cfg ev hok hevm ⟨x, N, by rw [hpcq]; exact h⟩)
               have hne : rdFr sh P cfg ev i q ≠ shD sh - 1 := by
                 intro he
                 have h2 : shD sh = sh.D.length + 1 := rfl
@@ -3272,7 +3298,7 @@ theorem stepClausesAt_act_sat (hok : RunOK sh P cfg ev)
                 rcases bool_eq_cases (assignOf sh P cfg ev (vdl sh i q u)) with hd | hd
                 · have hval : valAt sh u = some m := by
                     rw [← hdl hd]
-                    exact valAt_uIdx_some sh hmU
+                    exact valAt_uIdx_some sh (runOK_act_mU sh P cfg ev hok hevm ⟨a, x, by rw [hpcq]; exact h⟩)
                   refine clause2_right _ _ _ (by
                     rw [pos_eval, assignOf_kn sh P cfg ev (Nat.le_of_lt hi) huV]
                     rw [knHolds, hval]
@@ -3283,7 +3309,7 @@ theorem stepClausesAt_act_sat (hok : RunOK sh P cfg ev)
               rw [recvRealClause]
               have hlt : rdDl sh P cfg ev i q < sh.U.length := by
                 rw [hrdDl]
-                exact uIdx_some_lt sh hmU
+                exact uIdx_some_lt sh (runOK_act_mU sh P cfg ev hok hevm ⟨a, x, by rw [hpcq]; exact h⟩)
               have hne : rdDl sh P cfg ev i q ≠ sh.U.length := by
                 intro he
                 omega
@@ -3992,7 +4018,7 @@ theorem fresh_selected (hok : RunOK sh P cfg ev)
     rw [← hdeq]
     exact hrd
   have h4 : rget sh.D (ixOf dd sh.D) = some dd :=
-    rget_ixOf sh.D dd (runOK_act sh P cfg ev hok i q m dd hevm).2.2
+    rget_ixOf sh.D dd (runOK_act_dD sh P cfg ev hok hevm ⟨xa, Na, by rw [hpcq]; exact h⟩)
   have hdd : dd = N := Option.some.inj (h4.symm.trans h3)
   have h2r : Rel P (cfg i) (Ev.act q m dd) (cfg (i + 1)) := by rw [← hevm]; exact hrel i
   have h5 : nonceUsed (cfg i) dd = false := Rel.fresh_used h2r (by rw [hpcq]; exact h)

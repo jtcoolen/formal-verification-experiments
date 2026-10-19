@@ -586,7 +586,66 @@ hypothesis is now reported by the tool instead of being silently assumed, and th
 somewhere to put the domain that discharges it. What remains is the flip itself - pointing the `xe
 family at `shValX`/`uIdxX` and `shapeOf` at `exprVals` - after which `exprB` leaves `Residual` too.
 
+## Stage 4, fourth installment: `actB` becomes conditional, and SAFE means security (`EndToEnd.lean`)
+
+Three of the twelve `WithinBounds` conditions were still assumed about the execution after the
+second installment: `actB`'s delivered message and nonce choice, and `exprB`. Two of them were
+artefacts of asking for a bound on fields that six of the eight action rules never read. So
+`RunOK.actB` now bounds them *where the action reads them*:
+
+```lean
+actB : ∀ i q m d, ev i = Ev.act q m d → q < sh.nS1 ∧
+  (readsDelivery P q (pcOf (cfg i) q) -> m ∈ sh.U) ∧
+  (readsNonce  P q (pcOf (cfg i) q) -> d ∈ sh.D)
+```
+
+and `BoundedExec.actB_of_bounded` proves that from the public bound: a receive delivers a message
+the attacker knows (hence a universe message, by the bound), and a generation picks a nonce from
+the declared domain (the operational rule already demands it). The six other action rules are no
+longer asked to name a value they ignore. The refactor touched `Complete.lean` in eight places;
+the freshness range lemma `rdFr_lt` turned out not to need the membership at all (`ixOf_le` bounds
+the index regardless), which is worth knowing because it means the encoding never depended on that
+assumption. `Residual` is now a single condition, `exprB`, and `Represent.exprB_of_domainGap_false
+`discharges it from the decidable `Represent.domainGap`. So
+`BoundedExec.withinBounds_of_bounded` says: **for a gap-free query, every bounded execution
+satisfies `WithinBounds`** - the compiler representability conditions are theorems, not hypotheses.
+
+`ProtSat/EndToEnd.lean` turns that into the verdict. For `Examples.KeyDisclosure` - a session that
+publishes whatever it receives, secret withheld - the query is well-formed, `univClosed`,
+`univSub`, `SecretsOK` and gap-free, all by `decide`, and
+
+```lean
+theorem boundedSafe_of_gapFree (hvs : analyzeQuery qsafe = Result.encodingUnsat) :
+    boundedSafeGoals qsafe
+theorem noLeak (hvs : ...) : ¬ ∃ tr Cs, BoundedTrace PSafe B tr Cs ∧ runsLeaks PSafe Cs
+```
+
+is the statement the review asked for, with no `WithinBounds` anywhere in the hypothesis list.
+Non-vacuity is on the record too: `disclosure_certificate` re-states the already kernel-checked
+`Examples.KeyDisclosure.checked`, i.e. the same role and bounds *with* the disclosure admit a
+leak, so the safety is a fact about the compromise assumption and not about a dead role.
+
+**The honest remainder, measured.** The one thing not discharged by `decide` is the solver answer
+itself. Re-deriving `dpll (encode P B) = none` in the kernel costs: 1263 variables exceeds the
+default recursion budget; 828 variables exceeds 200k heartbeats in 14 s and had not finished in
+2 min at raised budgets; 494 variables had not finished in 5 min; the 648-variable instance with
+`steps := 1` (Regressions.Authentication) does decide in the normal build. So `hvs` is a
+hypothesis - the analyser computes the answer at runtime - and closing that last gap is precisely
+roadmap stage 6: a checked UNSAT certificate replaces minutes of kernel solver-replay with a
+linear proof check. The table is in the module header so the cost is published, not hidden.
+
 ## Log
+
+* 2026-10-19 (m) - stage 4 fourth installment: `RunOK.actB` made conditional on the actions that
+  read the fields (`readsDelivery`, `readsNonce`), `BoundedExec.actB_of_bounded` deriving it from
+  the public bound, `Residual` reduced to `exprB`, `Represent.exprB_of_domainGap_false` and
+  `BoundedExec.withinBounds_of_bounded` discharging it from a decidable query check, and
+  `ProtSat/EndToEnd.lean` producing `boundedSafeGoals` / `noLeak` for a gap-free example with the
+  solver answer as its only hypothesis. Kernel re-derivation costs measured and published.
+  Build green (1861 jobs), audit clean over 2769 theorems, 18/18 CI gates green.
+* Next - stage 6: an independently checked UNSAT certificate (through `Sat.Fmla.proof []`, not the
+  reified form) so `hvs` stops being a hypothesis; then the `xe` stride flip onto `Shape.V` so
+  gap-free stops being a restriction on the protocol; then stage 7 NS/NSL instrumentation.
 
 * 2026-10-19 (a) - baseline inspected; build green; three review witnesses promoted to permanent
   regressions in `ProtSat/Regressions.lean`; `ProtSat/Query.lean` added (contract, validator,

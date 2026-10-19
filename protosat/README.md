@@ -33,8 +33,11 @@ for two reasons that are proved rather than confessed - see
    have no name in the formula. Two things are now proved about that gap rather than assumed:
     `Represent.no_bound_discharges_exprB` shows *no* closure bound removes it (the condition asks the
     universe to be closed under pairing), and `BoundedExec.withinBounds_of_residual` shows it is one
-    of only two real conditions among the twelve `WithinBounds` ones - the other being the dummy
-    fields of `Ev.act` - since the remaining ten follow from the public bound alone.
+    of only two real conditions among the twelve `WithinBounds` ones. `RunOK.actB` now bounds the two
+    `Ev.act` fields *where an action reads them*, which the public bound does imply, so for a query
+    whose value domain has no gap (`Represent.domainGap`, decided by the tool) `WithinBounds` is a
+    theorem - and `ProtSat/EndToEnd.lean` turns an `encodingUnsat` answer into `boundedSafeGoals`
+    and `noLeak` with no execution hypothesis at all.
 
 `ProtSat/Query.lean` is the layer that keeps the two apart. A `Query` names the protocol, the
 bounds and the **selected goals** (`secrecy`, `agreement`, `agreementInj`);
