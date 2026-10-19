@@ -1,0 +1,3 @@
+theorems audited in ProtSat.*: 1699
+OK - every theorem depends only on propext, Classical.choice, Quot.sound
+    (no sorryAx, no user-declared axioms)

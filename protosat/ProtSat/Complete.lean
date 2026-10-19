@@ -168,7 +168,7 @@ theorem runs_rel {P : Protocol} {C0 : Cfg} {tr : List Ev} {Cs : List Cfg}
 /-! ### The boundedness hypothesis -/
 
 /-- **The run stays inside the shape** (the general form, stated for an arbitrary shape).
-Eight conditions, all of them instances of "the bounds can name what the run does":
+Ten conditions, all of them instances of "the bounds can name what the run does":
 
 1. every message the attacker ever knows is a universe message;
 2. every value any session ever stores is a universe message;
@@ -184,7 +184,12 @@ Eight conditions, all of them instances of "the bounds can name what the run doe
    protocol's own constructors, so this is a genuine hypothesis about the bounds and not a
    formality: it says the bounds are large enough for the messages the protocol *computes*,
    not only for the ones it exchanges.
-8. the run has exactly the sessions the shape instantiates.
+8. the run has exactly the sessions the shape instantiates;
+9. the shape's store-slot stride covers every variable the protocol reads - otherwise the
+   store group a variable leaf of an evaluation gate refers to would not exist;
+10. the shape's expression stride covers the protocol's expression table - otherwise the
+   value group of an evaluation gate would not exist.  At the shape of the analysis both 9 and
+   10 are theorems (ProtSat.Encoding.lt_shV_of_mem, ProtSat.Encoding.eIdx_lt), not hypotheses.
 
 These are precisely the conditions under which a finite encoding can represent the run at all
 - a run that leaves the universe has no finite name, and a run whose session index is not
@@ -197,7 +202,9 @@ def RunOK (sh : Shape) (P : Protocol) (cfg : Nat → Cfg) (ev : Nat → Ev) : Pr
   (∀ i q, q < sh.nS1 → pcOf (cfg i) q < shPc sh) ∧
   (∀ i q x, q < sh.nS1 → x ∈ (storeOf (cfg i) q).map Prod.fst → x < shV sh) ∧
   (∀ i q e, e ∈ allExprs P → admissible sh (Expr.eval e (storeOf (cfg i) q)) = true) ∧
-  (∀ i, (cfg i).sess.length = sh.nS1)
+  (∀ i, (cfg i).sess.length = sh.nS1) ∧
+  (∀ E ∈ allExprs P, ∀ x ∈ Expr.vars E, x < shV sh) ∧
+  (∀ E ∈ allExprs P, eIdx P E < shE sh)
 
 /-- **The run stays inside the bounds**: ProtSat.Complete.RunOK at the shape of the analysis.
 This is the hypothesis the completeness theorem (specification 8B) needs and the analyser
@@ -1420,32 +1427,43 @@ theorem ixOf_lt [BEq α] [LawfulBEq α] : ∀ (l : List α) (a : α), a ∈ l �
 /-! ### Inverting a transition of the operational semantics -/
 
 theorem runOK_knU (h : RunOK sh P cfg ev) : ∀ i t, t ∈ (cfg i).kn → t ∈ sh.U := by
-  rcases h with ⟨h1, _, _, _, _, _, _, _⟩; exact h1
+  rcases h with ⟨h1, _, _, _, _, _, _, _, _, _⟩; exact h1
 
 theorem runOK_storeU (h : RunOK sh P cfg ev) : ∀ i q v, q < sh.nS1 →
     v ∈ storeVals (storeOf (cfg i) q) → v ∈ sh.U := by
-  rcases h with ⟨_, h2, _, _, _, _, _, _⟩; exact h2
+  rcases h with ⟨_, h2, _, _, _, _, _, _, _, _⟩; exact h2
 
 theorem runOK_act (h : RunOK sh P cfg ev) : ∀ i q m d, ev i = Ev.act q m d →
     q < sh.nS1 ∧ m ∈ sh.U ∧ d ∈ sh.D := by
-  rcases h with ⟨_, _, h3, _, _, _, _, _⟩; exact h3
+  rcases h with ⟨_, _, h3, _, _, _, _, _, _, _⟩; exact h3
 
 theorem runOK_dedU (h : RunOK sh P cfg ev) : ∀ i t, ev i = Ev.ded t → t ∈ sh.U := by
-  rcases h with ⟨_, _, _, h4, _, _, _, _⟩; exact h4
+  rcases h with ⟨_, _, _, h4, _, _, _, _, _, _⟩; exact h4
 
 theorem runOK_pc (h : RunOK sh P cfg ev) : ∀ i q, q < sh.nS1 → pcOf (cfg i) q < shPc sh := by
-  rcases h with ⟨_, _, _, _, h5, _, _, _⟩; exact h5
+  rcases h with ⟨_, _, _, _, h5, _, _, _, _, _⟩; exact h5
 
 theorem runOK_var (h : RunOK sh P cfg ev) : ∀ i q x, q < sh.nS1 →
     x ∈ (storeOf (cfg i) q).map Prod.fst → x < shV sh := by
-  rcases h with ⟨_, _, _, _, _, h6, _, _⟩; exact h6
+  rcases h with ⟨_, _, _, _, _, h6, _, _, _, _⟩; exact h6
 
 theorem runOK_expr (h : RunOK sh P cfg ev) : ∀ i q e, e ∈ allExprs P →
     admissible sh (Expr.eval e (storeOf (cfg i) q)) = true := by
-  rcases h with ⟨_, _, _, _, _, _, h7, _⟩; exact h7
+  rcases h with ⟨_, _, _, _, _, _, h7, _, _, _⟩; exact h7
 
 theorem runOK_sessLen (h : RunOK sh P cfg ev) : ∀ i, (cfg i).sess.length = sh.nS1 := by
-  rcases h with ⟨_, _, _, _, _, _, _, h8⟩; exact h8
+  rcases h with ⟨_, _, _, _, _, _, _, h8, _, _⟩; exact h8
+
+/-- The shape's store-slot stride covers every variable the protocol reads; this is what the
+variable leaf of an evaluation gate needs. -/
+theorem runOK_vars (h : RunOK sh P cfg ev) :
+    ∀ E ∈ allExprs P, ∀ x ∈ Expr.vars E, x < shV sh := by
+  rcases h with ⟨_, _, _, _, _, _, _, _, h9, _⟩; exact h9
+
+/-- The shape's expression stride covers the protocol's expression table; this is what the
+value group of an evaluation gate needs. -/
+theorem runOK_eIdx (h : RunOK sh P cfg ev) : ∀ E ∈ allExprs P, eIdx P E < shE sh := by
+  rcases h with ⟨_, _, _, _, _, _, _, _, _, h10⟩; exact h10
 
 theorem Rel.noAct {P₁ : Protocol} {C C' : Cfg} {e : Ev} (h : Rel P₁ C e C') (q : Nat)
     (hq : ¬ ∃ (m : Term) (d : NonceName), e = Ev.act q m d) :
@@ -2462,5 +2480,209 @@ theorem sat_frame (hok : RunOK sh P cfg ev)
               (by simpa using hu)]
             exact decide_eq_true h9)
         · exact clause3_mid _ _ _ _ (by simp [neg_eval, h2])
+
+/-- The value number of an expression-table entry, stated at the expression itself. -/
+theorem rdXe_eIdx {E : Expr} (hE : E ∈ allExprs P) :
+    rdXe sh P cfg ev i q (eIdx P E) = uIdx sh (Expr.eval E (storeOf (cfg i) q)) := by
+  unfold rdXe
+  rw [eAt_eIdx hE]
+
+/-- Under the characteristic assignment the value group of a table entry decodes to the value
+the run computes for that entry. -/
+theorem decode_rdXe (hok : RunOK sh P cfg ev) (hi : i ≤ sh.steps) (hq : q < shS sh)
+    (he : e < shE sh) :
+    (xeOh sh i q e).decode (assignOf sh P cfg ev) = some (rdXe sh P cfg ev i q e) :=
+  Oh.decode_of_true (sat_xeOh sh P cfg ev hok hi hq he)
+    (List.mem_range.mpr (rdXe_lt sh P cfg ev))
+    (show assignOf sh P cfg ev (vxe sh i q e (rdXe sh P cfg ev i q e)) = true from
+      ((assignOf_xe sh P cfg ev hi hq he (rdXe_lt sh P cfg ev)).trans
+        (decide_eq_true rfl)))
+
+/-- Under the characteristic assignment the store group of a slot decodes to the value the
+run holds in that slot. -/
+theorem decode_rdSt (hok : RunOK sh P cfg ev) (hi : i ≤ sh.steps) (hq : q < shS sh)
+    (hx : x < shV sh) :
+    (stOh sh i q x).decode (assignOf sh P cfg ev) = some (rdSt sh P cfg ev i q x) :=
+  Oh.decode_of_true (sat_stOh sh P cfg ev hok hi hq hx)
+    (List.mem_range.mpr (rdSt_lt sh P cfg ev))
+    (show assignOf sh P cfg ev (vst sh i q x (rdSt sh P cfg ev i q x)) = true from
+      ((assignOf_st sh P cfg ev hi hq hx (rdSt_lt sh P cfg ev)).trans
+        (decide_eq_true rfl)))
+
+/-! ### The three shapes of an evaluation gate -/
+
+/-- A unary step: the value of the parent is the unary step applied to the value of the child. -/
+theorem rdXe_unary (hok : RunOK sh P cfg ev) {E c : Expr} (hE : E ∈ allExprs P)
+    (hchild : Expr.child1 E = some c) :
+    rdXe sh P cfg ev i q (eIdx P E) = f1 sh E (rdXe sh P cfg ev i q (eIdx P c)) := by
+  have hc : c ∈ allExprs P := mem_allExprs_child1 hE hchild
+  rw [rdXe_eIdx sh P cfg ev hE, rdXe_eIdx sh P cfg ev hc, f1]
+  rw [Expr.eval_child1 hchild]
+  rw [admissible_valAt_uIdx _ (runOK_expr sh P cfg ev hok i q c hc)]
+
+/-- A binary step: the value of the parent is the binary step applied to the values of its two
+children. -/
+theorem rdXe_binary (hok : RunOK sh P cfg ev) {E a b : Expr} (hE : E ∈ allExprs P)
+    (hchild : Expr.child2 E = some (a, b)) :
+    rdXe sh P cfg ev i q (eIdx P E)
+      = f2 sh E (rdXe sh P cfg ev i q (eIdx P a)) (rdXe sh P cfg ev i q (eIdx P b)) := by
+  obtain ⟨ha, hb⟩ := mem_allExprs_child2 hE hchild
+  rw [rdXe_eIdx sh P cfg ev hE, rdXe_eIdx sh P cfg ev ha, rdXe_eIdx sh P cfg ev hb, f2]
+  rw [Expr.eval_child2 hchild]
+  rw [admissible_valAt_uIdx _ (runOK_expr sh P cfg ev hok i q a ha),
+      admissible_valAt_uIdx _ (runOK_expr sh P cfg ev hok i q b hb)]
+
+/-- A leaf that reads the store: the value of the entry is the value of the slot. -/
+theorem rdXe_var {E : Expr} (hE : E ∈ allExprs P) (hx : E = Expr.var x) :
+    rdXe sh P cfg ev i q (eIdx P E) = rdSt sh P cfg ev i q x := by
+  rw [rdXe_eIdx sh P cfg ev hE, hx]
+  unfold rdSt
+  rfl
+
+/-- An expression with no children and no store read is a constant of the DSL. -/
+theorem eval_eq_constVal (E : Expr) (s : List (Var × Term))
+    (h1 : Expr.child1 E = none) (h2 : Expr.child2 E = none)
+    (hv : ∀ x, E ≠ Expr.var x) : Expr.eval E s = Expr.constVal E := by
+  cases E with
+  | agent A | nonce N | shrk a b | pubk a | privk a => rfl
+  | var x => exact absurd rfl (hv x)
+  | pair a b | encS a b | decS a b => exact absurd h2 (by simp [Expr.child2])
+  | encA a b | hash a | fst a | snd a | decA a b => exact absurd h1 (by simp [Expr.child1])
+
+/-- A constant leaf: the value of the entry is the message it denotes. -/
+theorem rdXe_const {E : Expr} (hE : E ∈ allExprs P)
+    (h1 : Expr.child1 E = none) (h2 : Expr.child2 E = none)
+    (hv : ∀ x, E ≠ Expr.var x) :
+    rdXe sh P cfg ev i q (eIdx P E) = uIdx sh (Expr.constVal E) := by
+  rw [rdXe_eIdx sh P cfg ev hE, eval_eq_constVal E (storeOf (cfg i) q) h1 h2 hv]
+
+/-- The gate of a constant leaf is the single clause pinning the entry to its message. -/
+theorem evalLeafGate_const {E : Expr} (h1 : Expr.child1 E = none) (h2 : Expr.child2 E = none)
+    (hv : ∀ x, E ≠ Expr.var x) :
+    evalLeafGate sh P i q e E =
+      [[pos (vxe sh i q e (uIdx sh (Expr.constVal E)))]] := by
+  cases E with
+  | var x => exact absurd rfl (hv x)
+  | agent A | nonce N | shrk a b | pubk a | privk a => rfl
+  | pair a b | encS a b | decS a b => exact absurd h2 (by simp [Expr.child2])
+  | encA a b | hash a | fst a | snd a | decA a b => exact absurd h1 (by simp [Expr.child1])
+
+/-- **Clause group 4 (Tseitin evaluation gates).**  The expression table of the encoding is a
+circuit: every entry is either a constant of the DSL, a read of a store slot, or one
+constructor/destructor step applied to the entries of its children, and the clauses of
+ProtSat.evalGate are exactly the definitional (Tseitin) clauses of that circuit, generated by
+the guarded forward families of ProtSat.OneHot.
+
+The characteristic assignment records for entry `e` the value `rdXe e = uIdx (eval e (store of
+the run))`.  The three shapes of a gate are satisfied because that record obeys the same
+equations as the semantics:
+
+* a unary entry: `rdXe E = f1 E (rdXe c)` - ProtSat.Expr.eval_child1 plus the seventh
+  component of RunOK, which says the intermediate value is a universe message and so can be
+  named by `uIdx`;
+* a binary entry: `rdXe E = f2 E (rdXe ca) (rdXe cb)` - ProtSat.Expr.eval_child2, likewise;
+* a leaf: a variable entry repeats its store slot (the ninth component of RunOK makes sure the
+  store group exists), and a constant entry is pinned to the message it denotes.
+
+Each case is then one application of the corresponding completeness theorem
+(ProtSat.OneHot.fwdClausesOn_complete, ProtSat.OneHot.fwd2ClausesOn_complete), which is the
+"if the recorded values respect the gate, the gate's clauses are satisfied" direction of the
+Tseitin translation. -/
+theorem sat_eval (hok : RunOK sh P cfg ev) :
+    Sat (assignOf sh P cfg ev) (evalClauses sh P) := by
+  intro cl hcl
+  simp only [evalClauses, cnfOf, eachStep1, eachSess, List.mem_flatMap, List.mem_range] at hcl
+  obtain ⟨i, hi, h2⟩ := hcl
+  obtain ⟨q, hq, h3⟩ := h2
+  rw [evalClausesAt] at h3
+  obtain ⟨E, hE, h4⟩ := List.mem_flatMap.mp h3
+  have hi' : i ≤ sh.steps := Nat.le_of_lt_succ (by simpa using hi)
+  have hq' : q < shS sh := by simpa using hq
+  have heE : eIdx P E < shE sh := runOK_eIdx sh P cfg ev hok E hE
+  cases h : Expr.child1 E with
+  | some c =>
+    -- unary gate
+    rw [evalGate, h] at h4
+    have hc : c ∈ allExprs P := mem_allExprs_child1 hE h
+    have hce : eIdx P c < shE sh := runOK_eIdx sh P cfg ev hok c hc
+    have hsat : Sat (assignOf sh P cfg ev)
+        (fwdClausesOn [] (xeOh sh i q (eIdx P c))
+          (fun u => pos (vxe sh i q (eIdx P E) (f1 sh E u)))) := by
+      refine fwdClausesOn_complete (sat_xeOh sh P cfg ev hok hi' hq' hce) ?_
+      intro u hu hd
+      have hdx := decode_rdXe sh P cfg ev hok hi' hq' hce
+      have : u = rdXe sh P cfg ev i q (eIdx P c) := Option.some.inj (hd.symm.trans hdx)
+      subst this
+      have hgoal : assignOf sh P cfg ev (vxe sh i q (eIdx P E) (f1 sh E (rdXe sh P cfg ev i q (eIdx P c))))
+          = decide (rdXe sh P cfg ev i q (eIdx P E) = f1 sh E (rdXe sh P cfg ev i q (eIdx P c))) :=
+        assignOf_xe sh P cfg ev hi' hq' heE (uIdx_lt' sh _)
+      rw [pos_eval, hgoal, rdXe_unary sh P cfg ev hok hE h]
+      exact decide_eq_true rfl
+    exact hsat cl h4
+  | none =>
+  cases h2 : Expr.child2 E with
+  | some ab =>
+    obtain ⟨ca, cb⟩ := ab
+    -- binary gate
+    rw [evalGate, h, h2] at h4
+    obtain ⟨ha, hb⟩ := mem_allExprs_child2 hE h2
+    have hae : eIdx P ca < shE sh := runOK_eIdx sh P cfg ev hok ca ha
+    have hbe : eIdx P cb < shE sh := runOK_eIdx sh P cfg ev hok cb hb
+    have hsat : Sat (assignOf sh P cfg ev)
+        (fwd2ClausesOn [] (xeOh sh i q (eIdx P ca)) (xeOh sh i q (eIdx P cb))
+          (fun u v => pos (vxe sh i q (eIdx P E) (f2 sh E u v)))) := by
+      refine fwd2ClausesOn_complete (sat_xeOh sh P cfg ev hok hi' hq' hae)
+        (sat_xeOh sh P cfg ev hok hi' hq' hbe) ?_
+      intro u hu v hv hd hd'
+      have hdx := decode_rdXe sh P cfg ev hok hi' hq' hae
+      have hdy := decode_rdXe sh P cfg ev hok hi' hq' hbe
+      have : u = rdXe sh P cfg ev i q (eIdx P ca) := Option.some.inj (hd.symm.trans hdx)
+      have : v = rdXe sh P cfg ev i q (eIdx P cb) := Option.some.inj (hd'.symm.trans hdy)
+      subst this
+      subst this
+      have hgoal : assignOf sh P cfg ev
+            (vxe sh i q (eIdx P E)
+              (f2 sh E (rdXe sh P cfg ev i q (eIdx P ca)) (rdXe sh P cfg ev i q (eIdx P cb))))
+          = decide (rdXe sh P cfg ev i q (eIdx P E)
+              = f2 sh E (rdXe sh P cfg ev i q (eIdx P ca)) (rdXe sh P cfg ev i q (eIdx P cb))) :=
+        assignOf_xe sh P cfg ev hi' hq' heE (uIdx_lt' sh _)
+      rw [pos_eval, hgoal, rdXe_binary sh P cfg ev hok hE h2]
+      exact decide_eq_true rfl
+    exact hsat cl h4
+  | none =>
+    -- leaf
+    rw [evalGate, h, h2] at h4
+    by_cases hxv : ∃ x, E = Expr.var x
+    · obtain ⟨x, rfl⟩ := hxv
+      have hx : x < shV sh :=
+        runOK_vars sh P cfg ev hok (Expr.var x) hE x (by simp [Expr.vars])
+      have hsat : Sat (assignOf sh P cfg ev)
+          (fwdClausesOn [] (stOh sh i q x)
+            (fun u => pos (vxe sh i q (eIdx P (Expr.var x)) u))) := by
+        refine fwdClausesOn_complete (sat_stOh sh P cfg ev hok hi' hq' hx) ?_
+        intro u hu hd
+        have hdx := decode_rdSt sh P cfg ev hok hi' hq' hx
+        have : u = rdSt sh P cfg ev i q x := Option.some.inj (hd.symm.trans hdx)
+        subst this
+        have hgoal : assignOf sh P cfg ev
+              (vxe sh i q (eIdx P (Expr.var x)) (rdSt sh P cfg ev i q x))
+            = decide (rdXe sh P cfg ev i q (eIdx P (Expr.var x)) = rdSt sh P cfg ev i q x) :=
+          assignOf_xe sh P cfg ev hi' hq' heE (uIdx_lt' sh _)
+        rw [pos_eval, hgoal, rdXe_var sh P cfg ev hE rfl]
+        exact decide_eq_true rfl
+      exact hsat cl h4
+    · -- constant leaf
+      have hv : ∀ y, E ≠ Expr.var y := by
+        intro y hy
+        exact hxv ⟨y, hy⟩
+      rw [evalLeafGate_const sh P (i := i) (q := q) (e := eIdx P E) h h2 hv] at h4
+      simp only [List.mem_singleton] at h4
+      subst h4
+      have hgoal : assignOf sh P cfg ev (vxe sh i q (eIdx P E) (uIdx sh (Expr.constVal E)))
+          = decide (rdXe sh P cfg ev i q (eIdx P E) = uIdx sh (Expr.constVal E)) :=
+        assignOf_xe sh P cfg ev hi' hq' heE (uIdx_lt' sh _)
+      exact clause1 _ _ (by
+        rw [pos_eval, hgoal, rdXe_const sh P cfg ev hE h h2 hv]
+        exact decide_eq_true rfl)
 
 end ProtSat.Complete

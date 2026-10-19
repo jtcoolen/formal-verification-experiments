@@ -1,0 +1,88 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=19mm,top=17mm,bottom=18mm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern,amsmath,amssymb,mathtools,xcolor}
+\usepackage[hidelinks]{hyperref}
+\definecolor{ink}{HTML}{163A4A}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5.2pt}
+\setlength{\abovedisplayskip}{5.5pt}
+\setlength{\belowdisplayskip}{5.5pt}
+\setlength{\abovedisplayshortskip}{3pt}
+\setlength{\belowdisplayshortskip}{3pt}
+\linespread{1.04}
+\newcommand{\ket}[1]{\lvert #1\rangle}
+\newcommand{\bra}[1]{\langle #1\rvert}
+\newcommand{\Tr}{\operatorname{Tr}}
+\newcommand{\ii}{\mathrm{i}}
+\pagestyle{plain}
+\begin{document}
+{\Large\bfseries\color{ink} Shor's algorithm: from a modular cycle to interference}\par
+\vspace{1pt}
+Shor's algorithm factors \(N\) by finding the \emph{order} of modular multiplication. After handling even integers and perfect powers classically, choose \(1<a<N\). A nontrivial \(\gcd(a,N)\) already gives a factor; otherwise seek \(r=\min\{d>0:a^d\equiv1\pmod N\}\). The function \(f(x)=a^x\bmod N\) repeats with period \(r\). The quantum part estimates fractions \(s/r\); classical arithmetic recovers the period and factors. Interference makes this hidden repetition measurable.
+
+Use a counting register \(C\) of \(t\) qubits, with \(Q=2^t\) chosen so \(N^2\le Q<2N^2\), and a work register \(W\) large enough to hold residues modulo \(N\). Hadamard gates create a uniform coherent superposition; reversible modular exponentiation correlates each input with its function value:
+\[
+\ket{0}^{\otimes t}_C\ket1_W
+ \xrightarrow{H^{\otimes t}}\frac1{\sqrt Q}\sum_{x=0}^{Q-1}\ket x\ket1
+ \xrightarrow{\Lambda}\ket\Psi=\frac1{\sqrt Q}\sum_{x=0}^{Q-1}\ket x\ket{a^x\bmod N}.
+\]
+Writing \(x=\sum_j2^jx_j\), bit \(x_j\) controls multiplication by \(a^{2^j}\bmod N\), computed classically by repeated squaring. This uses \(t\) efficient reversible multipliers. Reading one input/output pair does not reveal the period; the useful information is in their coherent joint superposition.
+
+The period is stored in correlations. Since \(f(x)=f(x')\) exactly when \(x\equiv x'\pmod r\), the work register distinguishes different remainder classes but does not distinguish inputs within one class. Tracing it out therefore gives
+\[
+(\rho_C)_{xx'}=\frac1Q\,\mathbf1_{\,x\equiv x'\;(\mathrm{mod}\ r)}.
+\]
+Every counting outcome \(x\) has probability \(1/Q\); the useful periodic structure lies in the \emph{off-diagonal coherence}. To expose the correlations, let \(\ket{e_c}=\ket{a^c\bmod N}\), let \(M_c=\lfloor(Q-1-c)/r\rfloor+1\) count inputs in class \(c\), and normalize each periodic comb:
+\[
+\ket{C_c}=\frac1{\sqrt{M_c}}\sum_{m=0}^{M_c-1}\ket{c+mr},
+\qquad
+\ket\Psi=\sum_{c=0}^{r-1}\sqrt{\frac{M_c}{Q}}\,\ket{C_c}\ket{e_c}.
+\]
+The distinct function values paired coherently with counting inputs prevent factorization. This is the Schmidt decomposition because both families are orthonormal: tracing one side removes cross terms, and orthogonality on the other makes the result spectral. With \(p_c=M_c/Q\),
+\[
+\rho_C=\sum_cp_c\ket{C_c}\bra{C_c},
+\qquad
+\rho_W=\sum_cp_c\ket{e_c}\bra{e_c}.
+\]
+The shared eigenvalues are \(p_c\), not the eigenvalues of the pure joint matrix, which are \(1,0,\ldots\). Von Neumann entropy \(S(\rho)=-\Tr(\rho\log_2\rho)\) measures local mixedness; for a pure joint state this measures entanglement:
+\[
+E=H(p)=S(\rho_C)=S(\rho_W)
+=-\sum_c\frac{M_c}{Q}\log_2\frac{M_c}{Q}\le\log_2r\quad\text{ebits}.
+\]
+If \(r\mid Q\), all weights equal \(1/r\) and \(E=\log_2r\). Rank counts branches; \(k\) Bell pairs have \(2^k\) equal branches and \(k\) ebits. Quantum mutual information \(I(C{:}W)=S(C)+S(W)-S(CW)=2E\) measures total correlations. Schmidt-basis measurements instead give classical mutual information \(E\). Before modular exponentiation, \(S(C)=0\) despite uniform computational outcomes: state entropy differs from measurement randomness.
+
+\newpage
+The same circuit is also \emph{quantum phase estimation}. Define the unitary \(U_a\ket w=\ket{aw\bmod N}\) on valid residues, extending it by the identity on unused binary labels. On the orbit, \(U_a\ket{e_c}=\ket{e_{c+1\bmod r}}\): it is a cyclic shift. Fourier modes of a cycle are its eigenvectors:
+\[
+\ket{u_s}=\frac1{\sqrt r}\sum_{c=0}^{r-1}e^{-2\pi\ii sc/r}\ket{e_c},
+\qquad
+U_a\ket{u_s}=e^{2\pi\ii s/r}\ket{u_s},
+\qquad
+\ket1=\frac1{\sqrt r}\sum_{s=0}^{r-1}\ket{u_s}.
+\]
+An index shift proves this relation. The easy input contains every relevant eigenphase; the circuit needs neither \(r\) nor its eigenvectors to implement these gates.
+
+For fixed \(\ket{u_s}\), controlled \(U_a^{2^j}\) multiplies only the control's \(\ket1\) amplitude by \(e^{2\pi\ii2^js/r}\). Bilinearity factors this scalar onto the control: \emph{phase kickback} makes it relative. Across bits, phases multiply to \(e^{2\pi\ii s\sum_j2^jx_j/r}=e^{2\pi\ii sx/r}\). The fixed eigenstate stays factored; linearity for the actual input gives
+\[
+\ket\Psi=\frac1{\sqrt r}\sum_{s=0}^{r-1}\ket{\Phi_s}\ket{u_s},
+\qquad
+\ket{\Phi_s}=\frac1{\sqrt Q}\sum_{x=0}^{Q-1}e^{2\pi\ii xs/r}\ket x.
+\]
+These nonproportional ramps paired with orthogonal work states describe the \emph{same entanglement} as the input/output correlations. Their overlap is \(Q^{-1}\sum_xe^{2\pi\ii x(s'-s)/r}\). Complete periods cancel for \(s\ne s'\) when \(r\mid Q\), giving another Schmidt decomposition; otherwise adjacent ramps overlap and weights \(1/r\) are not reduced eigenvalues. Paired conjugate rotations within equal-weight blocks give other Schmidt bases.
+
+Now apply the inverse \(Q\)-point quantum Fourier transform to \(C\), using \(F_Q^\dagger\ket x=Q^{-1/2}\sum_y e^{-2\pi\ii xy/Q}\ket y\). For candidate outcome \(y\), it subtracts the trial phase ramp \(2\pi xy/Q\). Summing the remaining amplitudes gives
+\[
+\ket{\Psi_{\mathrm{out}}}=\frac1{\sqrt r}\sum_{s,y}D_Q\!\left(\frac sr-\frac yQ\right)\ket y\ket{u_s},
+\quad
+D_Q(\delta)=\frac1Q\sum_{x=0}^{Q-1}e^{2\pi\ii x\delta}
+=\frac{1-e^{2\pi\ii Q\delta}}{Q(1-e^{2\pi\ii\delta})},
+\]
+with continuous limits where needed. Matching phases \(y/Q\approx s/r\) reinforce; mismatched ones mostly cancel. Orthogonal work eigenstates remove cross terms between \(s\), giving \(P(y)=r^{-1}\sum_s|D_Q(s/r-y/Q)|^2\). If \(r\mid Q\), exactly \(y=sQ/r\) occur, each with probability \(1/r\); otherwise peaks broaden. This local unitary preserves the Schmidt spectrum and entanglement while changing measurement probabilities; it need not diagonalize \(\rho_C\).
+
+A mixed state is separable if at least one probabilistic mixture of product density operators represents it. Before the inverse QFT, measuring \(W\)'s modular value and forgetting the outcome would give the separable state \(\rho'_{CW}=\sum_cp_c\ket{C_c}\bra{C_c}\otimes\ket{e_c}\bra{e_c}\). Both marginals stay unchanged, but joint entropy rises to \(H(p)\), mutual information falls from \(2H(p)\) to \(H(p)\), and entanglement becomes zero. Coherence within each comb survives, so Fourier statistics stay identical. Dephasing individual counting inputs would instead destroy that coherence and flatten the output. Thus persistent \(C|W\) entanglement is unnecessary for readout; mixed-state local entropy alone does not diagnose entanglement.
+
+A nearest-grid sample satisfies \(\lvert y/Q-s/r\rvert\le1/(2Q)<1/(2r^2)\), making reduced \(s/r\) a continued-fraction convergent of \(y/Q\). Such an outcome has probability at least \(4/\pi^2\) per eigenphase. Its denominator is \(r/\gcd(s,r)\), so repeat and verify candidates: \(a^d\equiv1\pmod N\) confirms a period, not necessarily the minimal one. For \(N=21,a=2,Q=512\), outcome \(85\) gives convergent \(1/6\), the correct order \(6\), and \(\gcd(2^3-1,21)=7\), \(\gcd(2^3+1,21)=3\). Generally, even \(r\) and \(z=a^{r/2}\not\equiv\pm1\pmod N\) yield factors because \(N\mid(z-1)(z+1)\) while neither factor is divisible by \(N\). Retry unsuccessful samples or bases.
+
+Clean temporary records distinguishing inputs within a comb, while retaining the modular result; reversing \(\Lambda\) itself restores the uniform counting input and forces outcome \(0\). Arithmetic, Fourier readout, and classical processing cost polynomially in \(\log N\); the useful resource is efficiently prepared coherence structure, beyond an entanglement value alone.
+\end{document}

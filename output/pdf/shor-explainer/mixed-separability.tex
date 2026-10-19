@@ -1,0 +1,42 @@
+\phead{PURE SUMS AND MIXED ENSEMBLES}{12a. Separability after a work measurement}{The same marginals can belong to an entangled pure state or a separable mixture.}
+For a mixed joint state, separability means that at least one probabilistic product decomposition exists:
+\[
+\rho_{AB}=\sum_\alpha q_\alpha\,
+\sigma_A^{(\alpha)}\otimes\tau_B^{(\alpha)},
+\qquad q_\alpha\ge0,\quad\sum_\alpha q_\alpha=1.
+\]
+The local operators are normalized density matrices. Equivalently they may be pure projectors; their vectors need not be orthogonal. Such a state can be prepared using a shared random label and local preparations. Entangled means that no product-state ensemble reproduces the joint density matrix.
+
+\lead{Why this reduces to Schmidt rank one for pure states}
+If \(\rho_{AB}=\proj\Psi\), its support is one-dimensional. Positivity forces every pure vector in any ensemble for it to lie along the same ray \(\Psi\). A product ensemble is therefore possible exactly when \(\Psi\) itself factors:
+\[
+\text{pure and separable}\iff
+\text{Schmidt rank }1\iff S(\rho_A)=S(\rho_B)=0.
+\]
+For mixed states, a spectral decomposition is only one possible ensemble. Entangled eigenvectors do not establish entanglement:
+\[
+\frac{\proj{00}+\proj{11}}2
+=\frac{\proj{\Phi^+}+\proj{\Phi^-}}2,
+\qquad
+\ket{\Phi^\pm}=\frac{\ket{00}\pm\ket{11}}{\sqrt2}.
+\]
+The left side is explicitly separable. In the right side the Bell coherences cancel. A coherent sum of kets and a probabilistic sum of projectors have different meanings.
+
+\lead{Apply the distinction to Shor's work measurement}
+Write \(p_c=M_c/Q\) and \(h=H(p)=-\sum_cp_c\log_2p_c\). Before measurement,
+\[
+\ket{\Psi_2}=\sum_c\sqrt{p_c}\ket{C_c}\ket{e_c},
+\qquad E=h,\quad S(CW)=0,\quad I(C:W)=2h.
+\]
+Measure \(W\) in the modular-value basis and forget the result. The resulting joint density matrix is
+\[
+\boxed{\rho^{\rm unread}_{CW}
+=\sum_cp_c\,\proj{C_c}\otimes\proj{e_c}.}
+\]
+This is a separable mixture of orthogonal product states. Both marginals remain unchanged, but joint entropy is now \(h\), mutual information is \(h\), and \(C|W\) entanglement is zero. The local entropies still equal \(h\), demonstrating why they cease to measure inter-register entanglement once joint purity is lost.
+
+Coherence between different Schmidt branches disappears, but coherence \emph{within} each periodic comb survives. Since \(\rho_C\) is unchanged, all subsequent counting-only statistics, including the inverse-QFT histogram, are identical. Entanglement need not persist between these two registers during readout.
+
+This differs from completely dephasing \(C\) in its computational basis. That operation destroys within-comb coherence too, leaving \(\rho_C=\id_Q/Q\) and a uniform Fourier histogram. Likewise, a work eigenbasis measurement preserves \(\rho_C\), but generally changes \(\rho_W\) for \(r\nmid Q\); preservation of both marginals above uses the Schmidt/work-value basis.
+
+\takeaway{For pure states, Schmidt rank and reduced entropy diagnose entanglement. For mixed states, local entropy or positive mutual information alone does not: separability concerns all possible product-state ensembles. Orthogonality is required for Schmidt spectral form, not for a separable mixed-state decomposition.}
