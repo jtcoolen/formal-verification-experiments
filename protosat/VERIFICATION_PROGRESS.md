@@ -723,6 +723,46 @@ Both depend only on `propext, Classical.choice, Quot.sound`. The leaky and guard
 in one expression, so the pair also shows the pipeline discriminates rather than answering
 constantly.
 
+## The correspondence, stated generally (`ProtSat/Correspondence.lean`)
+
+`Differential.lean` verified the correspondence on two protocols. The same argument works for *any*
+gap-free query, and stating it once makes the shape of the result visible:
+
+```lean
+theorem encoding_complete_gapFree :
+    domainGap P B = false -> boundedAttackGoals q -> Satisfiable (encode P B)
+
+theorem boundedSafe_of_unsat_gapFree :
+    domainGap P B = false -> Unsat (encode P B) -> boundedSafeGoals q
+
+theorem boundedSafe_of_refutation :
+    domainGap P B = false -> checkProof (encode P B) p = true -> boundedSafeGoals q
+```
+
+The second is the implication the objective asks for, stated at the level of the formula rather
+than the analyser: *no satisfying assignment, therefore no permitted execution violating the
+selected goal*. It is strictly stronger than
+`Query.boundedSafe_of_encodingUnsat_of_gapFree`, which needs the verdict equation
+`analyzeQuery q = encodingUnsat`; this one needs only `Unsat (encode P B)`, however it was
+obtained. The third takes that from the evidence checker, so the route from a prover output to
+the security statement never touches the solver: refutation -> `checkProof_sound` -> `Unsat` ->
+`boundedSafeGoals`. `guard_safe_from_unsat` instantiates the second on the guarded protocol from
+the kernel-checked `dpll = none`, giving the same verdict by the shorter route.
+
+The two-sided meaning of a verdict, assembled:
+
+* **no false negatives** (unsafe reported safe): `boundedSafe_of_unsat_gapFree` - a permitted
+  attack would make the formula satisfiable;
+* **no false positives** (safe reported unsafe): `BoundedCert.checkBounded_sound`, re-derived
+  from the certificate alone, with no reference to the CNF or the solver;
+* **the boundary is decidable**: `Represent.domainGap` says which queries the first bullet
+  covers, and the transient-pair witness shows what happens outside it.
+
+Still missing for the full `encoding_correct`: the direction
+`Satisfiable (encode P B) -> boundedAttackGoals q`, which needs `encoding_sound` to return the
+complete bounded predicate - specifically that the decoded run satisfies `runsInUniverse`. The
+leak half of that conclusion is already proved; the universe half is not.
+
 ## Log
 
 * 2026-10-19 (a) - baseline inspected; build green; three review witnesses promoted to permanent
@@ -826,6 +866,14 @@ constantly.
   ` (a hand-built leaking run yields a satisfying assignment via `encoding_complete` with no
   `WithinBounds` hypothesis, discharged by `withinBounds_of_bounded`). All three standard axioms
   only. Build green (1865 jobs, 11 s), audit clean over 2836 theorems, 18/18 CI gates green.
+
+* 2026-10-19 (q) - `ProtSat/Correspondence.lean`: the correspondence stated for every
+  gap-free query, not just two instances - `encoding_complete_gapFree` (attack implies
+  satisfiable, no `WithinBounds` hypothesis), `boundedSafe_of_unsat_gapFree` (unsat implies
+  `boundedSafeGoals`, needing only the semantic property of the formula rather than the analyser
+  verdict equation), and `boundedSafe_of_refutation` (a checked resolution refutation implies
+  `boundedSafeGoals`, so the solver is never consulted). Standard axioms only. Build green
+  (1867 jobs), audit clean over 2842 theorems, 18/18 CI gates green.
 
 * Next - stage 6: an independently checked UNSAT certificate, through Sat.Fmla.proof [] and
   not the reified forall-over-n-propositions form, so the solver answer stops being a
