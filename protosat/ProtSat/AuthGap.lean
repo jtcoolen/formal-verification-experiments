@@ -34,6 +34,12 @@ This module turns the label into a theorem. For the protocol `Authentication.P` 
 * both at once is `auth_gap_is_real`: same protocol, same bounds, safety for one goal and a genuine
   bounded attack for the other.
 
+* section 6 answers the obvious objection to that pairing. `Authentication.P` declares no secret,
+  so its secrecy safety is vacuous. `P2` declares one - a long-term private key - a bounded honest
+  run of it holds that key (`secret_held`), its violation clause is not empty
+  (`violationLits_nonempty`, `no_empty_clause2`), and the CNF is unsatisfiable anyway
+  (`safe_for_secrecy2`) while the same bounds admit an unmatched commit (`attacked_for_agreement2`).
+
 Every line below is a proposition about the definitions the tool actually uses, not a comment about
 them. And nothing here overclaims: the safety proved is a *secrecy* statement, and
 `why_the_formula_is_unsat` says out loud how thin its evidence is. The reason it cannot be promoted
@@ -264,6 +270,205 @@ theorem the_tool_never_says_agreement_is_broken :
       ¬ boundedSafeGoals Authentication.q :=
   ⟨cnf_answer_is_encodingUnsat, agreement_answer_is_refused, attacked_for_agreement⟩
 
+/-! ### 6. A second model, this one with something to keep -/
+
+/-- **A protocol that has a secret.** The first example is honest about being vacuous; this one is
+not. A principal `0` holds a long-term private key `sk(0)`, declared secret and not compromised.
+Session 0 plays the committing role: it finishes a run and commits on `sk(0)`. Session 1 plays the
+holding role: it loads `sk(0)` into its own register and never transmits it. The model can reach the
+secret, the encoding can name the leak, and the CNF is still unsatisfiable - so the safety below is
+not the safety of a protocol with nothing to protect.
+
+The model has one principal, so the commit is addressed to that principal: what `AuthBreak` needs is
+not two principals but an unmatched commit, and that is what session 0 produces. -/
+def P2 : Protocol :=
+  { roles := [{ acts := [Action.commit 0 (Expr.agent 0) (Expr.privk 0)] },
+              { acts := [Action.assign 0 (Expr.privk 0)] }],
+    sessions := [{ role := 0, self := 0, peer := 0 }, { role := 1, self := 0, peer := 0 }],
+    agents := [0], nonceDomain := [], compromised := [],
+    secrets := [Secret.closed (Expr.privk 0)], auths := [{ tag := 0 }] }
+
+/-- One event: enough for either role to take its single step, and small enough that the kernel can
+replay the solver's answer to it (`dpll_none2`). -/
+def B2 : Bounds := { steps := 1, rounds := 0 }
+
+/-- The declared secret message: the value of `Expr.privk 0`. -/
+def sec : Term := Term.key (Key.priv 0)
+
+/-- **(1) A secret is declared, and it is not compromised.** The declaration is non-empty, the
+compromise set is empty, the secret really is one of the closed secret messages the encoding
+reads, and - the point of the last line - the attacker is not handed it at the start. -/
+theorem p2_has_secret : P2.secrets ≠ [] := by decide
+
+theorem p2_not_compromised : P2.compromised = [] := rfl
+
+theorem p2_secret_is_declared : sec ∈ P2.closedSecretTerms := by decide
+
+theorem p2_secret_not_initial : sec ∉ initKn P2 := by decide
+
+/-- The initial configuration, the configuration after the holding role's single step, and the
+certificate of that step. The transition is exhibited, not asserted: `hold_steps` is the step
+checker's own answer. -/
+def K0 : Cfg := initCfg P2
+
+/-- Session 1's store after it loads the secret. -/
+def K1 : Cfg := succStore K0 1 0 sec
+
+/-- The one-step certificate of the holding run. -/
+def certHold : Certificate :=
+  { init := K0, steps := [{ ev := .act 1 (.agent 0) 0, after := K1 }] }
+
+/-- The holding step is a legal transition of the reference semantics, checked by the step
+checker. -/
+theorem hold_steps : checkSteps P2 K0 certHold.steps = true := by decide
+
+/-- Hence it is a run of the operational semantics. -/
+theorem hold_runs : Runs P2 (initCfg P2) (certTrace certHold) (certCfgs certHold) :=
+  checkSteps_runs P2 certHold.steps K0 hold_steps
+
+/-- And a *bounded* run: one event, every configuration inside the universe. -/
+theorem hold_bounded : BoundedTrace P2 B2 (certTrace certHold) (certCfgs certHold) := by
+  refine ⟨hold_runs, by decide, ?_⟩
+  change ∀ C ∈ certCfgs certHold, cfgInUniverse C (univ P2 B2) = true
+  decide
+
+/-- **(2) The executability witness.** In this bounded execution the declared secret's value is
+present - it sits in session 1's register - so the leak the violation literals ask about is a live
+possibility of the model rather than a nullity. Contrast `no_secrets_declared`: here there *is*
+something to keep. -/
+theorem secret_held : ∃ C ∈ certCfgs certHold, readVar 0 (storeOf C 1) = some sec :=
+  ⟨K1, List.Mem.tail _ (List.Mem.head _), by decide⟩
+
+/-- The held value is not the attacker's: this honest run stores the key without publishing it. -/
+theorem secret_not_in_knowledge : sec ∉ K1.kn := by decide
+
+/-- Session 0's configuration after its commit, and the certificate of that step. -/
+def L1 : Cfg := succAdvance K0 0
+
+/-- The one-step certificate of the committing run. -/
+def certCommit : Certificate :=
+  { init := K0, steps := [{ ev := .act 0 (.agent 0) 0, after := L1 }] }
+
+/-- The commit step is a legal transition, and a bounded run. -/
+theorem commit_steps : checkSteps P2 K0 certCommit.steps = true := by decide
+
+theorem commit_bounded : BoundedTrace P2 B2 (certTrace certCommit) (certCfgs certCommit) := by
+  refine ⟨checkSteps_runs P2 certCommit.steps K0 commit_steps, by decide, ?_⟩
+  change ∀ C ∈ certCfgs certCommit, cfgInUniverse C (univ P2 B2) = true
+  decide
+
+/-- The commit has no matching claim anywhere in the run, so non-injective agreement fails. -/
+theorem authbreak2 : AuthBreak P2 (certCfgs certCommit) (certTrace certCommit) :=
+  (authBreakBool_iff P2 (certCfgs certCommit) (certTrace certCommit)).mp (by decide)
+
+/-- Hence the agreement reading of this model has a bounded attack, through its selected goal. -/
+theorem p2_agreement_attacked : boundedAttackGoals (Query.mk P2 B2 [Goal.agreement]) :=
+  ⟨Goal.agreement, by decide, certTrace certCommit, certCfgs certCommit, commit_bounded,
+   by rw [violation_agreement]; exact authbreak2⟩
+
+set_option maxRecDepth 20000 in
+set_option maxHeartbeats 0 in
+/-- **(3) The solver answer, replayed by the kernel.** `dpll` finds no model of `encode P2 B2`.
+This is not free: the formula has 410 variables and 465 clauses, and the replay costs about a minute
+of kernel time - the cost `EndToEnd.lean` documents. It is also the *interesting*
+case: unlike `Authentication.P`, the violation clause here is not empty, so the answer is not handed
+to the solver for nothing. -/
+theorem dpll_none2 : DPLL.dpll (Encode.encode P2 B2) = none := by decide
+
+/-- **(3) The formula fact.** -/
+theorem unsat2 : ProtSat.Unsat (Encode.encode P2 B2) := DPLL.dpll_complete dpll_none2
+
+/-- **(7) The violation group is not empty.** One literal per way the declared secret can become
+known at a step; the key is a universe message here, so the literal exists. -/
+theorem violationLits_nonempty : violationLits (shapeOf P2 B2) P2 ≠ [] := by decide
+
+set_option maxRecDepth 20000 in
+/-- And the generated CNF contains no empty clause: contrast `empty_clause_in_encode`, where the
+first model's UNSAT was explained by a violation clause that could not be stated at all. Here the
+solver had to work. -/
+theorem no_empty_clause2 : ([] : List Lit) ∉ (Encode.encode P2 B2).clauses := by decide
+
+/-- The side conditions of the bridge, all closed for the second model too: the bounds name the
+protocol's closed expressions, the universe is subterm-closed, the declared secret is a universe
+message, and the value domain has no gap. -/
+theorem hU2 : univClosed (shapeOf P2 B2) P2 := by
+  unfold univClosed
+  decide
+
+theorem hsub2 : univSub (shapeOf P2 B2) := by
+  unfold univSub
+  decide
+
+theorem hsec2 : SecretsOK (shapeOf P2 B2) P2 := by
+  refine ⟨fun q x h => absurd h (by simp [P2]), fun s hs => ?_⟩
+  have heq : s = sec := List.mem_singleton.mp hs
+  rw [heq]
+  decide
+
+theorem gapFree2 : domainGap P2 B2 = false := by decide
+
+/-- The analyser's verdict for the second model. -/
+theorem analyze2 : analyze P2 B2 = Verdict.encodingUnsat := by
+  have hu : univClosedBool (shapeOf P2 B2) P2 = true := by decide
+  rw [analyze]
+  simp [hu, dpll_none2]
+
+theorem q2_wf : WellFormed (Query.mk P2 B2 [Goal.secrecy]) := by
+  show validate (Query.mk P2 B2 [Goal.secrecy]) = []
+  decide
+
+theorem q2_goals : ∀ g ∈ (Query.mk P2 B2 [Goal.secrecy]).goals, goalEncoded g := by decide
+
+theorem q2_ne : (Query.mk P2 B2 [Goal.secrecy]).goals ≠ [] := by decide
+
+/-- The contract's answer to the secrecy query: `encodingUnsat`, reached through the analyser rather
+than assumed. -/
+theorem cnf_answer_is_encodingUnsat2 :
+    analyzeQuery (Query.mk P2 B2 [Goal.secrecy]) = Result.encodingUnsat := by
+  show liftVerdict (analyze P2 B2) = Result.encodingUnsat
+  exact congrArg liftVerdict analyze2
+
+/-- The agreement query is well-formed and refused, exactly as for the first model. -/
+theorem q2a_wf : WellFormed (Query.mk P2 B2 [Goal.agreement]) := by
+  show validate (Query.mk P2 B2 [Goal.agreement]) = []
+  decide
+
+theorem agreement_answer_is_refused2 :
+    analyzeQuery (Query.mk P2 B2 [Goal.agreement]) =
+      Result.unsupportedGoals [Goal.agreement] := by
+  show Result.unsupportedGoals (unsupported (Query.mk P2 B2 [Goal.agreement])) = _
+  simp [unsupported, goalEncoded, encodedGoals]
+
+/-- **(3) continued: the CNF route proves safety, non-vacuously.** The same bridge as
+`safe_for_secrecy`, fed with the verdict equation: the tool answers `encodingUnsat` for this query,
+the goal it selected is one the encoding represents, the value domain has no gap, and therefore no
+permitted execution of `P2` within `B2` leaks the declared key. Unlike the first model, there *was*
+a key to leak. -/
+theorem safe_for_secrecy2 : boundedSafeGoals (Query.mk P2 B2 [Goal.secrecy]) :=
+  boundedSafe_of_encodingUnsat_of_gapFree q2_goals q2_ne hU2 hsub2 hsec2 gapFree2
+    cnf_answer_is_encodingUnsat2
+
+/-- **(4) continued.** And yet the same model, at the same bounds, has a bounded attack on
+agreement. -/
+theorem attacked_for_agreement2 : ¬ boundedSafeGoals (Query.mk P2 B2 [Goal.agreement]) :=
+  fun h => h p2_agreement_attacked
+
+/-- **(6) The headline, non-vacuously.** Same protocol, same bounds, a declared secret the model
+really reaches and the encoding really asks about: the CNF route proves the secrecy query safe, and
+the agreement query is attacked. The gap is not an artefact of a model with nothing to protect. -/
+theorem auth_gap_is_real_nonvacuous :
+    boundedSafeGoals (Query.mk P2 B2 [Goal.secrecy]) ∧
+      ¬ boundedSafeGoals (Query.mk P2 B2 [Goal.agreement]) :=
+  ⟨safe_for_secrecy2, attacked_for_agreement2⟩
+
+/-- The two models side by side: in the first the violation clause is the empty disjunction; in the
+second it is not, and the CNF is unsatisfiable anyway. -/
+theorem the_gap_survives_the_nonvacuity_check :
+    violationLits (shapeOf P B) P = [] ∧ violationLits (shapeOf P2 B2) P2 ≠ [] ∧
+      ProtSat.Unsat (Encode.encode P2 B2) ∧
+        ¬ boundedSafeGoals (Query.mk P2 B2 [Goal.agreement]) :=
+  ⟨why_the_formula_is_unsat, violationLits_nonempty, unsat2, attacked_for_agreement2⟩
+
 end ProtSat.AuthGap
 
 /-!
@@ -287,6 +492,11 @@ end ProtSat.AuthGap
 * `why_the_formula_is_unsat` and `empty_clause_in_encode` - *why* the answer came out UNSAT for this
   model: the violation clause is the empty disjunction, so the formula is unsatisfiable before the
   solver runs.
+* `safe_for_secrecy2`, `secret_held`, `violationLits_nonempty` and `no_empty_clause2` - the same
+  story on a model that does declare a secret, reaches it in a bounded honest run, and has a
+  non-empty violation clause with no empty clause anywhere in the formula. The second safety result
+  is not vacuous, and `auth_gap_is_real_nonvacuous` pairs it with an unmatched commit at the same
+  bounds.
 
 **Not proved, and not claimed.**
 
@@ -304,7 +514,17 @@ end ProtSat.AuthGap
   `Correspondence.boundedSafe_of_unsat_gapFree` are used exactly as stated, with their hypotheses
   discharged rather than bypassed. The point of this file is that they *cannot* be applied to the
   agreement query, not that they were applied wrongly to the secrecy one.
-* The bounds are one event and zero closure rounds. The gap is not an artefact of that smallness -
-  the agreement attack is present at these bounds and the CNF is unsatisfiable at these bounds - but
-  no claim here extends to larger bounds or to unbounded security.
+* The bounds are one event and zero closure rounds in both models. The gap is not an artefact of
+  that smallness - the agreement attack is present at these bounds and the CNF is unsatisfiable at
+  these bounds - but no claim here extends to larger bounds or to unbounded security.
+* The second model has one principal, so its commit is addressed to that principal. `AuthBreak` asks
+  for an unmatched commit, not for a second party, and `authbreak2` exhibits exactly that - but
+  `P2` is a logical witness, not a realistic protocol. A two-principal version (the same shape over
+  `agents := [0, 1]`, secret `K(0,1)`) was tried: its generated CNF has 850 variables and the kernel
+  replay of the solver did not finish in ten minutes, so the one-principal model is the price of
+  keeping `dpll_none2` a checked fact rather than a hypothesis.
+* The unsatisfiability of `encode P2 B2` is evidence the kernel replays: `dpll_none2` costs about a
+  minute of check time at 410 variables. It is not an independently checked refutation. Roadmap
+  stage 6 is what replaces the replay with a certificate, and
+  `Correspondence.boundedSafe_of_refutation` is the socket it would plug into.
 -/

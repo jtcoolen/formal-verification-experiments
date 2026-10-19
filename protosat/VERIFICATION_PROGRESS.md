@@ -957,6 +957,20 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   not silently fall back to the empty list. Not yet: completeness (DP variable elimination in
   progress) and any run on a real protocol formula.
   Build green, audit clean, 22/22 CI gates green.
+* 2026-10-19 (y) - `AuthGap` section 6: the non-vacuous version of the headline gap. A protocol that
+  DOES declare a secret (`P2.secrets ≠ []`, not compromised, not initially known), with an exhibited
+  honest execution that reaches it (`hold_steps` accepted by the step checker, `hold_bounded`,
+  `secret_held`, and `secret_not_in_knowledge` so it is held rather than published), whose CNF is
+  unsatisfiable - and the violation group is proved NON-empty (`violationLits_nonempty`,
+  `no_empty_clause2`), so the UNSAT answer is not explained by having nothing to leak - while
+  agreement is broken at the same bounds (`authbreak2`, `attacked_for_agreement2`). Headline:
+  `auth_gap_is_real_nonvacuous`, and `safe_for_secrecy2` goes through the tool's own verdict
+  (`analyze2`, `cnf_answer_is_encodingUnsat2`) rather than a hand-fed unsatisfiability.
+
+  Measured kernel-replay cost, which is a stage 8 datum and the reason the model is one-principal:
+  410 CNF variables -> 59 s to elaborate the module; 648 -> 215 s; 850 -> did not finish in 600 s.
+  The two-principal variant was built and every condition checked except that last replay.
+  Build green (1877 jobs), audit clean over 3056 theorems, 22/22 CI gates green.
 * Next - stage 6 is nearly closed: the checker (`Resolution`), the binding of evidence to its
   formula (`checkAgainst`), and the serialization (`Serialize`) are proved, and a checked code now
   reaches `boundedSafeGoals q` (`CheckedSafe.boundedSafe_of_checkedCode`). What is missing is a
