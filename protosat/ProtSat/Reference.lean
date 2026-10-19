@@ -3,6 +3,7 @@ Copyright (c) 2026 Formally Verified Examples.
 Licensed under the MIT License. See the file LICENSE in the project root for
 license information.
 -/
+import ProtSat.Bounded
 import ProtSat.Certificate
 
 /-!
@@ -56,14 +57,21 @@ open ProtSat Term Protocol Attacker
 
 /-! ### Configurations -/
 
-/-- A configuration: the local state of every session, the attacker's knowledge, and the
-**allocation history** of every nonce this run has generated. The history is part of the state
-precisely because freshness cannot be recovered from the stores: a nonce stops being visible the
-moment it is overwritten or wrapped into a pair, but it does not stop being used. -/
+/-- A configuration: the local state of every session, the attacker's knowledge, the **allocation
+history** of every nonce this run has generated, and the **secret obligations** the run has
+undertaken.
+
+The history is part of the state because freshness cannot be recovered from the stores: a nonce
+stops being visible the moment it is overwritten or wrapped into a pair, but it does not stop being
+used. The obligations are part of the state for the same reason one step further on: a value
+declared secret at some event stays secret after the register that held it is overwritten, and a
+check that reads the current store forgets the promise (`ProtSat.Secret.store` does exactly
+that). -/
 structure Cfg where
   sess : List SessState
   kn : List Term
   alloc : List NonceName
+  oblig : List Term
   deriving Repr, DecidableEq
 
 /-- The local state of session `q`. -/
@@ -80,7 +88,16 @@ def storeOf (C : Cfg) (q : Nat) : List (Var × Term) :=
 attacker holding exactly the public information and the compromised keys, and nothing allocated.
 -/
 def initCfg (P : Protocol) : Cfg :=
-  { sess := P.sessions.map fun _ => { pc := 0, store := [] }, kn := P.initKn, alloc := [] }
+  { sess := P.sessions.map fun _ => { pc := 0, store := [] },
+    kn := P.initKn, alloc := [], oblig := [] }
+
+/-- Record a secret obligation: the *value* snapshot at the declaring event, not the register. -/
+def declareObl (C : Cfg) (v : Term) : Cfg := { C with oblig := C.oblig ++ [v] }
+
+@[simp] theorem declareObl_alloc (C : Cfg) (v : Term) : (declareObl C v).alloc = C.alloc := rfl
+@[simp] theorem declareObl_kn (C : Cfg) (v : Term) : (declareObl C v).kn = C.kn := rfl
+@[simp] theorem declareObl_oblig (C : Cfg) (v : Term) :
+    (declareObl C v).oblig = C.oblig ++ [v] := rfl
 
 /-! ### Events -/
 
@@ -115,6 +132,48 @@ def allocate (C : Cfg) (n : NonceName) : Cfg := { C with alloc := C.alloc ++ [n]
 @[simp] theorem mapSess_kn (f : SessState -> SessState) (C : Cfg) (q : Nat) :
     (mapSess f C q).kn = C.kn := rfl
 
+/-! ### Credential provisioning -/
+
+/-- *Credential provisioning.*
+
+`Expr.decA m a` decrypts with the private key of `a`, and `Expr.privk a` names that key: in
+`Expr.eval` either is available to *any* role that writes it, so a role acquires the power to
+decrypt for a principal merely by naming it, and can publish that principal's private key. The
+repaired semantics makes the authority explicit: a session is provisioned with its own private key
+and the long-term shared keys of its conversation, plus whatever key it has actually received, and
+an expression that needs any other private key is not enabled. -/
+def requiredPrivKeys (e : Expr) : List Agent :=
+  (e.subexpressions.filterMap fun
+    | Expr.privk a => some a
+    | Expr.decA _ a => some a
+    | _ => none).eraseDups
+
+/-- The keys a session holds by right of its role: its own private key and the long-term keys of
+its conversation. -/
+def provisioned (P : Protocol) (q : Nat) : List Key :=
+  match rget P.sessions q with
+  | none => []
+  | some s => Key.priv s.self :: [Key.shrk s.self s.peer, Key.shrk s.peer s.self]
+
+/-- Every key appearing anywhere in a message. -/
+def keysIn : Term -> List Key :=
+  fun t => (Bounded.subtermsL t).filterMap fun
+    | Term.key k => some k
+    | _ => none
+
+/-- The keys a session may use: its credentials plus every key it has received or stored. -/
+def availableKeys (P : Protocol) (C : Cfg) (q : Nat) : List Key :=
+  provisioned P q ++ (storeVals (storeOf C q)).flatMap keysIn
+
+/-- May this session evaluate this expression? -/
+def canUse (P : Protocol) (C : Cfg) (q : Nat) (e : Expr) : Bool :=
+  (requiredPrivKeys e).all fun a => Key.priv a ∈ availableKeys P C q
+
+/-- Is every expression the action reads within the session's authority? This is the gate that
+`stepOf` applies before executing a deterministic action. -/
+def actionUsable (P : Protocol) (C : Cfg) (q : Nat) (act : Action) : Bool :=
+  (act.exprs).all fun e => canUse P C q e
+
 /-! ### When an authentication annotation is meaningful -/
 
 /-- The (peer, value) a claim or commit records, evaluated in the acting session's store. The peer
@@ -136,7 +195,7 @@ def actStep (P : Protocol) (C : Cfg) (q : Nat) : Action -> Option Cfg
       match Expr.eval e1 (storeOf C q), Expr.eval e2 (storeOf C q) with
       | some v1, some v2 => if v1 == v2 then some (mapSess bump C q) else none
       | _, _ => none
-  | Action.secret e => (Expr.eval e (storeOf C q)).map fun _ => mapSess bump C q
+  | Action.secret e => (Expr.eval e (storeOf C q)).map fun v => declareObl (mapSess bump C q) v
   | Action.claim _ peer v =>
       if (authData P C q peer v).isSome then some (mapSess bump C q) else none
   | Action.commit _ peer v =>
@@ -161,8 +220,9 @@ def stepOf (P : Protocol) (C : Cfg) : Ev -> Option Cfg
             else some (allocate (mapSess (bumpStore x (Term.nonce n)) C q) n)
           else none
       | _ => none
-  | Ev.act q => match P.actionAt q (pcOf C q) with
-      | some act => actStep P C q act
+  | Ev.act q =>
+      match P.actionAt q (pcOf C q) with
+      | some act => if actionUsable P C q act then actStep P C q act else none
       | none => none
 
 /-- **The transition relation** of the repaired semantics: `C'` is what the step function
@@ -336,10 +396,13 @@ theorem alloc_mono {P : Protocol} {C C' : Cfg} {e : Ev} (h : Rel P C e C') :
     | none => simp [hact] at h
     | some act =>
         rw [hact] at h
-        intro n hn
-        have heq := alloc_eq_of_actStep h
-        rw [heq]
-        exact hn
+        by_cases hu : actionUsable P C q act
+        · simp [hact, hu] at h
+          intro n hn
+          have heq := alloc_eq_of_actStep h
+          rw [heq]
+          exact hn
+        · simp [hact, hu] at h
 
 /-- The attacker's knowledge is monotone along a step. -/
 theorem kn_mono {P : Protocol} {C C' : Cfg} {e : Ev} (h : Rel P C e C') :
@@ -378,7 +441,51 @@ theorem kn_mono {P : Protocol} {C C' : Cfg} {e : Ev} (h : Rel P C e C') :
     rw [stepOf] at h
     cases hact : P.actionAt q (pcOf C q) with
     | none => simp [hact] at h
-    | some act => rw [hact] at h; exact kn_mono_of_actStep h
+    | some act =>
+        rw [hact] at h
+        by_cases hu : actionUsable P C q act
+        · simp [hact, hu] at h
+          exact kn_mono_of_actStep h
+        · simp [hact, hu] at h
+
+/-! ### What a run must not reveal -/
+
+/-- The secrets a configuration must keep: the protocol's static closed secrets, and every value
+snapshotted by a `secret` action so far. The second part is what `ProtSat.Secret.store` cannot
+express: it re-reads the register at every configuration, so overwriting the register retires the
+promise. -/
+def declaredSecrets (P : Protocol) (C : Cfg) : List Term := P.closedSecretTerms ++ C.oblig
+
+/-- A configuration leaks when the attacker knows one of the declared secrets. -/
+def leaks (P : Protocol) (C : Cfg) : Prop := ∃ s ∈ declaredSecrets P C, s ∈ C.kn
+
+/-- The executable form. -/
+def leaksBool (P : Protocol) (C : Cfg) : Bool :=
+  (declaredSecrets P C).any fun s => decide (s ∈ C.kn)
+
+theorem leaksBool_iff (P : Protocol) (C : Cfg) : leaksBool P C = true <-> leaks P C := by
+  classical
+  rw [leaksBool, leaks, List.any_eq_true]
+  constructor
+  · rintro ⟨s, hs, hmem⟩
+    exact ⟨s, hs, of_decide_eq_true hmem⟩
+  · rintro ⟨s, hs, hmem⟩
+    exact ⟨s, hs, decide_eq_true hmem⟩
+
+/-- A trace leaks when one of the configurations it visits does. -/
+def traceLeaks (P : Protocol) (Cs : List Cfg) : Prop := ∃ C ∈ Cs, leaks P C
+
+def traceLeaksBool (P : Protocol) (Cs : List Cfg) : Bool := Cs.any (leaksBool P)
+
+theorem traceLeaksBool_iff (P : Protocol) (Cs : List Cfg) :
+    traceLeaksBool P Cs = true <-> traceLeaks P Cs := by
+  classical
+  rw [traceLeaksBool, List.any_eq_true, traceLeaks]
+  constructor
+  · rintro ⟨C, hC, h⟩
+    exact ⟨C, hC, (leaksBool_iff P C).mp h⟩
+  · rintro ⟨C, hC, h⟩
+    exact ⟨C, hC, (leaksBool_iff P C).mpr h⟩
 
 /-! ### Authentication events -/
 
@@ -580,6 +687,10 @@ theorem empty_domain_no_generate :
 /-- The configurations a trace visits, or empty when it is not a trace. -/
 def visit (P : Protocol) (tr : List Ev) : List Cfg := (run P (initCfg P) tr).getD []
 
+/-- The configuration reached after `i` events, or the initial one if the trace is not a run. -/
+def nthCfg (P : Protocol) (tr : List Ev) (i : Nat) : Cfg :=
+  ((visit P tr).drop i).head?.getD (initCfg P)
+
 /-- Two sessions, one claiming and one committing on the same tag and data. -/
 def pairP : Protocol :=
   { roles := [{ acts := [Action.claim 0 (Expr.agent 1) (Expr.nonce 5)] },
@@ -691,6 +802,95 @@ theorem replay_breaks_injectively :
 theorem pair_agrees_injectively :
     agreesInjBool (insts pairP (visit pairP [Ev.act 0, Ev.act 1])
       [Ev.act 0, Ev.act 1]) = true := by decide
+
+/-- *Credential provisioning.*
+
+A role that names another principal's private key is not thereby entitled to it. The session plays
+agent 0 and tries to decrypt a ciphertext addressed to agent 1. -/
+def decARole : Role :=
+  { acts := [Action.recv 0 0, Action.assign 1 (Expr.decA (Expr.var 0) 1)] }
+
+def decABase : Protocol :=
+  { roles := [decARole]
+    sessions := [{ role := 0, self := 0, peer := 1 }]
+    agents := [0, 1]
+    nonceDomain := []
+    compromised := []
+    secrets := []
+    auths := [] }
+
+/-- The ciphertext addressed to agent 1. -/
+def ctTo1 : Term := Term.encA (Term.agent 1) 1
+
+/-- The trace: the attacker builds the ciphertext (asymmetric encryption is one of its steps),
+delivers it, and the session tries to decrypt it for agent 1. -/
+def decATrace : List Ev := [Ev.ded ctTo1, Ev.recv 0 ctTo1, Ev.act 0]
+
+/-- **Rejected.** The session plays 0, so it holds no private key for 1: naming 1 in a `decA`
+gives it nothing. -/
+theorem unprovisioned_decryption_blocked :
+    run decABase (initCfg decABase) decATrace = none := by decide
+
+/-- The same role played by the principal the ciphertext is addressed to: now the key is
+provisioned and the step is enabled. The difference is the credential, not the expression. -/
+def decAOwnP : Protocol := { decABase with sessions := [{ role := 0, self := 1, peer := 0 }] }
+
+theorem provisioned_decryption_works :
+    run decAOwnP (initCfg decAOwnP) decATrace ≠ none := by decide
+
+/-- Nor may a role publish a private key it was not given. -/
+def leakKeyP : Protocol :=
+  { decABase with roles := [{ acts := [Action.send 0 (Expr.privk 1)] }] }
+
+theorem unprovisioned_key_not_publishable :
+    run leakKeyP (initCfg leakKeyP) [Ev.act 0] = none := by decide
+
+/-- But its own key is its own to lose: the discipline is about provisioning, not a ban on the
+constructor. -/
+def leakOwnKeyP : Protocol :=
+  { leakKeyP with sessions := [{ role := 0, self := 1, peer := 0 }] }
+
+theorem provisioned_key_publishable :
+    run leakOwnKeyP (initCfg leakOwnKeyP) [Ev.act 0] ≠ none := by decide
+
+/-- *Secret obligations survive an overwrite.*
+
+The session generates a nonce, declares it secret, hides it inside a pair, overwrites the register,
+and finally publishes the pair; the attacker projects the nonce out of it. -/
+def snapshotP : Protocol :=
+  { roles := [{ acts :=
+        [Action.fresh 0 0,
+         Action.secret (Expr.var 0),
+         Action.assign 1 (Expr.pair (Expr.var 0) (Expr.agent 0)),
+         Action.assign 0 (Expr.agent 0),
+         Action.send 1 (Expr.var 1)] }]
+    sessions := [{ role := 0, self := 0, peer := 1 }]
+    agents := [0, 1]
+    nonceDomain := [7]
+    compromised := []
+    secrets := []
+    auths := [] }
+
+def snapshotTrace : List Ev :=
+  [Ev.generate 0 7, Ev.act 0, Ev.act 0, Ev.act 0, Ev.act 0, Ev.ded (Term.nonce 7)]
+
+/-- The run is legal. -/
+theorem snapshot_runs : run snapshotP (initCfg snapshotP) snapshotTrace ≠ none := by decide
+
+/-- The register no longer holds the declared value: a check that reads the store at the end of the
+run sees `agent 0`, not the nonce. -/
+theorem snapshot_register_forgotten :
+    readVar 0 (storeOf ((nthCfg snapshotP snapshotTrace 6)) 0) =
+      some (Term.agent 0) := by decide
+
+/-- And the obligation still names the nonce. -/
+theorem snapshot_obligation_kept :
+    (nthCfg snapshotP snapshotTrace 6).oblig = [Term.nonce 7] := by decide
+
+/-- **The leak is detected.** The final configuration leaks through the obligation, even though
+the register was overwritten three steps earlier. -/
+theorem snapshot_leaks :
+    traceLeaksBool snapshotP (visit snapshotP snapshotTrace) = true := by decide
 
 end Gates
 

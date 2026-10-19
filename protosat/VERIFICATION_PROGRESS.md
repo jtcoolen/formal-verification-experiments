@@ -112,13 +112,61 @@ Two findings that were not in the review and are now recorded:
    alone does not yield `BoundedAttack`; `Regressions` proves the universe fact separately by
    `decide`. Roadmap stage 5 has to fold the bounds into the checker.
 
+## Stage 2 - repaired reference semantics (`ProtSat/Reference.lean`, 896 lines)
+
+A second semantics module, independent of SAT (it imports only `ProtSat.Bounded` and
+`ProtSat.Certificate`), so the eight thousand lines of encoding proofs keep their meaning while
+the defects are fixed where they can be proved fixed. Each gate below is a `decide`-checked
+theorem, and each is the repaired counterpart of a witness in `ProtSat/Regressions.lean`.
+
+**Configuration.** `Cfg = { sess, kn, alloc, oblig }`: the nonce allocation history and the secret
+obligations are state, not readings of the current stores.
+
+| Gate | Theorem | Repairs |
+|---|---|---|
+| nested nonce reuse rejected | `Gates.nested_reuse_rejected` | `Regressions.Semantics.nested_reuse_accepted` |
+| overwrite reuse rejected | `Gates.overwrite_reuse_rejected` | `Regressions.Semantics.overwrite_reuse_accepted` |
+| history monotone | `alloc_mono`, uniqueness `not_generate_allocated`, domain bound `not_generate_outside_domain`, `generate_step` | `nonceUsed` |
+| send/check with an empty nonce domain | `Gates.empty_domain_run` | `RunOK.actB` demanding `d ∈ sh.D` |
+| malformed annotation blocks | `Gates.unset_commit_blocked`, `Gates.nonce_peer_blocked` | `authOfStep` returning `[]` |
+| later claim does not excuse | `Gates.later_claim_does_not_excuse` | `Regressions.Semantics.later_claim_excuses_commit` |
+| wrong peer does not excuse | `Gates.wrong_peer_breaks` | `AuthBreak` ignoring actor and order |
+| injective differs from non-injective | `Gates.replay_agrees_noninjectively`, `Gates.replay_breaks_injectively`, `agreesInj.agrees` | (new capability) |
+| unprovisioned decryption unavailable | `Gates.unprovisioned_decryption_blocked`, positive control `Gates.provisioned_decryption_works` | `Expr.eval` letting any role name any private key |
+| private key not publishable | `Gates.unprovisioned_key_not_publishable`, control `Gates.provisioned_key_publishable` | same |
+| secret survives an overwrite | `Gates.snapshot_leaks` with `Gates.snapshot_register_forgotten` and `Gates.snapshot_obligation_kept` | `Secret.store` re-reading the register |
+| honest runs reach the events being claimed | `Gates.pair_honest_run`, `Gates.reuse_prefix_runs`, `Gates.replay_runs`, `Gates.snapshot_runs` | vacuity guard (roadmap stage 6) |
+
+Design notes:
+
+* Events are `idle | ded t | recv q m | generate q n | act q`. A deterministic action carries
+  nothing; what it published and which authentication event it was are derived from the action and
+  the configuration (`instAt`), which is what the roadmap asked for instead of `act q m d` with
+  dummy fields.
+* `Rel` is defined through the total function `stepOf`, so every gate is a kernel computation
+  rather than an inversion of an inductive. `Runs` is `run P C₀ tr = some Cs`.
+* Credentials: `provisioned P q = priv(self) :: [shrk self peer, shrk peer self]` plus every key
+  appearing in the session's store; `actionUsable` gates `Ev.act` before `actStep` runs, so a
+  role never acquires a key by naming it.
+* `secret e` snapshots the *value* into `Cfg.oblig`; `declaredSecrets = closedSecretTerms ++ oblig`,
+  with `leaksBool_iff` / `traceLeaksBool_iff` connecting the executable and declarative forms.
+
+Still open in stage 2: role parameterisation by `self`/`peer` inside role expressions (roles still
+name principals literally), the dataflow/read-before-binding check, and renaming invariance for
+canonical nonce names.
+
 ## Log
 
 * 2026-10-19 (a) - baseline inspected; build green; three review witnesses promoted to permanent
   regressions in `ProtSat/Regressions.lean`; `ProtSat/Query.lean` added (contract, validator,
   gate theorems); `Analyzer.Verdict.safe` renamed to `encodingUnsat`; README headline, section 8,
   section 10 and the module map corrected; demo extended with the query contract.
-* Next (stage 2) - the repaired reference layer, independent of SAT: allocation history for
-  freshness, action-specific events, ordered actor/peer-aware authentication monitor with
-  malformed-annotation rejection, persistent secret obligations, and the provisioning checks the
-  validator still defers.
+* 2026-10-19 (b) - stage 2a/2b: `ProtSat/Reference.lean` with the allocation history,
+  action-specific events, ordered role-aware authentication monitor, injective-agreement monitor,
+  credential provisioning and persistent secret obligations; twelve kernel-checked gate theorems
+  that each reverse a `Regressions` witness. Build green (1847 jobs), audit clean over 2313
+  theorems.
+* Next - stage 3: one public `BoundedExecution` predicate over the repaired semantics, per-expression
+  `EvalDomain` construction (so `fst (pair x x)` is representable even when the pair is outside
+  `U`), and deriving the compiler's representability conditions from the public bound instead of
+  assuming them.
