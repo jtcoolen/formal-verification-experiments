@@ -65,13 +65,16 @@ open Term Protocol Bounded Encode Encoding Complete Certificate Analyzer DPLL
 
 * `secrecy`: no declared secret (`ProtSat.Secret`, in either form) ever reaches the attacker;
 * `agreement`: non-injective agreement - every `commit` is matched by a `claim` of the same
-  tag, peer and value somewhere in the run (`ProtSat.AuthBreak` is its failure).
-
-Injective agreement is deliberately **not** listed yet: it needs its own trace semantics and its own
-monitor (roadmap stage 3), and a goal with no semantics is a goal no verdict can mean. -/
+  tag, peer and value somewhere in the run (`ProtSat.AuthBreak` is its failure);
+* `agreementInj`: injective agreement - distinct commits need distinct earlier matching claims
+  (`ProtSat.Reference.agreesInj`, with its own proved monitor `ProtSat.Reference.agreesInjBool`).
+  It is a separate goal rather than a flag on `agreement` because the two can disagree on the same
+  model: one claim excused by nothing is a non-injective failure too, while two commits sharing one
+  claim passes the first and fails the second (`ProtSat.Reference.Gates.replayP`). -/
 inductive Goal where
   | secrecy : Goal
   | agreement : Goal
+  | agreementInj : Goal
   deriving Repr, DecidableEq
 
 /-- The goals whose violation the generated CNF demands. `Encode.violationLits` builds one
@@ -90,10 +93,14 @@ theorem goalEncoded_secrecy : goalEncoded Goal.secrecy = true := by
 theorem not_goalEncoded_agreement : goalEncoded Goal.agreement = false := by
   simp [goalEncoded, encodedGoals]
 
+theorem not_goalEncoded_agreementInj : goalEncoded Goal.agreementInj = false := by
+  simp [goalEncoded, encodedGoals]
+
 theorem goalEncoded_iff (g : Goal) : goalEncoded g = true <-> g = Goal.secrecy := by
   cases g
   · simp [goalEncoded_secrecy]
   · simp [not_goalEncoded_agreement]
+  · simp [not_goalEncoded_agreementInj]
 
 /-! ### The query -/
 
@@ -118,12 +125,20 @@ appears here, which is what makes this the target the encoding is measured again
 def Violation (P : Protocol) : Goal -> List Cfg -> List Ev -> Prop
   | Goal.secrecy, Cs, tr => runsLeaks P Cs
   | Goal.agreement, Cs, tr => AuthBreak P Cs tr
+  | Goal.agreementInj, _Cs, _tr => True
 
 theorem violation_secrecy (P : Protocol) (Cs : List Cfg) (tr : List Ev) :
     Violation P Goal.secrecy Cs tr <-> runsLeaks P Cs := Iff.rfl
 
 theorem violation_agreement (P : Protocol) (Cs : List Cfg) (tr : List Ev) :
     Violation P Goal.agreement Cs tr <-> AuthBreak P Cs tr := Iff.rfl
+
+/-- The old semantics has no injective monitor, so every run counts as violating that goal. This is
+deliberate and it is the safe direction: a contract cannot report safety for a property it has no
+semantics for. The CNF route refuses such a query anyway (`goalEncoded`), and the deciding contract
+`ProtSat.Reference.Contract` gives the goal its real semantics. -/
+theorem violation_agreementInj (P : Protocol) :
+    ∀ (Cs : List Cfg) (tr : List Ev), Violation P Goal.agreementInj Cs tr := fun _ _ => trivial
 
 /-- An attack on query `q` through goal `g`: a bounded execution of the query's protocol within
 the query's bounds that violates `g`. -/
@@ -149,6 +164,7 @@ theorem boundedAttackGoals_iff_BoundedAttack (P : Protocol) (B : Bounds) :
     cases g
     · exact ⟨tr, Cs, hbt, Or.inl (by rwa [violation_secrecy] at hv)⟩
     · exact ⟨tr, Cs, hbt, Or.inr (by rwa [violation_agreement] at hv)⟩
+    · exact absurd hg (by simp)
   · rintro ⟨tr, Cs, hbt, h | h⟩
     · exact ⟨Goal.secrecy, by simp, tr, Cs, hbt, h⟩
     · exact ⟨Goal.agreement, by simp [List.mem_cons], tr, Cs, hbt, h⟩
@@ -236,7 +252,9 @@ agreement: a secrecy question is not ill-formed because it ignores an unused tag
 def validate (q : Query) : List Diagnostic :=
   validateSessions q.protocol ++ validateSecrets q.protocol
     ++ validateCompromised q.protocol
-    ++ if Goal.agreement ∈ q.goals then validateAuths q.protocol else []
+    ++ if Goal.agreement ∈ q.goals || Goal.agreementInj ∈ q.goals then
+         validateAuths q.protocol
+       else []
 
 /-- **Well-formedness of a query**: the proposition the validator decides. Every condition is a
 finite membership test over the query's own protocol, so defining the proposition as "the validator

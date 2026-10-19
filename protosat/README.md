@@ -33,8 +33,8 @@ for two reasons that are proved rather than confessed - see
    have no name in the formula.
 
 `ProtSat/Query.lean` is the layer that keeps the two apart. A `Query` names the protocol, the
-bounds and the **selected goals**; `encodedGoals = [secrecy]` says what the CNF can currently
-represent a violation of; and `analyzeQuery` refuses - rather than answering - any query that
+bounds and the **selected goals** (`secrecy`, `agreement`, `agreementInj`);
+`encodedGoals = [secrecy]` says what the CNF can currently represent a violation of; and `analyzeQuery` refuses - rather than answering - any query that
 selects a goal the encoding does not represent:
 
 ```lean
@@ -96,7 +96,12 @@ instantiated on models that already carry permanent witnesses:
   neither of which can be mistaken for security;
 * `Gates.authOrderQ_verdict` and `Gates.authSwappedQ_verdict` - one role, `claim` then `commit`,
   is safe *non-vacuously* (`authOrder_commit_recorded` shows the commit is really reached); swapping
-  the two actions breaks it. The monitor is ordered, and a safe authentication verdict is achievable.
+  the two actions breaks it. The monitor is ordered, and a safe authentication verdict is achievable;
+* `Gates.replayAgreeQ_verdict` and `Gates.replayInjQ_verdict` - one claim then two commits, one
+  protocol and one bound: non-injective agreement is `boundedSafe`, injective agreement is
+  `boundedAttack`, and `replayInjQ_witness_agrees` shows the same execution satisfies the weaker
+  monitor. The selected goal changes the answer, and the CNF route can ask neither question
+  (`replayInjQ_cnf_refused`, `Gates.authQ_cnf_refused`).
 
 
 An `attack` verdict is a certificate, not a claim: `analyze_attack_certificate` shows the named

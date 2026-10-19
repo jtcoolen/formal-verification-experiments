@@ -80,6 +80,7 @@ def goalViolation (P : Protocol) (g : Goal) (Cs : List Cfg) (tr : List Ev) : Pro
   match g with
   | Goal.secrecy => traceLeaks P Cs
   | Goal.agreement => authBreak P Cs tr
+  | Goal.agreementInj => authBreakInj P Cs tr
 
 theorem goalViolation_secrecy (P : Protocol) (Cs : List Cfg) (tr : List Ev) :
     goalViolation P Goal.secrecy Cs tr <-> traceLeaks P Cs := Iff.rfl
@@ -87,11 +88,15 @@ theorem goalViolation_secrecy (P : Protocol) (Cs : List Cfg) (tr : List Ev) :
 theorem goalViolation_agreement (P : Protocol) (Cs : List Cfg) (tr : List Ev) :
     goalViolation P Goal.agreement Cs tr <-> authBreak P Cs tr := Iff.rfl
 
+theorem goalViolation_agreementInj (P : Protocol) (Cs : List Cfg) (tr : List Ev) :
+    goalViolation P Goal.agreementInj Cs tr <-> authBreakInj P Cs tr := Iff.rfl
+
 /-- The executable twin of `goalViolation`, via the two proved monitors. -/
 def goalViolationBool (P : Protocol) (g : Goal) (Cs : List Cfg) (tr : List Ev) : Bool :=
   match g with
   | Goal.secrecy => traceLeaksBool P Cs
   | Goal.agreement => ! (agreesBool (insts P Cs tr))
+  | Goal.agreementInj => ! (agreesInjBool (insts P Cs tr))
 
 theorem goalViolationBool_iff (P : Protocol) (g : Goal) (Cs : List Cfg) (tr : List Ev) :
     goalViolationBool P g Cs tr = true <-> goalViolation P g Cs tr := by
@@ -102,6 +107,11 @@ theorem goalViolationBool_iff (P : Protocol) (g : Goal) (Cs : List Cfg) (tr : Li
         ¬ agreesBool (insts P Cs tr) = true := by
       cases agreesBool (insts P Cs tr) <;> simp
     rw [key, Iff.not (agreesBool_iff (insts P Cs tr))]
+  · simp only [goalViolation, goalViolationBool, authBreakInj]
+    have key : (Bool.not (agreesInjBool (insts P Cs tr)) = true) <->
+        ¬ agreesInjBool (insts P Cs tr) = true := by
+      cases agreesInjBool (insts P Cs tr) <;> simp
+    rw [key, Iff.not (agreesInjBool_iff (insts P Cs tr))]
 
 /-! ### The bounded question -/
 
@@ -251,16 +261,20 @@ theorem boundedSafe_of_attackFound_false {q : Query} (h : attackFound q = false)
 theorem boundedSafe_of_findAttack_none {q : Query} (h : findAttack q = none) : boundedSafe q :=
   boundedSafe_of_attackFound_false (attackFound_false_of_findAttack_none h)
 
-/-- **Safety in the explorer's sense implies safety of the query**: selecting goals can only ask about
-a subset of what the explorer already ruled out. -/
-theorem boundedSafe_of_BoundedSafe {q : Query} (h : BoundedSafe q.protocol q.bounds) :
-    boundedSafe q := by
+/-- **Safety in the explorer's sense implies safety of the query**, provided the query asks only about
+the two properties the explorer monitors. Injective agreement is a third property with its own monitor
+(`ProtSat.Reference.agreesInjBool`), and the explorer does not check it. -/
+theorem boundedSafe_of_BoundedSafe {q : Query}
+    (hgoals : ∀ g ∈ q.goals, g = Goal.secrecy ∨ g = Goal.agreement)
+    (h : BoundedSafe q.protocol q.bounds) : boundedSafe q := by
   intro hat
   obtain ⟨g, hg, tr, Cs, hrun, hv⟩ := hat
   refine h ⟨tr, Cs, hrun, ?_⟩
-  cases g
-  · exact Or.inl hv
-  · exact Or.inr hv
+  rcases hgoals g hg with hsec | hag
+  · subst hsec
+    exact Or.inl hv
+  · subst hag
+    exact Or.inr hv
 
 /-- Dually, an attack the explorer finds is an attack on any query that selected both goals. -/
 theorem boundedAttack_of_BoundedAttack {q : Query} (hsec : Goal.secrecy ∈ q.goals)
@@ -621,7 +635,7 @@ theorem secureQ_verdict : ∃ e, analyze secureQ = Verdict.boundedSafe e :=
 
 /-- The same conclusion from the explorer's already kernel-checked answer, at no extra cost. -/
 theorem secureQ_boundedSafe : boundedSafe secureQ :=
-  boundedSafe_of_BoundedSafe Explore.Gates.secure_bounded_safe
+  boundedSafe_of_BoundedSafe (by simp [secureQ]) Explore.Gates.secure_bounded_safe
 
 /-- And no attack verdict is possible for it. -/
 theorem secureQ_no_attack_verdict : ∀ x, analyze secureQ ≠ Verdict.attack x :=
@@ -776,6 +790,101 @@ and the model declares no secrets at all. -/
 theorem authSwappedQ_witness_not_leak :
     goalViolationBool authSwappedP Goal.secrecy
       (foundNode authSwappedQ).Cs (foundNode authSwappedQ).tr = false := by decide
+
+/-! **Non-injective and injective agreement, told apart by the verdict.**
+
+`ProtSat.Reference.Gates.replayP` shows the two monitors disagree on one hand-written trace. The
+model below makes the same difference *reachable inside the bounded semantics*: one claim followed by
+two commits. Non-injective agreement holds, because each commit has an earlier matching claim;
+injective agreement fails, because the second commit reuses the only claim available. Same protocol,
+same bounds, opposite verdicts - so the selected goal is doing real work rather than renaming the same
+check. -/
+
+/-- One session: claim, then commit, then commit again. -/
+def replayOrderP : Protocol :=
+  { roles := [{ acts := [Action.claim 0 (Expr.agent 0) (Expr.nonce 5),
+                         Action.commit 0 (Expr.agent 0) (Expr.nonce 5),
+                         Action.commit 0 (Expr.agent 0) (Expr.nonce 5)] }]
+    sessions := [{ role := 0, self := 0, peer := 0 }]
+    agents := [0]
+    nonceDomain := []
+    compromised := []
+    secrets := []
+    auths := [{ tag := 0 }] }
+
+def replayOrderB : ProtSat.Bounded.Bounds := { steps := 3, rounds := 0 }
+
+/-- The same query, asking the weaker question. -/
+def replayAgreeQ : Query := Query.mk replayOrderP replayOrderB [Goal.agreement]
+
+/-- The same query, asking the stronger one. -/
+def replayInjQ : Query := Query.mk replayOrderP replayOrderB [Goal.agreementInj]
+
+/-- **Non-vacuity**: the honest execution really reaches both commits. -/
+theorem replayOrder_honest_run :
+    run replayOrderP (initCfg replayOrderP) [Ev.act 0, Ev.act 0, Ev.act 0] ≠ none := by decide
+
+/-- and there really are two commit events on it. -/
+theorem replayOrder_two_commits :
+    ((insts replayOrderP (ProtSat.Reference.Gates.visit replayOrderP [Ev.act 0, Ev.act 0, Ev.act 0])
+      [Ev.act 0, Ev.act 0, Ev.act 0]).filter fun i => i.isCommit).length = 2 := by decide
+
+theorem replayAgreeQ_wellFormed : (validate replayAgreeQ).isEmpty = true := by decide
+theorem replayInjQ_wellFormed : (validate replayInjQ).isEmpty = true := by decide
+
+/-- **Non-injective agreement holds**, with evidence: no permitted execution of three events commits
+without an earlier matching claim. -/
+theorem replayAgreeQ_boundedSafe : boundedSafe replayAgreeQ :=
+  boundedSafe_of_attackFound_false (by decide : attackFound replayAgreeQ = false)
+
+theorem replayAgreeQ_verdict : ∃ e, analyze replayAgreeQ = Verdict.boundedSafe e :=
+  analyze_boundedSafe replayAgreeQ replayAgreeQ_wellFormed (by decide)
+    (by decide : attackFound replayAgreeQ = false)
+
+/-- **Injective agreement fails** on the same model and bounds: two commits, one claim. -/
+theorem replayInjQ_verdict : ∃ x, analyze replayInjQ = Verdict.attack x :=
+  analyze_attack replayInjQ replayInjQ_wellFormed (by decide)
+    (by decide : attackFound replayInjQ = true)
+
+theorem replayInjQ_boundedAttack : boundedAttack replayInjQ := by
+  obtain ⟨x, hx⟩ := replayInjQ_verdict
+  exact analyze_attack_sound replayInjQ hx
+
+/-- The witness violates the injective goal specifically... -/
+theorem replayInjQ_witness_is_inj :
+    goalViolationBool replayOrderP Goal.agreementInj
+      (foundNode replayInjQ).Cs (foundNode replayInjQ).tr = true := by
+  classical
+  obtain ⟨x, hx⟩ := findAttack_some_of_attackFound (by decide : attackFound replayInjQ = true)
+  obtain ⟨_, hpx⟩ := find?_some_mem (p := nodeViolatesQuery replayInjQ) hx
+  have hfn : foundNode replayInjQ = x := foundNode_eq hx
+  rw [hfn]
+  have key : nodeViolatesQuery replayInjQ x =
+      goalViolationBool replayOrderP Goal.agreementInj x.Cs x.tr := by
+    simp [nodeViolatesQuery, replayInjQ]
+  rw [key] at hpx
+  exact hpx
+
+/-- ...and the *same* execution satisfies the non-injective monitor. The two goals are genuinely
+different properties, checked by different proved monitors. -/
+theorem replayInjQ_witness_agrees :
+    goalViolationBool replayOrderP Goal.agreement
+      (foundNode replayInjQ).Cs (foundNode replayInjQ).tr = false := by decide
+
+/-- And it passes the re-checker for the query that selected the injective goal. -/
+theorem replayInjQ_witness_checks : checkWitness replayInjQ (foundNode replayInjQ) = true :=
+  answer_checkWitness (by decide : attackFound replayInjQ = true)
+
+/-- The CNF route refuses the injective question as it refuses the non-injective one, so the goal is
+answerable *only* by the deciding contract. -/
+theorem replayInjQ_cnf_refused :
+    analyzeQuery replayInjQ = Result.unsupportedGoals [Goal.agreementInj] := by
+  have hsel : ∃ g ∈ replayInjQ.goals, ! goalEncoded g :=
+    ⟨Goal.agreementInj, by simp [replayInjQ], by decide⟩
+  have hne : ¬ replayInjQ.goals.isEmpty := by decide
+  rw [analyzeQuery_unsupported_of_unencoded (by simpa using replayInjQ_wellFormed) hne hsel]
+  have : unsupported replayInjQ = [Goal.agreementInj] := by decide
+  rw [this]
 
 end Gates
 

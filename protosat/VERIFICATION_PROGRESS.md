@@ -350,6 +350,20 @@ header.
 | `Gates.secureQ_verdict`, `authQ_verdict`, `transientQ_verdict`, `emptyQ_verdict`, `badQ_verdict` | all four verdicts instantiated on models that already carry permanent witnesses elsewhere: bounded safety on the explorer's secure model, the authentication attack the CNF refuses to ask about, the transient-pair leak the CNF's `WithinBounds` excludes, no goals, and a malformed model |
 | `Gates.authQ_cnf_refused` | the same query on the CNF route returns `unsupportedGoals`, so the two answers can be compared directly |
 
+**Injective agreement is now a selectable goal.** `Goal` gained `agreementInj`, and the deciding
+contract gives it its own semantics and its own proved monitor
+(`ProtSat.Reference.agreesInj` / `agreesInjBool` / `agreesInjBool_iff`, already present from
+stage 2). The gate pair `replayAgreeQ_verdict` and `replayInjQ_verdict` is the point: one
+protocol, one bound, one claim followed by two commits - non-injective agreement is `boundedSafe`
+with evidence, injective agreement is `boundedAttack`, and `replayInjQ_witness_agrees` shows the
+very same execution satisfies the weaker monitor. So the selected goal changes the answer rather than
+renaming the same check, which is what roadmap stage 3 ("implement injective agreement separately; its
+checker needs its own correctness proof") and stage 7 ("examples distinguishing non-injective and
+injective agreement") ask for. `replayInjQ_cnf_refused` records that the CNF route still cannot ask
+either agreement question. In the old contract `Violation P Goal.agreementInj := True`: that
+semantics has no injective monitor, so every run counts as violating the goal and no safety can be
+claimed for a property that is not modelled there - the safe direction for an unimplemented goal.
+
 **Authentication, non-vacuously.** `Gates.authOrderP` is one role whose two actions are
 `claim` then `commit` on the same tag and data; `Gates.authSwappedP` is the same role with the two
 actions swapped. `authOrder_honest_run`, `authOrder_commit_recorded` and `authOrder_agrees` prove
@@ -406,6 +420,12 @@ stay separate in the verdict rather than collapsing into "something went wrong".
   `attack` verdict re-checkable without the search; seven kernel-checked verdict gates including a
   non-vacuous safe authentication verdict (`authOrderQ_verdict`) and its swapped-order counterexample;
   demo extended with the enumeration contract. Build green (1855 jobs), audit clean over 2535 theorems.
+* 2026-10-19 (f) - `Goal.agreementInj` added and wired into the deciding contract: `goalViolation`
+  and `goalViolationBool` gain the injective case with its proved monitor,
+  `boundedSafe_of_BoundedSafe` is restricted to the goals the explorer actually checks, and the new
+  gates give opposite verdicts for the two agreement notions on one model at one bound. The validator
+  now runs the authentication-tag check for either agreement goal. Build green (1855 jobs), audit clean
+  over 2555 theorems.
 * Next - the explorer (above), then stage 3's `BoundedExecution` unification, then per-expression
   `EvalDomain` construction (so `fst (pair x x)` is representable even when the pair is outside
   `U`), and deriving the compiler's representability conditions from the public bound instead of

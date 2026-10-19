@@ -142,6 +142,10 @@ def main : IO Unit := do
     ProtSat.Reference.Contract.Gates.authOrderQ
   demoContract "the same role with the two actions swapped"
     ProtSat.Reference.Contract.Gates.authSwappedQ
+  demoContract "one claim, two commits - asking non-injective agreement"
+    ProtSat.Reference.Contract.Gates.replayAgreeQ
+  demoContract "the same model and bounds - asking injective agreement"
+    ProtSat.Reference.Contract.Gates.replayInjQ
   demoContract "a query that selects no goal" ProtSat.Reference.Contract.Gates.emptyQ
   demoContract "a model with a session naming a role that does not exist"
     ProtSat.Reference.Contract.Gates.badQ
