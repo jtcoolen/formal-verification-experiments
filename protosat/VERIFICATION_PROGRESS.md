@@ -933,6 +933,18 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   the witness being the decoded run rather than a hand-built trace. Still secrecy only:
   `Encode.violationLits` names leak literals and nothing else.
   Build green (1870 jobs), audit clean over 2936 theorems, 22/22 CI gates green.
+* 2026-10-19 (w) - the review's headline defect becomes a theorem: `ProtSat/AuthGap.lean`. For the
+  commit-only witness model, at the same protocol and the same bounds, the CNF route proves
+  `boundedSafeGoals (Query.mk P B [secrecy])` and agreement is violated:
+  `auth_gap_is_real`, and therefore `goal_hypothesis_is_needed`:
+  `¬ (∀ q, boundedSafeGoals (secrecy-only q) → boundedSafeGoals q)`. The goal-selection hypothesis
+  that `CheckedSafe` carries is now known to be load-bearing rather than defensive. The module also
+  proves *why* the formula is unsat there - `why_the_formula_is_unsat` (`violationLits = []`, because
+  the model declares no secret) and `empty_clause_in_encode` - and says plainly that the route
+  cannot distinguish 'nothing to leak' from 'properly protected'. A non-vacuous variant (a protocol
+  that does declare a secret, keeps it, and still breaks agreement, with an honest execution
+  reaching the secret) is the follow-up in progress.
+  Build green, audit clean over 2965 theorems, 22/22 CI gates green.
 * Next - stage 6 is nearly closed: the checker (`Resolution`), the binding of evidence to its
   formula (`checkAgainst`), and the serialization (`Serialize`) are proved, and a checked code now
   reaches `boundedSafeGoals q` (`CheckedSafe.boundedSafe_of_checkedCode`). What is missing is a
