@@ -535,6 +535,19 @@ it. So the residue is not "some runs are unrepresentable" but "the old event typ
 that mean nothing", which is precisely what roadmap stage 2 removed in `ProtSat/Reference.lean` -
 where a deterministic action event carries no fields at all.
 
+**What the two residual fields actually are.** Three more lemmas sharpen the diagnosis.
+`kn_of_rel_act_recv` and `domain_of_rel_act_fresh` show that the *only* rules that read the delivered
+message and the nonce choice are `rRecv` and `rFresh` - and for those two the public bound already
+bounds them (`actM_of_recv`: a received message is known, hence in the universe; `actD_of_fresh`: a
+generated nonce is in the declared domain). So `Residual.actM`/`actD` demand bounds on the two
+fields **no rule reads**, which is the dummy-field defect and nothing else. And
+`actB_vacuous_with_empty_nonce_domain` shows the unconditional form is not merely unprovable but
+false for a whole protocol class: with `nonceDomain = []`, `actB` requires `d ∈ []` of every action
+event - sends, checks, claims included - so no run in which a session acts satisfies it, and the CNF
+completeness theorem is vacuous for such a protocol. That is roadmap stage 2's gate ("a send/check
+must work with an empty fresh-nonce domain") read from the other side, and the repaired semantics
+meets it because its events carry no such field.
+
 Two facts worth keeping from the plumbing: `Runs` inductions in this codebase must be stated over the
 *position* (`cfgOK_at`), not over membership in the visited list - `induction` on `Runs P (initCfg P)
 tr Cs` reverts any hypothesis mentioning the configuration index and the substitution then fails;

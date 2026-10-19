@@ -568,4 +568,77 @@ theorem canonical_actM_actD :
     show (0 : NonceName) ∈ P0.nonceDomain
     decide
 
+/-! ### What the two residual fields really are -/
+
+/-- The only rule that reads the delivered message is `rRecv`, and it reads it as a message the
+attacker already knows. -/
+theorem kn_of_rel_act_recv {P : Protocol} {C C' : Cfg} {q : Nat} {a : Agent} {x : Var}
+    {m : Term} {d : NonceName} (h : Rel P C (Ev.act q m d) C')
+    (hact : P.actionAt q (pcOf C q) = some (Action.recv a x)) : m ∈ C.kn := by
+  cases h with
+  | rRecv _ hm => exact hm
+  | rFresh h _ _ => exact absurd hact (by rw [h]; simp)
+  | rSend h _ => exact absurd hact (by rw [h]; simp)
+  | rAssign h _ => exact absurd hact (by rw [h]; simp)
+  | rCheck h _ _ => exact absurd hact (by rw [h]; simp)
+  | rSecret h => exact absurd hact (by rw [h]; simp)
+  | rClaim h => exact absurd hact (by rw [h]; simp)
+  | rCommit h => exact absurd hact (by rw [h]; simp)
+
+/-- The only rule that reads the nonce choice is `rFresh`, and it reads it from the declared
+domain. -/
+theorem domain_of_rel_act_fresh {P : Protocol} {C C' : Cfg} {q : Nat} {x : Var} {N : NonceName}
+    {m : Term} {d : NonceName} (h : Rel P C (Ev.act q m d) C')
+    (hact : P.actionAt q (pcOf C q) = some (Action.fresh x N)) : d ∈ P.nonceDomain := by
+  cases h with
+  | rFresh _ hd _ => exact hd
+  | rSend h _ => exact absurd hact (by rw [h]; simp)
+  | rRecv h _ => exact absurd hact (by rw [h]; simp)
+  | rAssign h _ => exact absurd hact (by rw [h]; simp)
+  | rCheck h _ _ => exact absurd hact (by rw [h]; simp)
+  | rSecret h => exact absurd hact (by rw [h]; simp)
+  | rClaim h => exact absurd hact (by rw [h]; simp)
+  | rCommit h => exact absurd hact (by rw [h]; simp)
+
+/-- **The two residual fields are the two no rule reads.** Where a rule does read one, the public
+bound already bounds it: a receive delivers a known message, a generation picks a domain nonce. So
+`Residual.actM` and `Residual.actD` are not missing facts about the execution - they are artefacts
+of an event type that stores fields the transition ignores. -/
+theorem actM_of_recv {P : Protocol} {B : Bounds} {tr : List Ev} {Cs : List Cfg}
+    (hbt : BoundedTrace P B tr Cs) (i q : Nat) {a : Agent} {x : Var} {m : Term} {d : NonceName}
+    (he : evAt tr i = Ev.act q m d)
+    (hact : P.actionAt q (pcOf (cfgAt Cs i) q) = some (Action.recv a x)) :
+    m ∈ (shapeOf P B).U := by
+  have hrel : Rel P (cfgAt Cs i) (Ev.act q m d) (cfgAt Cs (i + 1)) := by
+    rw [← he]
+    exact (runs_rel hbt.1).2 i
+  exact knU_of_bounded hbt i (kn_of_rel_act_recv hrel hact)
+
+theorem actD_of_fresh {P : Protocol} {B : Bounds} {tr : List Ev} {Cs : List Cfg}
+    (hbt : BoundedTrace P B tr Cs) (i q : Nat) {x : Var} {N : NonceName} {m : Term}
+    {d : NonceName} (he : evAt tr i = Ev.act q m d)
+    (hact : P.actionAt q (pcOf (cfgAt Cs i) q) = some (Action.fresh x N)) :
+    d ∈ (shapeOf P B).D := by
+  have hrel : Rel P (cfgAt Cs i) (Ev.act q m d) (cfgAt Cs (i + 1)) := by
+    rw [← he]
+    exact (runs_rel hbt.1).2 i
+  exact domain_of_rel_act_fresh hrel hact
+
+/-- **And the unconditional form is not merely unprovable, it is false for a whole class of
+protocols.** With an empty nonce domain, `actB` demands `d ∈ []` of every action event - including
+sends, checks and claims, which generate nothing. Any run in which a session acts is therefore
+outside `actB`, so the CNF completeness theorem is vacuous for it. This is exactly the gate roadmap
+stage 2 sets ("a send/check must work with an empty fresh-nonce domain"), and the repaired semantics
+meets it because its events carry no such field. -/
+theorem actB_vacuous_with_empty_nonce_domain {P : Protocol} {B : Bounds} {tr : List Ev}
+    {Cs : List Cfg} (hD : P.nonceDomain = []) (i q : Nat) {m : Term} {d : NonceName}
+    (he : evAt tr i = Ev.act q m d) :
+    ¬ (∀ i q m d, evAt tr i = Ev.act q m d →
+        q < (shapeOf P B).nS1 /\ m ∈ (shapeOf P B).U /\ d ∈ (shapeOf P B).D) := by
+  intro hall
+  obtain ⟨_, _, hd⟩ := hall i q m d he
+  have hd' : d ∈ P.nonceDomain := hd
+  rw [hD] at hd'
+  exact absurd hd' (by simp)
+
 end ProtSat.BoundedExec
