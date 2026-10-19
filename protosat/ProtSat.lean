@@ -18,3 +18,4 @@ import ProtSat.Query
 import ProtSat.Regressions
 import ProtSat.Reference
 import ProtSat.ExprDomain
+import ProtSat.BoundedCert

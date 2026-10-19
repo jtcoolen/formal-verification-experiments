@@ -189,6 +189,42 @@ the intermediate values a protocol expression computes. That is exactly the diff
 `Regressions.Bounds` - the transient `pair x x` leaves the universe while every configuration stays
 inside it - so the explorer is complete where the CNF is only an under-approximation.
 
+**Correction after a second prototype pass.** Do not enumerate "nodes reachable in exactly k steps"
+and induct on `k` with the start node fixed: the flatMap decomposition gives
+`y ∈ extend x₀, x ∈ reachable k y`, so the induction hypothesis must be generalised over the
+*start* node, which the "exactly k" formulation cannot express. Use an accumulator instead:
+
+```lean
+def explore : (P : Protocol) -> (B : Bounds) -> Nat -> List Node -> List Node
+  | _, _, 0, acc => acc
+  | P, B, k + 1, acc => explore P B k (acc ++ acc.flatMap (extend P B))
+
+def isPrefix (P B) (x : Node) : Prop :=
+  Runs P (initCfg P) x.tr x.Cs /\ boundedCfgs P B x.Cs
+
+-- both directions are then one clean induction on the depth, generalising acc:
+theorem prefix_of_mem_explore : (forall y in acc, isPrefix P B y) ->
+    x in explore P B k acc -> isPrefix P B x
+theorem mem_explore_of_bounded : x0 in explore P B j [initNode P] ->
+    (rest is a bounded one-step-at-a-time extension of x0) ->
+      node x0 rest in explore P B (j + rest.length) [initNode P]
+```
+
+**Third-pass status of the explorer.** `ProtSat/Explore.lean` reached: `inBounds` +
+`inBoundsBool_iff`, `candidates` with the five membership lemmas and `candidates_complete`, `stepB` with
+`step_of_stepB`/`inBounds_of_stepB`/`stepB_of`, `Node`/`initNode`/`extend`/`frontier`,
+`isPrefix` with `isPrefix_initNode`, `isPrefix_of_extend` (needs `run_snoc`, proved by induction with
+`List.getLastD` helpers) and `isPrefix_of_mem_frontier`. What remains is `frontier_complete` (the
+completeness direction) and `explorer_correct`. The blocker is notation, not mathematics: a statement
+of the form `a || b = true` where `a` and `b` are `Bool` parses the `=` inside the `||`; state such
+disjunctions as `a = true ∨ b = true` and use `Bool.or_eq_true_iff`.
+
+Also settled by the prototype: `inBounds` as a conjunction-of-Props with an `inBoundsBool` twin and
+`inBoundsBool_iff` proved by `simp only [...]; tauto`; `stepB := (stepOf ...).filter inBoundsBool`
+with `Option.filter_eq_some_iff` giving the two projections for free; `candidates` membership proved
+by `simp [candidates, sessionEvents, hq, h]`; `extend` returning a singleton list rather than
+`filterMap`, so `List.mem_flatMap` plus `List.mem_singleton` decomposes it.
+
 Practical notes from the prototype, to save the next pass the iterations:
 
 * Put the module inside `namespace ProtSat.Reference.Explore`. `ProtSat.Cfg` and `ProtSat.Ev`
@@ -205,6 +241,41 @@ Practical notes from the prototype, to save the next pass the iterations:
   inside it is what the equation compiler struggled with; using `extend` as a separate
   `def` (or `decreasing_by`) resolves it.
 
+## Stage 3 - expression domains (`ProtSat/ExprDomain.lean`)
+
+The universe bound and the expression bound were the same condition in the encoding, which is what made
+`Complete.RunOK.exprB` an execution-wide hypothesis and `Regressions.Bounds` a genuine soundness gap.
+Separated now:
+
+* `evalDomain U e` builds a finite domain compositionally: variables range over `none` plus `U`,
+  constants over their denotation, unary/binary nodes take the image of their children's domains under
+  `Expr.stepEval1`/`Expr.stepEval2`, and `none` (failure) is always a member - so nothing is clipped
+  to `U` on the way.
+* `eval_mem_evalDomain` proves the reference evaluator cannot leave the domain, for any store whose
+  values lie in `U`, with **no closure assumption** on `U`.
+* `storesInU` is the criterion for an action that stores or publishes.
+* The counterexample, handled: `U0_eq` identifies the regression model's universe by `decide`, and
+  `transient_pair_intermediate_outside`, `transient_pair_result_in_domain`,
+  `transient_pair_stores_in_U`, `transient_intermediate_not_inside` and `transient_bounds_agree` hold
+  simultaneously - the intermediate leaves `U` while the action stays admissible and the test still
+  succeeds.
+
+## Bounded certificates (`ProtSat/BoundedCert.lean`)
+
+Stage 1 recorded that `checkCertificate` verifies neither the step bound nor the universe bound, so an
+accepted certificate gave `Attack` plus a length inequality rather than `BoundedAttack`. Fixed:
+
+* `checkBounded P B c` = `checkCertificate P c` and `c.steps.length ≤ B.steps` and every visited
+  configuration inside `univ P B`.
+* `checkBounded_sound : checkBounded P B c = true -> BoundedAttack P B` - the complete public bounded
+  predicate, with no hypothesis beyond the certificate and the bounds.
+* Both regression certificates pass it (`auth_bounded`, `bounds_bounded`), so the checker is not
+  vacuous.
+* `out_of_universe_accepted_by_old_checker` and `out_of_universe_rejected`: a legal leaking run whose
+  attacker knowledge contains `pair (agent 0) (agent 0)` - outside the universe - is accepted by the
+  old checker and rejected by the bounded one. `too_long_rejected` is the step bound biting on the
+  same certificate.
+
 ## Log
 
 * 2026-10-19 (a) - baseline inspected; build green; three review witnesses promoted to permanent
@@ -218,7 +289,15 @@ Practical notes from the prototype, to save the next pass the iterations:
   theorems.
 * 2026-10-19 (c) - repo housekeeping: `tmp/`, `scratch/` and `output/pdf/` untracked (kept on disk).
   Explorer prototyped and deliberately withdrawn rather than merged with holes; design recorded above.
-* Next - the explorer (above), then stage 3: one public `BoundedExecution` predicate over the repaired semantics, per-expression
+* 2026-10-19 (d) - stage 3: `ProtSat/ExprDomain.lean` (compositional expression domains,
+  `eval_mem_evalDomain`, the transient pair handled) and `ProtSat/BoundedCert.lean`
+  (`checkBounded` + `checkBounded_sound` giving `BoundedAttack`, with the old checker's gap exhibited
+  by `out_of_universe_rejected`). Build green (1851 jobs), audit clean over 2368 theorems.
+  Second explorer prototype: the frontier/prefix machinery is written and mostly proved
+  (`inBounds`, `candidates_complete`, `stepB`, `Node`, `isPrefix`, `extend`, `frontier`,
+  `run_snoc`); it was withdrawn again at the completeness direction rather than committed with holes.
+  The remaining obstacle is stated precisely below.
+* Next - the explorer (above), then stage 3's `BoundedExecution` unification, then per-expression
   `EvalDomain` construction (so `fst (pair x x)` is representable even when the pair is outside
   `U`), and deriving the compiler's representability conditions from the public bound instead of
   assuming them.
