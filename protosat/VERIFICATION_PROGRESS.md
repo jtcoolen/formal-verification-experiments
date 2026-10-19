@@ -907,6 +907,17 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   `REFUTATION EVIDENCE` section prints a checked refutation, the same refutation serialized and
   re-checked, the round trip, and a rejection of evidence transplanted to another formula. CI runs
   22 gates (four new) with the theorem floor raised to 2880. Build green, audit clean.
+* 2026-10-19 (u) - stage 6 third installment: `ProtSat/CheckedSafe.lean`. The evidence chain is now
+  a theorem about a `Query`, not about a formula: `bytes -> proofOfCode -> checkProof -> Unsat ->
+  boundedSafeGoals q`, delivered as `boundedSafe_of_checkedProof` and `boundedSafe_of_checkedCode`.
+  The goal-transfer lemma `boundedSafeGoals_of_secrecy` carries the hypothesis that makes it true
+  (`every selected goal is one the encoding represents`) instead of smuggling a secrecy-only result
+  past a query that asked about agreement. It also constructs a `SafeEvidence` - `Query.lean` said
+  nothing builds one, because the analyser's answer is a solver run; checked evidence does, and
+  `boundedSafe_is_security` shows the answer it builds counts as a security verdict. On the guarded
+  protocol, `qg_safe_of_code` says: any code the checker accepts for this protocol's formula is a
+  bounded-security theorem about the protocol, with no solver in the statement. What is still
+  missing is the producer of such a code.
 * Next - stage 6 is nearly closed: the checker (`Resolution`), the binding of evidence to its
   formula (`checkAgainst`), and the serialization (`Serialize`) are proved; what is missing is a
   PROVER, so that a safety answer arrives with a refutation instead of being re-run in the kernel.
