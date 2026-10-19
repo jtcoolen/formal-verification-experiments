@@ -211,36 +211,71 @@ def univOf (P : Protocol) (B : Bounds) : List Term := Bounded.univ P B
 
 theorem univOf_eq (P : Protocol) (B : Bounds) : univOf P B = Bounded.univ P B := rfl
 
-/-- The shape of the analysis with its value domain extended to name expression intermediates. Only
-the value list changes: sessions, program counters, store slots, the step bound and the expression
-table are the ones `shapeOf` computes. -/
+/-- The shape of the analysis with its value domain extended to name expression intermediates.
+The persistent universe `U` is untouched - it is still what `BoundedTrace` bounds - and only the
+list the expression families number over grows. -/
 def shapeX (P : Protocol) (B : Bounds) : Shape :=
-  { shapeOf P B with U := exprVals (univOf P B) P }
+  { shapeOf P B with V := exprVals (univOf P B) P }
 
-theorem shapeX_U (P : Protocol) (B : Bounds) :
-    (shapeX P B).U = exprVals (univOf P B) P := rfl
+theorem shapeX_V (P : Protocol) (B : Bounds) :
+    (shapeX P B).V = exprVals (univOf P B) P := rfl
 
-/-- **`exprB` discharged as a property of the query.** With the extended value domain, every
-protocol expression is admissible in every universe-valued store - so the seventh boundedness
-condition holds for every run at once, and stops being a hypothesis about the execution. -/
-theorem exprB_of_exprVals {P : Protocol} {B : Bounds} {e : Expr} (he : e ∈ allExprs P)
+/-- The persistent bound is unchanged: extending the nameable domain does not widen what a
+configuration may store. -/
+theorem shapeX_U (P : Protocol) (B : Bounds) : (shapeX P B).U = univOf P B := rfl
+
+/-- The extended domain appends, so the prefix invariant holds and no existing index moves. -/
+theorem shapeX_ShapePrefix (P : Protocol) (B : Bounds) : ShapePrefix (shapeX P B) :=
+  ⟨_, by rw [shapeX_V, shapeX_U]; rfl⟩
+
+/-- Every value a table expression denotes in a universe-valued store is nameable in `V`. -/
+theorem nameable_of_eval {P : Protocol} {B : Bounds} {e : Expr} (he : e ∈ allExprs P)
     {s : List (Var × Term)} (h : storeIn (univOf P B) s) :
-    admissible (shapeX P B) (Expr.eval e s) = true := by
+    Expr.eval e s = none ∨ ∃ t ∈ (shapeX P B).V, Expr.eval e s = some t := by
   have hv := eval_inside_exprVals e he h
-  have hU : (shapeX P B).U = exprVals (univOf P B) P := rfl
-  rw [← hU] at hv
-  have h2 : inside (shapeX P B).U (Expr.eval e s) = admissible (shapeX P B) (Expr.eval e s) :=
-    inside_admissible
-  rw [h2] at hv
-  exact hv
+  cases hval : Expr.eval e s with
+  | none => exact Or.inl rfl
+  | some t =>
+      right
+      have hv2 : inside (exprVals (univOf P B) P) (some t) = true := by rwa [hval] at hv
+      rw [inside] at hv2
+      exact ⟨t, of_decide_eq_true hv2, rfl⟩
 
-/-- The same statement in the form the completeness proof uses: at every position of every run whose
-stores stay inside the persistent universe. -/
-theorem exprB_of_exprVals_at {P : Protocol} {B : Bounds} {cfg : Nat → Cfg}
+/-- **`exprB` discharged as a property of the query.** At the extended domain every value a table
+expression denotes in a universe-valued store reads back exactly - no admissibility hypothesis,
+no closure assumption on the universe, nothing about a run. This is what replaces
+`admissible_valAt_uIdx` under `RunOK.exprB` once the expression families number over `V`. -/
+theorem eval_valAtX_uIdxX {P : Protocol} {B : Bounds} {e : Expr} (he : e ∈ allExprs P)
+    {s : List (Var × Term)} (h : storeIn (univOf P B) s) :
+    valAtX (shapeX P B) (uIdxX (shapeX P B) (Expr.eval e s)) = Expr.eval e s :=
+  valAtX_uIdxX_of_nameable _ _ (nameable_of_eval he h)
+
+/-- The same statement at every position of every run whose stores stay inside the persistent
+universe: the seventh boundedness condition, as a theorem about the query. -/
+theorem eval_valAtX_uIdxX_at {P : Protocol} {B : Bounds} {cfg : Nat → Cfg}
     (hstore : ∀ i q, storeIn (univOf P B) (storeOf (cfg i) q))
     (i q : Nat) (e : Expr) (he : e ∈ allExprs P) :
-    admissible (shapeX P B) (Expr.eval e (storeOf (cfg i) q)) = true :=
-  exprB_of_exprVals he (hstore i q)
+    valAtX (shapeX P B) (uIdxX (shapeX P B) (Expr.eval e (storeOf (cfg i) q))) =
+      Expr.eval e (storeOf (cfg i) q) :=
+  eval_valAtX_uIdxX he (hstore i q)
+
+/-- And the gate equations keep their content: a step applied to the children's values reads back
+to the parent's value, which is exactly what `rdXe_unary` and `rdXe_binary` need. -/
+theorem stepEval1_valAtX_uIdxX {P : Protocol} {B : Bounds} {e c : Expr} (he : e ∈ allExprs P)
+    (hc : Expr.child1 e = some c) {s : List (Var × Term)} (h : storeIn (univOf P B) s) :
+    valAtX (shapeX P B)
+      (uIdxX (shapeX P B) (Expr.stepEval1 e (Expr.eval c s))) =
+      Expr.stepEval1 e (Expr.eval c s) := by
+  rw [← Expr.eval_child1 hc]
+  exact eval_valAtX_uIdxX he h
+
+theorem stepEval2_valAtX_uIdxX {P : Protocol} {B : Bounds} {e a b : Expr} (he : e ∈ allExprs P)
+    (hc : Expr.child2 e = some (a, b)) {s : List (Var × Term)} (h : storeIn (univOf P B) s) :
+    valAtX (shapeX P B)
+      (uIdxX (shapeX P B) (Expr.stepEval2 e (Expr.eval a s) (Expr.eval b s))) =
+      Expr.stepEval2 e (Expr.eval a s) (Expr.eval b s) := by
+  rw [← Expr.eval_child2 hc]
+  exact eval_valAtX_uIdxX he h
 
 /-- The extended domain is never smaller than the universe, and it is strictly bigger exactly when
 some intermediate was unnameable. -/
@@ -281,27 +316,26 @@ theorem transient_nameable :
 /-- The gate that `Regressions.gate_clipped` shows collapses to the unset index does not collapse at
 the extended domain: the intermediate pair gets an index of its own. -/
 theorem transient_gate_not_clipped :
-    uIdx (shapeX boundsP boundsB) (some (Term.pair (Term.agent 0) (Term.agent 0))) <
-      ((shapeX boundsP boundsB).U).length := by
-  have hne : (shapeX boundsP boundsB).U = exprVals (univOf boundsP boundsB) boundsP := rfl
-  have hmem : Term.pair (Term.agent 0) (Term.agent 0) ∈ (shapeX boundsP boundsB).U := by
+    uIdxX (shapeX boundsP boundsB) (some (Term.pair (Term.agent 0) (Term.agent 0))) <
+      ((shapeX boundsP boundsB).V).length := by
+  have hne : (shapeX boundsP boundsB).V = exprVals (univOf boundsP boundsB) boundsP := rfl
+  have hmem : Term.pair (Term.agent 0) (Term.agent 0) ∈ (shapeX boundsP boundsB).V := by
     rw [hne]
     exact transient_nameable
-  have hidx : uIdx (shapeX boundsP boundsB) (some (Term.pair (Term.agent 0) (Term.agent 0))) =
-      ixOf (Term.pair (Term.agent 0) (Term.agent 0)) (shapeX boundsP boundsB).U := by
-    simp [uIdx, hmem]
+  have hidx : uIdxX (shapeX boundsP boundsB) (some (Term.pair (Term.agent 0) (Term.agent 0))) =
+      ixOf (Term.pair (Term.agent 0) (Term.agent 0)) (shapeX boundsP boundsB).V := by
+    simp [uIdxX, hmem]
   rw [hidx]
   exact ixOf_lt _ _ hmem
 
 /-- And the index names the right value: `valAt` at the index `uIdx` returns recovers the
 intermediate, which is the property `admissible_valAt_uIdx` grants only under `admissible`. -/
-theorem transient_valAt_uIdx :
-    valAt (shapeX boundsP boundsB)
-        (uIdx (shapeX boundsP boundsB) (some (Term.pair (Term.agent 0) (Term.agent 0)))) =
+theorem transient_valAtX_uIdxX :
+    valAtX (shapeX boundsP boundsB)
+        (uIdxX (shapeX boundsP boundsB) (some (Term.pair (Term.agent 0) (Term.agent 0)))) =
       some (Term.pair (Term.agent 0) (Term.agent 0)) :=
-  admissible_valAt_uIdx (some (Term.pair (Term.agent 0) (Term.agent 0)))
-    (exprB_of_exprVals (P := boundsP) (B := boundsB)
-      (e := Expr.pair (Expr.var 0) (Expr.var 0)) (by decide) storeIn_transient)
+  eval_valAtX_uIdxX (P := boundsP) (B := boundsB)
+    (e := Expr.pair (Expr.var 0) (Expr.var 0)) (by decide) storeIn_transient
 
 /-! ### No closure bound discharges the condition -/
 
@@ -479,12 +513,15 @@ theorem no_bound_discharges_exprB (r : Nat) :
     exact admissible_false hnot
 
 /-- The contrast in one line: at the *same* bound, the store that breaks admissibility over the
-universe is admissible over the extended value domain. -/
+universe has its value named by the extended domain. -/
 theorem exprB_holds_at_X_for_deep_store (r : Nat) :
-    admissible (shapeX boundsP {steps := 3, rounds := r})
-      (Expr.eval (Expr.pair (Expr.var 0) (Expr.var 0))
-        [(0, (fun m => Term.hash m)^[r] seedPair)]) = true :=
-  exprB_of_exprVals (P := boundsP) (B := {steps := 3, rounds := r})
+    valAtX (shapeX boundsP {steps := 3, rounds := r})
+      (uIdxX (shapeX boundsP {steps := 3, rounds := r})
+        (Expr.eval (Expr.pair (Expr.var 0) (Expr.var 0))
+          [(0, (fun m => Term.hash m)^[r] seedPair)])) =
+      Expr.eval (Expr.pair (Expr.var 0) (Expr.var 0))
+        [(0, (fun m => Term.hash m)^[r] seedPair)] :=
+  eval_valAtX_uIdxX (P := boundsP) (B := {steps := 3, rounds := r})
     (e := Expr.pair (Expr.var 0) (Expr.var 0)) (by decide) (by
       intro p hp
       have hpeq : p = (0, (fun m => Term.hash m)^[r] seedPair) := by simpa using hp
@@ -513,17 +550,36 @@ theorem exprB_of_exprBOn {P : Protocol} {sh : Shape} {cfg : Nat → Cfg}
   rw [hEq]
   exact h1 e he
 
+/-- Admissibility with respect to the nameable domain rather than the persistent one. -/
+def admissibleX (sh : Shape) : Val -> Bool
+  | none => true
+  | some t => sh.V.contains t
+
+theorem admissibleX_none (sh : Shape) : admissibleX sh none = true := rfl
+
+theorem admissibleX_some (sh : Shape) (t : Term) : admissibleX sh (some t) = sh.V.contains t := rfl
+
+/-- The decidable form of the extended-domain check. -/
+def exprBOnX (P : Protocol) (sh : Shape) (stores : List (List (Var × Term))) : Bool :=
+  stores.all fun s => (allExprs P).all fun e => admissibleX sh (Expr.eval e s)
+
 /-- The check passes at the extended domain for *every* list of universe-valued stores: this is
-`exprB_of_exprVals` in the decidable form. -/
-theorem exprBOn_shapeX {P : Protocol} {B : Bounds}
+`eval_valAtX_uIdxX` in the decidable form, and it is the statement the analyser can run before
+committing to the extended encoding. -/
+theorem exprBOnX_shapeX {P : Protocol} {B : Bounds}
     (stores : List (List (Var × Term))) (h : ∀ s ∈ stores, storeIn (univOf P B) s) :
-    exprBOn P (shapeX P B) stores = true := by
-  unfold exprBOn
+    exprBOnX P (shapeX P B) stores = true := by
+  unfold exprBOnX
   rw [List.all_eq_true]
   intro s hs
   rw [List.all_eq_true]
   intro e he
-  exact exprB_of_exprVals he (h s hs)
+  cases nameable_of_eval he (h s hs) with
+  | inl hnone => rw [hnone, admissibleX_none]
+  | inr hx =>
+      obtain ⟨t, ht, hEq⟩ := hx
+      rw [hEq, admissibleX_some]
+      simpa [shapeX_V] using ht
 
 /-- The transient-pair run fails the check at the bound of `Regressions.Bounds` - the same fact
 `not_withinBounds` extracts from the `WithinBounds` hypothesis, now as a computation. -/

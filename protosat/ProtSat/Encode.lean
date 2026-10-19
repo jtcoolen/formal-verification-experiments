@@ -240,6 +240,16 @@ structure Shape where
   steps : Nat
   /-- The number of distinct subexpressions over all roles. -/
   nE1 : Nat
+  /-- The **extended value domain**: the universe, and possibly more. The store, knowledge,
+  delivery and authentication families read their value stride from shVal (over U); the
+  expression families are the only ones that need to name intermediate values, and they read
+  their stride from shValX (over V). At shapeOf the two lists are equal, so the generated CNF
+  is exactly what it was before this field existed. ProtSat.Represent.shapeX is the shape where
+  V is the closure of U under the protocol expressions, which is what lets Complete.RunOK.exprB
+  become a property of the domain instead of a hypothesis about the run. The invariant
+  ShapePrefix says V extends U by appending, so no value the other families already name gets
+  renumbered. -/
+  V : List Term
 
 /-! ### Deduction instances -/
 
@@ -352,7 +362,8 @@ def shapeOf (P : Protocol) (B : Bounds) : Shape :=
     U := Bounded.univ P B,
     D := P.nonceDomain,
     steps := B.steps,
-    nE1 := (allExprs P).length }
+    nE1 := (allExprs P).length,
+    V := Bounded.univ P B }
 
 /-! ### Group sizes and bases -/
 
@@ -613,6 +624,122 @@ theorem uIdx_lt' (sh : Shape) (v : Val) : uIdx sh v < shVal sh := by
         omega
       · rw [if_neg ht]
         exact hlen
+
+/-! ### The extended value domain (roadmap stage 4) -/
+
+/-- Appending a list keeps the first-occurrence index of everything already in the prefix. -/
+theorem ixOf_append_left {α : Type} [BEq α] [LawfulBEq α] (a : α) (l r : List α) (h : a ∈ l) :
+    ixOf a (l ++ r) = ixOf a l := by
+  induction l with
+  | nil => exact absurd h (by simp)
+  | cons x xs ih =>
+      by_cases hx : x == a
+      · have hxa : x = a := by simpa using hx
+        subst hxa
+        rw [List.cons_append]
+        simp [ixOf]
+      · have hmem : a ∈ xs := by
+          rw [List.mem_cons] at h
+          rcases h with rfl | hxs
+          · exact absurd (by simp) hx
+          · exact hxs
+        have h1 : ixOf a ((x :: xs) ++ r) = ixOf a (xs ++ r) + 1 := by
+          rw [List.cons_append]
+          simp [ixOf, hx]
+        have h2 : ixOf a (x :: xs) = ixOf a xs + 1 := by simp [ixOf, hx]
+        rw [h1, h2, ih hmem]
+
+/-- **The prefix invariant of a shape**: the extended value domain is the universe with extra names
+appended after it. Nothing the store, knowledge, delivery or authentication families already number
+changes position, so widening V can only add names. -/
+def ShapePrefix (sh : Shape) : Prop := ∃ W, sh.V = sh.U ++ W
+
+/-- The shape of an analysis satisfies it with nothing appended: the generated CNF is unchanged. -/
+theorem shapeOf_ShapePrefix (P : Protocol) (B : Bounds) : ShapePrefix (shapeOf P B) :=
+  ⟨[], by show (shapeOf P B).V = (shapeOf P B).U ++ []; simp [shapeOf]⟩
+
+/-- A universe message is nameable in the extended domain. -/
+theorem mem_V_of_mem_U {sh : Shape} (hp : ShapePrefix sh) {t : Term} (ht : t ∈ sh.U) :
+    t ∈ sh.V := by
+  obtain ⟨W, hV⟩ := hp
+  rw [hV]
+  exact List.mem_append_left _ ht
+
+/-- **Index preservation.** Under the prefix invariant a universe message keeps its number, so
+widening the domain cannot renumber a value another family already names. -/
+theorem ixOf_V_eq_ixOf_U {sh : Shape} (hp : ShapePrefix sh) {t : Term} (ht : t ∈ sh.U) :
+    ixOf t sh.V = ixOf t sh.U := by
+  obtain ⟨W, hV⟩ := hp
+  rw [hV]
+  exact ixOf_append_left t sh.U W ht
+
+/-- Stride of the expression-value domain: unset plus every nameable value. -/
+def shValX (sh : Shape) : Nat := sh.V.length + 1
+
+theorem shValX_pos (sh : Shape) : 0 < shValX sh := Nat.succ_pos _
+
+/-- The value with number u in the extended domain. -/
+def valAtX (sh : Shape) (u : Nat) : Val := rget sh.V u
+
+/-- The number of a value in the extended domain. Written exactly as uIdx so the two agree where
+they overlap: what uIdx clips away - any message outside U - is simply present in V, so for the
+expression families the clip never fires. -/
+def uIdxX (sh : Shape) : Val -> Nat
+  | none => sh.V.length
+  | some t => if t ∈ sh.V then ixOf t sh.V else sh.V.length
+
+theorem valAtX_uIdxX_none (sh : Shape) : valAtX sh (uIdxX sh none) = none := rget_len sh.V
+
+theorem valAtX_uIdxX_some (sh : Shape) {t : Term} (ht : t ∈ sh.V) :
+    valAtX sh (uIdxX sh (some t)) = some t := by
+  show valAtX sh (if t ∈ sh.V then ixOf t sh.V else sh.V.length) = some t
+  rw [if_pos ht]
+  exact rget_ixOf sh.V t ht
+
+/-- **The property that replaces admissible_valAt_uIdx.** A value the extended domain names - or
+nothing - reads back exactly, with no admissibility hypothesis about a run. -/
+theorem valAtX_uIdxX_of_nameable (sh : Shape) (v : Val)
+    (h : v = none ∨ ∃ t ∈ sh.V, v = some t) : valAtX sh (uIdxX sh v) = v := by
+  cases h with
+  | inl hv => subst hv; exact valAtX_uIdxX_none sh
+  | inr h =>
+      obtain ⟨t, ht, rfl⟩ := h
+      exact valAtX_uIdxX_some sh ht
+
+/-- The extended index is always in range, exactly as uIdx is. -/
+theorem uIdxX_lt (sh : Shape) (v : Val) : uIdxX sh v < shValX sh := by
+  have hlen : sh.V.length < shValX sh := by show sh.V.length < sh.V.length + 1; omega
+  cases v with
+  | none => exact hlen
+  | some t =>
+      show (if t ∈ sh.V then ixOf t sh.V else sh.V.length) < shValX sh
+      by_cases ht : t ∈ sh.V
+      · rw [if_pos ht]
+        have h1 : ixOf t sh.V ≤ sh.V.length := ixOf_le sh.V t
+        omega
+      · rw [if_neg ht]
+        exact hlen
+
+/-- Where the domains overlap the numbers agree: the transport lemma the cross-family clauses need
+when an expression index is compared with a store, knowledge or delivery index. -/
+theorem uIdxX_eq_uIdx_of_mem {sh : Shape} (hp : ShapePrefix sh) {t : Term} (ht : t ∈ sh.U) :
+    uIdxX sh (some t) = uIdx sh (some t) := by
+  show (if t ∈ sh.V then ixOf t sh.V else sh.V.length) =
+    (if t ∈ sh.U then ixOf t sh.U else sh.U.length)
+  rw [if_pos (mem_V_of_mem_U hp ht), if_pos ht, ixOf_V_eq_ixOf_U hp ht]
+
+/-- When the two domains are equal - the shape of the analysis today - every index agrees, so
+switching a family to the extended stride changes nothing. -/
+theorem uIdxX_eq_uIdx_of_V_eq_U {sh : Shape} (h : sh.V = sh.U) (v : Val) :
+    uIdxX sh v = uIdx sh v := by
+  unfold uIdxX uIdx
+  cases v with
+  | none => rw [h]
+  | some t => rw [h]
+
+theorem shValX_eq_shVal_of_V_eq_U {sh : Shape} (h : sh.V = sh.U) : shValX sh = shVal sh := by
+  show sh.V.length + 1 = sh.U.length + 1
+  rw [h]
 
 /-- The index of a value is within the stride: now immediate, because an out-of-universe
 message also maps to the unset index. -/
