@@ -58,10 +58,10 @@ block-range lemmas are all stated against `nVarsAll`. There is a second route, a
 `ProtSat/Reference.lean` is a finite deterministic transition system, so its bounded executions can
 be enumerated. `ProtSat/Explore.lean` does that and proves the answer *is* the security statement:
 
-`@lean
+```lean
 Explore.explorer_correct        : explorerAttack P B = true <-> BoundedAttack P B
 Explore.boundedSafe_of_explorer : explorerAttack P B = false -> BoundedSafe P B
-`@
+```
 
 No encoding, no representability hypothesis and no solver appears in either direction, and both goals
 `ProtSat.Query` distinguishes are covered. The gates are kernel-checked by `decide`:
@@ -77,7 +77,7 @@ semantics: `goalViolation P g` selects `traceLeaks` for secrecy and the ordered 
 execution, and `boundedSafe q` is the statement a SAFE verdict is supposed to mean. The enumeration
 is proved to decide exactly that question:
 
-`lean
+```lean
 Contract.attackFound_decides : attackFound q = true <-> boundedAttack q
 Contract.analyze_boundedSafe_sound : analyze q = boundedSafe e -> boundedSafe q
 Contract.analyze_attack_sound : analyze q = attack x -> boundedAttack q
@@ -93,7 +93,11 @@ instantiated on models that already carry permanent witnesses:
   (`Gates.authQ_cnf_refused` shows it answering `unsupportedGoals` instead);
 * `Gates.transientQ_verdict` - the leak `Regressions.Bounds` proves the CNF cannot name;
 * `Gates.emptyQ_verdict` and `Gates.badQ_verdict` - selecting nothing, and a malformed model,
-  neither of which can be mistaken for security.
+  neither of which can be mistaken for security;
+* `Gates.authOrderQ_verdict` and `Gates.authSwappedQ_verdict` - one role, `claim` then `commit`,
+  is safe *non-vacuously* (`authOrder_commit_recorded` shows the commit is really reached); swapping
+  the two actions breaks it. The monitor is ordered, and a safe authentication verdict is achievable.
+
 
 An `attack` verdict is a certificate, not a claim: `analyze_attack_certificate` shows the named
 execution is a bounded run that violates a selected goal, and `checkWitness` re-checks exactly that

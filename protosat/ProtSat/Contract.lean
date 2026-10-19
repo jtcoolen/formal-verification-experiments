@@ -684,6 +684,99 @@ theorem badQ_validate : validate badQ = [Diagnostic.roleOutOfRange 0 5] := by de
 theorem badQ_verdict : analyze badQ = Verdict.invalidModel [Diagnostic.roleOutOfRange 0 5] := by
   rw [analyze_invalid badQ (by rw [badQ_validate]; simp), badQ_validate]
 
+/-! **Authentication, non-vacuously safe.**
+
+Roadmap stage 7 asks that a positive security example first have a proved honest execution reaching
+the events it is about; otherwise the property may hold only because the protocol never claims
+anything. The two models below differ *only* in the order of two actions inside one role, so together
+they show that the monitor is ordered, that a commit really is reached, and that a safe authentication
+verdict is achievable rather than vacuous. -/
+
+/-- One session, claim then commit, on the same tag and data. -/
+def authOrderP : Protocol :=
+  { roles := [{ acts := [Action.claim 0 (Expr.agent 0) (Expr.nonce 5),
+                         Action.commit 0 (Expr.agent 0) (Expr.nonce 5)] }]
+    sessions := [{ role := 0, self := 0, peer := 0 }]
+    agents := [0]
+    nonceDomain := []
+    compromised := []
+    secrets := []
+    auths := [{ tag := 0 }] }
+
+/-- The same role with the two actions swapped: the commit happens with no claim before it. -/
+def authSwappedP : Protocol :=
+  { authOrderP with
+    roles := [{ acts := [Action.commit 0 (Expr.agent 0) (Expr.nonce 5),
+                         Action.claim 0 (Expr.agent 0) (Expr.nonce 5)] }] }
+
+def authOrderB : ProtSat.Bounded.Bounds := { steps := 2, rounds := 0 }
+
+def authOrderQ : Query := Query.mk authOrderP authOrderB [Goal.agreement]
+def authSwappedQ : Query := Query.mk authSwappedP authOrderB [Goal.agreement]
+
+/-- **Non-vacuity**: the honest execution really is a run. -/
+theorem authOrder_honest_run :
+    run authOrderP (initCfg authOrderP) [Ev.act 0, Ev.act 0] ≠ none := by decide
+
+/-- and its second event is recorded as a commit. -/
+theorem authOrder_commit_recorded :
+    ((insts authOrderP (ProtSat.Reference.Gates.visit authOrderP [Ev.act 0, Ev.act 0])
+      [Ev.act 0, Ev.act 0]).any fun i => i.isCommit) = true := by decide
+
+/-- and the monitor accepts the honest trace. -/
+theorem authOrder_agrees :
+    agreesBool (insts authOrderP
+      (ProtSat.Reference.Gates.visit authOrderP [Ev.act 0, Ev.act 0]) [Ev.act 0, Ev.act 0]) = true := by
+  decide
+
+theorem authOrderQ_wellFormed : (validate authOrderQ).isEmpty = true := by decide
+theorem authOrderQ_hasGoals : authOrderQ.goals.isEmpty = false := by decide
+
+/-- **A safe authentication verdict that is not vacuous**: commits do happen, and every permitted
+execution that reaches one has already performed the matching claim. -/
+theorem authOrderQ_boundedSafe : boundedSafe authOrderQ :=
+  boundedSafe_of_attackFound_false (by decide : attackFound authOrderQ = false)
+
+theorem authOrderQ_verdict : ∃ e, analyze authOrderQ = Verdict.boundedSafe e :=
+  analyze_boundedSafe authOrderQ authOrderQ_wellFormed authOrderQ_hasGoals
+    (by decide : attackFound authOrderQ = false)
+
+theorem authSwappedQ_wellFormed : (validate authSwappedQ).isEmpty = true := by decide
+theorem authSwappedQ_hasGoals : authSwappedQ.goals.isEmpty = false := by decide
+
+/-- Swapping the two actions breaks it: a later claim cannot excuse an earlier commit. Unlike
+`ProtSat.Regressions.Semantics.later_claim_excuses_commit`, this commit is actually reachable, so
+the ordering requirement is being tested rather than asserted. -/
+theorem authSwappedQ_verdict : ∃ x, analyze authSwappedQ = Verdict.attack x :=
+  analyze_attack authSwappedQ authSwappedQ_wellFormed authSwappedQ_hasGoals
+    (by decide : attackFound authSwappedQ = true)
+
+theorem authSwappedQ_boundedAttack : boundedAttack authSwappedQ := by
+  obtain ⟨x, hx⟩ := authSwappedQ_verdict
+  exact analyze_attack_sound authSwappedQ hx
+
+/-- And the violation is the authentication goal specifically: the witness's agreement monitor is the
+one that fires. -/
+theorem authSwappedQ_witness_is_auth :
+    goalViolationBool authSwappedP Goal.agreement
+      (foundNode authSwappedQ).Cs (foundNode authSwappedQ).tr = true := by
+  classical
+  obtain ⟨x, hx⟩ := findAttack_some_of_attackFound (by decide : attackFound authSwappedQ = true)
+  obtain ⟨_, hpx⟩ := find?_some_mem (p := nodeViolatesQuery authSwappedQ) hx
+  have hfn : foundNode authSwappedQ = x := foundNode_eq hx
+  rw [hfn]
+  have key : nodeViolatesQuery authSwappedQ x =
+      goalViolationBool authSwappedP Goal.agreement x.Cs x.tr := by
+    simp [nodeViolatesQuery, authSwappedQ]
+  rw [key] at hpx
+  exact hpx
+
+/-- The same witness is *not* flagged as a secrecy break: the two goals stay separate in the verdict,
+and the model declares no secrets at all. -/
+theorem authSwappedQ_witness_not_leak :
+    goalViolationBool authSwappedP Goal.secrecy
+      (foundNode authSwappedQ).Cs (foundNode authSwappedQ).tr = false := by decide
+
 end Gates
 
 end ProtSat.Reference.Contract

@@ -350,6 +350,17 @@ header.
 | `Gates.secureQ_verdict`, `authQ_verdict`, `transientQ_verdict`, `emptyQ_verdict`, `badQ_verdict` | all four verdicts instantiated on models that already carry permanent witnesses elsewhere: bounded safety on the explorer's secure model, the authentication attack the CNF refuses to ask about, the transient-pair leak the CNF's `WithinBounds` excludes, no goals, and a malformed model |
 | `Gates.authQ_cnf_refused` | the same query on the CNF route returns `unsupportedGoals`, so the two answers can be compared directly |
 
+**Authentication, non-vacuously.** `Gates.authOrderP` is one role whose two actions are
+`claim` then `commit` on the same tag and data; `Gates.authSwappedP` is the same role with the two
+actions swapped. `authOrder_honest_run`, `authOrder_commit_recorded` and `authOrder_agrees` prove
+the commit is actually reached and accepted, so `authOrderQ_boundedSafe` is a safe authentication
+verdict about a protocol that really claims things - not the safety of a dead role.
+`authSwappedQ_boundedAttack` is the matching negative: with the order reversed the commit has no
+earlier claim, which is `Regressions.Semantics.later_claim_excuses_commit` made reachable instead of
+merely observed in the old semantics. `authSwappedQ_witness_is_auth` and
+`authSwappedQ_witness_not_leak` pin the violation to the goal the query selected, so the two goals
+stay separate in the verdict rather than collapsing into "something went wrong".
+
 **Honest scope notes.**
 
 * `Contract.boundedSafe` and `Query.boundedSafeGoals` are deliberately *different* propositions,
@@ -357,12 +368,15 @@ header.
   Nothing bridges them, and that is the point: the CNF route must not inherit a security label from a
   proof about a different model. `Query.boundedSafe_of_encodingUnsat` still needs the
   representability hypothesis that `Regressions.Bounds` shows is not implied.
-* The `BOUNDED SAFE` gate selects both goals on a model with no `claim`/`commit` actions, so its
-  authentication half holds vacuously. The non-vacuity work of roadmap stage 7 - a *safe*
-  authentication example whose honest execution reaches the commit through a value the attacker cannot
-  fabricate - is still open. `Gates.authQ_verdict` (a one-event attack: schedule the commit, block the
-  claim) is the reminder that agreement claims need an explicit progress assumption, or a causal binding
-  between claim and commit, before they mean what a reader assumes they mean.
+* `Gates.secureQ_verdict` selects both goals on a model with no `claim`/`commit` actions, so its
+  authentication half is vacuous *there*; the non-vacuous safe authentication verdict is
+  `Gates.authOrderQ_verdict`. What remains open is the cross-session case: under a Dolev-Yao attacker
+  that may block any session, agreement between two *different* principals is refuted by scheduling the
+  commit and not the claim (`Gates.authQ_verdict`, one event). A safe cross-session example needs
+  either an explicit progress assumption in the query or a causal binding from claim to commit, and the
+  message universe as defined gives no such binding: every term of `univ P B` is injectable at any
+  time, so passing a check on a universe value cannot witness that a particular honest action happened.
+  Saying that plainly is better than hiding it behind a model that only looks strong.
 * Cost is exponential in `B.steps`, same as the explorer's.
 
 ## Log
@@ -389,8 +403,9 @@ header.
 * 2026-10-19 (e) - `ProtSat/Contract.lean`: the goal-indexed contract over the repaired
   semantics with `attackFound_decides` (sound and complete, no encoding hypothesis) and an analyser
   that issues `boundedSafe` with evidence; `analyze_attack_certificate` and `checkWitness` make an
-  `attack` verdict re-checkable without the search; five kernel-checked verdict gates; demo extended
-  with the enumeration contract. Build green (1855 jobs), audit clean over 2521 theorems.
+  `attack` verdict re-checkable without the search; seven kernel-checked verdict gates including a
+  non-vacuous safe authentication verdict (`authOrderQ_verdict`) and its swapped-order counterexample;
+  demo extended with the enumeration contract. Build green (1855 jobs), audit clean over 2535 theorems.
 * Next - the explorer (above), then stage 3's `BoundedExecution` unification, then per-expression
   `EvalDomain` construction (so `fst (pair x x)` is representable even when the pair is outside
   `U`), and deriving the compiler's representability conditions from the public bound instead of

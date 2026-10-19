@@ -138,6 +138,10 @@ def main : IO Unit := do
     ProtSat.Reference.Contract.Gates.authQ
   demoContract "transient-pair model, asking about secrecy"
     ProtSat.Reference.Contract.Gates.transientQ
+  demoContract "claim then commit in one role, asking about agreement"
+    ProtSat.Reference.Contract.Gates.authOrderQ
+  demoContract "the same role with the two actions swapped"
+    ProtSat.Reference.Contract.Gates.authSwappedQ
   demoContract "a query that selects no goal" ProtSat.Reference.Contract.Gates.emptyQ
   demoContract "a model with a session naming a role that does not exist"
     ProtSat.Reference.Contract.Gates.badQ
