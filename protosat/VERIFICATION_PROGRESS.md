@@ -436,6 +436,67 @@ The distinction the roadmap asked for - "keep mathematical reference solving tot
 from a production driver that may time out" - is now in the API with theorems on both sides: the total
 `analyze` never says `unknown`, and the bounded driver says nothing at all when it runs out.
 
+## Stage 4, first installment: representability is a value-domain question (`ProtSat/Represent.lean`)
+
+The narrowing that `Regressions.Bounds` exhibits lives in one field of `Complete.RunOK`:
+
+```
+exprB : ∀ i q e, e ∈ allExprs P → admissible sh (Expr.eval e (storeOf (cfg i) q)) = true
+```
+
+`exprB` is consumed at exactly six sites in three lemmas (Complete.lean:2540, 2551, 3200, 3307,
+3359): `rdXe_unary` and `rdXe_binary` - the two Tseitin gate equations - and three places that only
+need the *published* value to be a universe message. Everything else in `RunOK` is either the public
+bound itself or a theorem about the protocol. So closing stage 4 means giving those two gate
+equations a domain in which the intermediate has a name.
+
+**The first thing proved is that the bound cannot do it.** `no_bound_discharges_exprB`: for *every*
+closure bound `r` there is a store whose only value lies in `univ boundsP ⟨3, r⟩` and in which the
+table entry `pair (var 0) (var 0)` denotes a message that `univ boundsP ⟨3, r⟩` does not contain.
+The proof is a depth count (`td`, `level`, `td_closeOne`: one closure round adds at most one to the
+depth of anything, and `hash`-nesting a depth-one seed reaches that maximum at every round). So
+`exprB` asks the universe to be closed under pairing, which no finite universe is; raising
+`Bounds.rounds` can never discharge it. That settles the question the previous round left open about
+whether stage 4 was a bound problem - it is not, it is a naming problem.
+
+**The second thing proved is that a value domain can.** `exprVals U P` is the persistent universe
+`U`, kept as a *prefix* so nothing already named keeps its index (`ixOf_exprVals`), followed by every
+message any table expression denotes in a universe-valued store - assembled from the per-expression
+`ExprDomain.evalDomain` that stage 3 built. The theorems:
+
+| Declaration | Meaning |
+|---|---|
+| `eval_inside_exprVals` | every table expression, in *any* universe-valued store, denotes a nameable value - no run hypothesis, no closure assumption, no bound arithmetic |
+| `stepEval1_inside_exprVals`, `stepEval2_inside_exprVals` | the admissibility content of the two gate equations, as theorems about the domain |
+| `exprB_of_exprVals`, `exprB_of_exprVals_at` | `exprB` holds at `shapeX P B` for every run at once, given only that stores stay in the persistent universe |
+| `transient_nameable` | the message `Regressions.gate_clipped` shows unnameable is nameable *at the same bounds that fail* `exprB` |
+| `transient_gate_not_clipped`, `transient_valAt_uIdx` | and it gets an index of its own, which `valAt` reads back - the property `admissible_valAt_uIdx` grants only under `admissible` |
+| `ixOf_exprVals`, `length_univ_le` | the extension is index-preserving on `U`, so store, knowledge and delivery groups keep their numbering |
+| `no_bound_discharges_exprB` | the negative result above |
+| `exprB_holds_at_X_for_deep_store` | one line: the store that breaks admissibility over `U` is admissible over `exprVals`, at the same bound |
+
+**Not done.** `exprVals` is not yet wired into `Shape`. The CNF still has one value stride
+(`shVal sh = sh.U.length + 1`) shared by every family, so the encoding is unchanged and
+`encoding_complete` still assumes `exprB`. The wiring is the next increment: a second value list
+used by the `xe` family only (`vxe`, `axe`, `szXe`, `szAxe`, `xeOh`, `f1`, `f2`, `evalGate`, then the
+`rdXe` and `decXe` lemmas), with the five hardcoded `sh.U.length` sites in `Clauses.lean` (281, 429,
+437, 455, 461) split into universe indices and extended indices. Estimated blast radius ~65-70
+declarations, of which ~40 are mechanical stride renames; the soundness direction (8A) needs
+nothing, because `Encoding.xe_unary`/`xe_binary` already conclude with a `.filter` on universe
+membership and tolerate clipped intermediates.
+
+**Also recorded, from investigating roadmap stage 6.** The pinned Mathlib (v4.34.1) has *no*
+Prop-level LRAT checker: `Mathlib/Tactic/Sat/` is one file, `FromLRAT.lean`, whose API is
+elaboration-time - `lrat_proof` / `from_lrat` build an `Expr` and hand it to the kernel, and the
+only object-level handles are `Sat.Fmla.proof [] : Prop` (FromLRAT.lean:126) and `Fmla.refute`
+(:188). There is no `Rat.CNF`, no `Lrats`, no `checkLrats` in this pin. Measured here: fine at 2000
+variables (2.3 s), and at 20000 variables the kernel fails with "deep recursion detected" and the
+declaration **silently degrades to an axiom** unless `#print axioms` is re-run - so stage 6 must
+consume `ctx.proof []` through a bridge lemma rather than the reified form with 2n+1 binders, and
+must re-audit axioms on whatever it produces. ProtSat `Lit`/`Clause`/`CNF` map onto
+`Sat.Literal`/`Clause`/`Fmla` index-preservingly (`BVar` is already 0-based), with DIMACS text
+needing `±(v+1)`.
+
 ## Log
 
 * 2026-10-19 (a) - baseline inspected; build green; three review witnesses promoted to permanent
@@ -485,7 +546,12 @@ from a production driver that may time out" - is now in the API with theorems on
   `searchFuel_eq_find?` (agreement with the unbounded search), soundness of both answers, completeness
   at the sufficient-fuel budget, and gates for exhaustion, attack and safety. All five stage-1 result
   categories now have a declaration that can produce them.
-* Next - the explorer (above), then stage 3's `BoundedExecution` unification, then per-expression
-  `EvalDomain` construction (so `fst (pair x x)` is representable even when the pair is outside
-  `U`), and deriving the compiler's representability conditions from the public bound instead of
-  assuming them.
+
+* 2026-10-19 (j) - stage 4 first installment: `ProtSat/Represent.lean` (extended value domain
+  `exprVals`, index preservation, `eval_inside_exprVals`, the two gate-equation lemmas,
+  `exprB_of_exprVals`, the transient pair made nameable at the bounds that fail `exprB`, and
+  `no_bound_discharges_exprB` proving no bound discharges it). Build green (1857 jobs), audit clean
+  over 2657 theorems, 15/15 CI gates green. Roadmap stage 6 investigated; its real shape is
+  recorded above.
+* Next - wire `exprVals` into `Shape` and the `xe` family (the ~65-declaration stride change), then
+  `encoding_complete` without `exprB`; then stage 6 through `Sat.Fmla.proof []`, not the reified form.

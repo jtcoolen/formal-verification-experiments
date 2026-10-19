@@ -18,6 +18,7 @@ import ProtSat.Query
 import ProtSat.Regressions
 import ProtSat.Reference
 import ProtSat.ExprDomain
+import ProtSat.Represent
 import ProtSat.BoundedCert
 import ProtSat.Explore
 import ProtSat.Contract
