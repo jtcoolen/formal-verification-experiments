@@ -14,3 +14,5 @@ tmp/
 scratch/
 output/pdf/
 .DS_Store
+Probe.lean
+protosat/Probe.lean
