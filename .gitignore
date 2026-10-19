@@ -13,3 +13,4 @@ ll1/bench*-results/*
 tmp/
 scratch/
 output/pdf/
+.DS_Store
