@@ -52,9 +52,14 @@ for two reasons that are proved rather than confessed - see
     `boundedSafe_of_checkedCode` gives `boundedSafeGoals q` from an accepted code, with the
     goal-selection hypothesis stated rather than assumed, and it builds a `SafeEvidence` -
     something nothing could construct before. `ProtSat/Refute.lean` is the producer: a
-    saturating resolution engine whose output the checker accepts (`refute_sound`), gated by `decide`
-    on a real refutation it emits itself; it has not yet been run on a protocol-sized formula,
-    and the reference DPLL still emits no proofs and no LRAT solver is installed
+    saturating resolution engine that is proved both sound and complete: `refute_sound` (the
+    checker accepts whatever the engine emits) and `refute_complete` (if the formula is unsatisfiable,
+    some fuel makes the engine emit a refutation), so `refute_iff` says the checker and the engine
+    agree exactly, and `boundedSafe_of_refutation` turns engine output into `boundedSafeGoals q`. It
+    is a theorem, not a solver: on the guarded protocol's real CNF, two saturation rounds produce
+    37167 lines without reaching the empty clause and take 19 minutes to evaluate, so the closed
+    `decide` gate exists only on the demo formula, and the reference DPLL still emits no proofs and
+    no LRAT solver is installed
     here, so what remains is production at protocol size - measured, not hidden.
 
 `ProtSat/Query.lean` is the layer that keeps the two apart. A `Query` names the protocol, the
@@ -516,7 +521,7 @@ and the tenth is not enabled.
 | `ProtSat/CheckedSafe.lean` | 152 | the evidence chain at query level: `boundedSafe_of_checkedCode`, `SafeEvidence` from a checked refutation |
 | `ProtSat/Sound.lean` | 380 | the soundness half: decoded values are universe values, `decoding_runsInUniverse`, and the two-sided `encoding_correct` |
 | `ProtSat/AuthGap.lean` | 310 | the authentication gap as a theorem: safe for secrecy and attacked for agreement at one protocol and one bound |
-| `ProtSat/Refute.lean` | 571 | the producer: saturating resolution, `refute_sound` (the checker accepts the engine's output), kernel-checked gate on its own refutation |
+| `ProtSat/Refute.lean` | 1291 | the producer: saturating resolution, `refute_sound` (the checker accepts its output) and `refute_complete` (every unsatisfiable formula has output to accept), so `refute_iff` |
  refutations as a flat integer code: total decoder, round trip, injectivity, `checkCode_sound` |
 | `ProtSat/ExprDomain.lean` | 310 | finite per-expression domains: `evalDomain`, `eval_mem_evalDomain`, the transient pair handled |
 | `ProtSat/BoundedCert.lean` | 170 | `checkBounded`: certificates that carry their bounds, sound to `BoundedAttack` |
