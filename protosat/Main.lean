@@ -181,6 +181,11 @@ def main : IO Unit := do
   IO.println ("    evidence bound to a different formula rejected: "        ++ toString (! Resolution.checkAgainst Resolution.demoF
           { clauses := Resolution.demoF_other.clauses, proof := Resolution.demoP }))
   IO.println ("    truncated code rejected: "        ++ toString (! Serialize.checkCode Resolution.demoF 4 [0, 0, 0, 0, 3]))
+  IO.println ("    produced by the engine and checked: " ++ toString (Resolution.checkProof
+      Resolution.demoF Refute.demoRefut) ++ " (" ++ toString Refute.demoRefut.length
+      ++ " lines the engine emitted itself)")
+  IO.println ("    engine output survives serialization: " ++ toString (Serialize.checkCode
+      Resolution.demoF (Refute.demoRefut.length + 1) (Serialize.proofCode Refute.demoRefut)))
   IO.println ""
   IO.println "SOLVER SANITY CHECKS (all by the kernel, see ProtSat/DPLL.lean)"
   IO.println ("    demoUnit      isSome = " ++ toString ((dpll DPLL.demoUnit).isSome))
