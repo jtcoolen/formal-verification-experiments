@@ -666,6 +666,37 @@ replay cannot be exercised on a real ProtSat instance yet. That is stated plainl
 over: the checking side of stage 6 is done, the producing side needs a proof-emitting solver wired
 to `toDimacs`.
 
+## The closed verdict: SAFE means security, with no hypotheses (`EndToEnd.qg_safe`)
+
+The objective is one sentence: *no execution permitted by the stated model, assumptions and
+bounds violates any selected security goal.* For the CNF route that sentence used to arrive with a
+bundle of assumptions about the executions themselves. It no longer does:
+
+```lean
+theorem qg_safe : boundedSafeGoals qg
+theorem qg_noLeak :
+    - exists tr Cs, BoundedTrace Guard GB tr Cs /\ runsLeaks Guard Cs
+```
+
+Both are proved with **no hypotheses at all**, and both depend only on `propext, Classical.choice,
+Quot.sound` - no `sorryAx`, no user axiom, verified by `#print axioms` and by the audit that walks
+every theorem in `ProtSat.*`. The chain that closes it:
+
+* the query is well-formed (`decide`),
+* the value domain has no gap (`Represent.domainGap = false`, `decide`), so every bounded
+  execution satisfies `WithinBounds` (`BoundedExec.withinBounds_of_bounded`),
+* the generated CNF has no model - at 246 variables and 291 clauses the kernel can check that
+  itself (`DPLL.dpll (encode Guard GB) = none` by `decide`, about 20 s),
+* hence `analyzeQuery qg = encodingUnsat`, hence by
+  `Query.boundedSafe_of_encodingUnsat_of_gapFree` the security statement.
+
+The example is deliberately small and deliberately *not* vacuous in shape: `Leak` is the same
+protocol with one expression changed - publishing the key instead of a public name - and the
+pipeline reports an attack for it, so the verdict is a discrimination, not a constant. For
+`Examples.KeyDisclosure` (1263 variables) the same chain runs with the solver answer as its only
+hypothesis, because kernel replay of the solver does not scale; that is the gap
+`ProtSat/Resolution.lean` is built to close by checking evidence instead of re-running search.
+
 ## Log
 
 * 2026-10-19 (a) - baseline inspected; build green; three review witnesses promoted to permanent
@@ -755,6 +786,13 @@ to `toDimacs`.
   empty, out-of-range evidence), the bridge `encodingUnsat_of_proof` that reaches the analyser
   verdict without running the solver, and `toDimacs` so an external prover can be handed the exact
   formula. Build green (1863 jobs), audit clean over 2804 theorems, 18/18 CI gates green.
+
+* 2026-10-19 (o) - the closed verdict: `EndToEnd.qg_safe` and `qg_noLeak` prove
+  `boundedSafeGoals` and the public no-leak statement with NO hypotheses, for a real protocol,
+  depending only on the three standard axioms (checked by `#print axioms` and the full audit).
+  Well-formedness, gap-freeness and the solver answer are all `decide`d; `Leak` shows the same
+  pipeline reports an attack for a one-expression change, so the verdict discriminates.
+  Build green (1863 jobs), audit clean over 2816 theorems, 18/18 CI gates green.
 
 * Next - stage 6: an independently checked UNSAT certificate, through Sat.Fmla.proof [] and
   not the reified forall-over-n-propositions form, so the solver answer stops being a

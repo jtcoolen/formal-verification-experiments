@@ -37,7 +37,10 @@ for two reasons that are proved rather than confessed - see
     `Ev.act` fields *where an action reads them*, which the public bound does imply, so for a query
     whose value domain has no gap (`Represent.domainGap`, decided by the tool) `WithinBounds` is a
     theorem - and `ProtSat/EndToEnd.lean` turns an `encodingUnsat` answer into `boundedSafeGoals`
-    and `noLeak` with no execution hypothesis at all. What that still assumes is the solver's own
+    and `noLeak` with no execution hypothesis at all - and for a small real protocol both are
+    proved with **no hypotheses whatsoever** (`EndToEnd.qg_safe`, `qg_noLeak`: well-formed,
+    gap-free, and the CNF unsatisfiability checked by the kernel), depending only on
+    `propext, Classical.choice, Quot.sound`. What that still assumes is the solver's own
     answer; `ProtSat/Resolution.lean` replaces it with evidence: a resolution refutation is checked
     by a linear walk (`checkProof_sound`), truncated, corrupted, out-of-range and wrong-formula
     evidence is rejected by `decide`, and `encodingUnsat_of_proof` reaches the verdict without

@@ -116,4 +116,89 @@ assumption, not about a protocol that cannot reach its leak. -/
 theorem disclosure_certificate :
     checkCertificate KeyDisclosure.P (certOfTrace KeyDisclosure.P KeyDisclosure.tr) = true :=
   KeyDisclosure.checked
+/-! ### A closed verdict: no hypotheses at all -/
+
+/-- The two protocols below differ in one action: which expression the session publishes. The
+first never publishes the declared key, the second publishes nothing else. Both are gap-free, so
+by the theorems above the analyser answer *is* the security statement - and at this size the
+kernel can check the solver answer directly (about 20 s of `decide` over 246 variables and 291
+clauses), so the verdict below carries no hypothesis at all. -/
+def Guard : Protocol :=
+  { roles := [{ acts := [Action.send 0 (Expr.agent 0)] }],
+    sessions := [{ role := 0, self := 0, peer := 0 }],
+    agents := [0], nonceDomain := [], compromised := [],
+    secrets := [Secret.closed (Expr.shrk 0 0)], auths := [] }
+
+/-- The same shape publishing the secret itself: the pipeline must call this one unsafe. -/
+def Leak : Protocol :=
+  { roles := [{ acts := [Action.send 0 (Expr.shrk 0 0)] }],
+    sessions := [{ role := 0, self := 0, peer := 0 }],
+    agents := [0], nonceDomain := [], compromised := [],
+    secrets := [Secret.closed (Expr.shrk 0 0)], auths := [] }
+
+def GB : Bounds := { steps := 1, rounds := 0 }
+
+/-- The guarded query. -/
+def qg : Query := Query.mk Guard GB [Goal.secrecy]
+
+/-- The leaky query. -/
+def ql : Query := Query.mk Leak GB [Goal.secrecy]
+
+theorem qg_wf : WellFormed qg := by
+  show validate qg = []
+  decide
+
+theorem qg_gap : domainGap Guard GB = false := by decide
+
+theorem qg_hU : univClosed (shapeOf Guard GB) Guard := by
+  unfold univClosed
+  decide
+
+theorem qg_hsub : univSub (shapeOf Guard GB) := by
+  unfold univSub
+  decide
+
+theorem qg_hsec : SecretsOK (shapeOf Guard GB) Guard := by
+  refine ⟨fun q x h => ?_, ?_⟩
+  · have heq : Secret.store q x = Secret.closed (Expr.shrk 0 0) := List.mem_singleton.mp h
+    cases heq
+  · decide
+
+theorem qg_goals : ∀ g ∈ qg.goals, goalEncoded g := by decide
+
+theorem qg_ne : qg.goals ≠ [] := by decide
+
+set_option maxRecDepth 4000 in
+/-- The solver answer, checked by the kernel at this size. -/
+theorem qg_unsat : DPLL.dpll (encode Guard GB) = none := by decide
+
+/-- Hence the analyser answer, and hence the verdict - with no hypotheses. -/
+theorem qg_verdict : analyzeQuery qg = Result.encodingUnsat := by
+  have hu : univClosedBool (shapeOf Guard GB) Guard = true := by decide
+  have hana : analyze Guard GB = Verdict.encodingUnsat := by
+    rw [analyze, if_neg (by simp [hu]), qg_unsat]
+  show analyzeQuery qg = Result.encodingUnsat
+  rw [analyzeQuery]
+  rw [if_pos (by simpa [WellFormed] using qg_wf)]
+  rw [if_neg (by simp [qg])]
+  rw [if_neg (by simp [qg, unsupported, goalEncoded, encodedGoals])]
+  rw [show analyze qg.protocol qg.bounds = Verdict.encodingUnsat from hana]
+  rfl
+
+/-- **The closed security statement.** No `WithinBounds`, no representability hypothesis, no
+solver-answer hypothesis: for every execution this model permits, within these sessions, these
+compromises, this universe and this event bound, no selected goal is violated. That is the
+sentence the objective asked SAFE to mean, proved end to end on the CNF route. -/
+theorem qg_safe : boundedSafeGoals qg :=
+  boundedSafe_of_encodingUnsat_of_gapFree qg_goals qg_ne qg_hU qg_hsub qg_hsec qg_gap qg_verdict
+
+/-- In the public vocabulary: no permitted execution leaks a declared secret. -/
+theorem qg_noLeak :
+    ¬ ∃ (tr : List Ev) (Cs : List Cfg),
+        BoundedTrace Guard GB tr Cs ∧ runsLeaks Guard Cs := by
+  intro h
+  obtain ⟨tr, Cs, hbt, hleak⟩ := h
+  exact qg_safe ⟨Goal.secrecy, by decide, tr, Cs, hbt,
+    by rw [violation_secrecy]; exact hleak⟩
+
 end ProtSat.EndToEnd
