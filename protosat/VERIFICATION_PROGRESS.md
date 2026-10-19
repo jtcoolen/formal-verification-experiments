@@ -634,6 +634,38 @@ hypothesis - the analyser computes the answer at runtime - and closing that last
 roadmap stage 6: a checked UNSAT certificate replaces minutes of kernel solver-replay with a
 linear proof check. The table is in the module header so the cost is published, not hidden.
 
+## Stage 6, first installment: UNSAT evidence that is checked, not re-run (`ProtSat/Resolution.lean`)
+
+`EndToEnd.lean` left one hypothesis: the analyser answer itself. Believing it in the kernel means
+re-running DPLL in the kernel, which the measurements in that file price at minutes for a few
+hundred variables and out of reach for a thousand. Roadmap stage 6 asks for the other shape -
+*evidence* from the search, checked independently - and this module is the checker.
+
+A refutation is a list of clauses, each justified as a clause of the formula (`Just.orig n`) or as
+the resolution of two earlier lines on one variable (`Just.res i j v`), ending with the empty
+clause. `checkProof` walks it once: no search, no solver, no trust in whoever produced it.
+
+| declaration | meaning |
+|---|---|
+| `checkProof_sound` | `checkProof f p = true -> ProtSat.Unsat f` - the whole point |
+| `accepts_demo` | a real refutation of (x or y) and (x or not y) and (not x or z) and (not x or not z), kernel-checked by `decide` |
+| `demoF_unsat` | and the formula really has no model, by the theorem rather than by search |
+| `rejects_truncated` | a proof one line short is rejected |
+| `rejects_corrupted` | a line claiming a resolvent that resolution does not produce is rejected |
+| `rejects_wrong_formula` | valid evidence for a different formula is rejected: the `orig` lines no longer read back |
+| `rejects_empty`, `rejects_out_of_range` | an empty proof, and a line citing a missing parent or a clause index off the end |
+| `encodingUnsat_of_proof` | the bridge: a checked refutation of `encode P B` gives `analyze P B = encodingUnsat` through `dpll_none_iff_unsat`, with the solver never run |
+| `toDimacs`, `dimacs_demo` | the exact formula as DIMACS text, so an external prover can be handed *this* problem and its output handed back to the checker |
+
+Chain that completes: checked refutation -> `Unsat (encode P B)` -> `dpll = none` ->
+`analyze = encodingUnsat` -> `analyzeQuery = encodingUnsat` -> (gap-free query) ->
+`boundedSafeGoals`. Every arrow is a proved theorem in this repository; the only missing link is a
+prover that emits the refutation for a large instance. The reference DPLL does not emit proofs, and
+the only SAT tool installed here is `z3`, which does not emit LRAT, so Mathlib`s elaboration-time
+replay cannot be exercised on a real ProtSat instance yet. That is stated plainly rather than papered
+over: the checking side of stage 6 is done, the producing side needs a proof-emitting solver wired
+to `toDimacs`.
+
 ## Log
 
 * 2026-10-19 (a) - baseline inspected; build green; three review witnesses promoted to permanent
@@ -716,6 +748,13 @@ linear proof check. The table is in the module header so the cost is published, 
   `ProtSat/EndToEnd.lean` producing `boundedSafeGoals` / `noLeak` for a gap-free example with the
   solver answer as its only hypothesis. Kernel re-derivation costs measured and published.
   Build green (1861 jobs), audit clean over 2769 theorems, 18/18 CI gates green.
+
+* 2026-10-19 (n) - stage 6 first installment: `ProtSat/Resolution.lean` - resolution
+  refutations as data, `checkProof` as a linear walk, `checkProof_sound` proving the checker, six
+  kernel-decided gates (accepts a real refutation; rejects truncated, corrupted, wrong-formula,
+  empty, out-of-range evidence), the bridge `encodingUnsat_of_proof` that reaches the analyser
+  verdict without running the solver, and `toDimacs` so an external prover can be handed the exact
+  formula. Build green (1863 jobs), audit clean over 2804 theorems, 18/18 CI gates green.
 
 * Next - stage 6: an independently checked UNSAT certificate, through Sat.Fmla.proof [] and
   not the reified forall-over-n-propositions form, so the solver answer stops being a
