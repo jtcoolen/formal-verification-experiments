@@ -1366,6 +1366,47 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   theorem is stated that way rather than quietly against the easier target. Reconciling the two
   predicates - or documenting which one `Goal.agreement` names - is now its own work item.
   Build green (1895 jobs), audit clean over 3876 theorems, 30/30 CI gates green.
+* 2026-10-20 (am) - the most important semantic finding of the audit, and it is about the CONTRACT,
+  not the prover: `ProtSat/AgreementPredicates.lean` (971 lines, 75 theorems) proves that
+  `Goal.agreement` names two INCOMPARABLE predicates and that the CNF route is measured against the
+  blind one. `Query.Violation P Goal.agreement` is `ProtSat.AuthBreak` (Operational.lean:461) - a
+  commit whose (tag, peer, value) triple was never claimed, unordered - while the reference route's
+  `Contract.goalViolation` is `Reference.authBreak = ¬ agrees`, which demands a matching claim
+  STRICTLY EARLIER with the roles crossed. The natural conjecture was that the ordered notion is
+  simply stricter, so the unordered one is a safe approximation. It is FALSE in both directions:
+  `ordered_not_le_unordered` (a commit excused only by a later claim, on `Regressions.Semantics.
+  futureClaimP`) and `unordered_not_le_ordered` (the repository's own honest `Reference.Gates.pairP`).
+  And it is not a missing proof: `authBreak_carries_too_little` exhibits two event lists whose
+  `AuthBreak`-visible projections are LITERALLY EQUAL with opposite ordered verdicts, because `AuthInst
+  's record has no `self` and no `idx` - the ordering requirement cannot be stated in that
+  vocabulary at all. What IS true is the conditional `unorderedAgrees_of_agrees_of_selfEqPeer`: ordered
+  implies unordered exactly when every commit's self equals its peer, and both counterexamples violate
+  precisely that hypothesis.
+  *The consequence, as a theorem.* `cnf_route_agreement_target_is_blind`: on `selfAddrP` - one session
+  played by agent 1 running a role that claims and then commits the triple (tag 0, peer agent 0,
+  nonce 5) - the commit's triple IS claimed, by the wrong principal, so the unordered monitor is
+  silent on all 43 enumerated permitted executions (`selfAddr_unorderedBoundedSafe`) while the ordered
+  monitor reports an attack (`selfAddr_orderedBoundedAttack`). A `boundedSafeGoals` answer for an
+  agreement query therefore means 'no commit triple went unclaimed', not 'no commit went unmatched'.
+  The mirror also holds (`cnf_route_agreement_target_overreports`): on the honest pair the unordered
+  reading reports an attack the ordered reading refuses, so this is not a one-sided loss of precision.
+  This is exactly the class of defect the project exists to catch, found in its own contract.
+  *Two more contract facts.* `Violation P Goal.agreementInj = True`, so `boundedAttackGoals_of_
+  agreementInj` proves EVERY query selecting injective agreement is attacked - the empty execution
+  violates it (`empty_boundedTrace`) whatever the protocol and bounds. It is harmless today only
+  because `goalEncoded` refuses the query before the predicate is consulted (`injQ_wellFormed +
+  injQ_refused`): the VALIDATOR does not save it, and adding a fourth goal to `encodedGoals` without
+  giving `Violation` a semantics would ship the constant verdict immediately. And `Examples.NS.P`
+  declares no authentication event at all (`NS_has_no_auth_events`, decided), so neither monitor can
+  witness the Lowe attack as an agreement violation in this model - the NS example is a SECRECY
+  example, and any text implying it authenticates anything is wrong.
+  *Recommendation, not yet applied:* rename rather than retarget - `agreementUnordered` plus a new
+  `agreementOrdered`, aliasing only when the CNF route can represent the ordered test. Retargeting
+  would make the route incomparable rather than stricter, would invalidate GoalEncode's tripleOnly
+  pairing, and cannot be stated over `Operational` at all. Blast radius recorded: AuthBreak 33
+  occurrences/10 files, Goal.agreement 119/10, Violation 101/8, boundedSafeGoals 68/11.
+  All 47 decide gates are cheap (slowest tactic replay 155 ms; whole file 2.4 s). Build green,
+  audit clean over 3966 theorems, 30/30 CI gates green.
 * Next - the remaining work is now all about the headline, not about hypotheses. (1) *Goal-indexed
   `encode`*: `Encode.violationLits` names leak literals only, so `encode P B` is secrecy-specific by
   construction; the fix is `violationLits sh P gs` plus `encodeGroups` and a `Complete` that is

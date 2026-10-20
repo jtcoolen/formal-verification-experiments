@@ -107,6 +107,25 @@ Regressions.Bounds.hwb_fails :
     ¬ (∀ tr Cs, BoundedTrace P B tr Cs -> WithinBounds P B (cfgAt Cs) (evAt tr))
 ```
 
+**`Goal.agreement` does not name one predicate in this repository, and the difference is proved, not
+rhetorical.** `Query.Violation P Goal.agreement` is `ProtSat.AuthBreak` - a commit whose
+`(tag, peer, value)` triple was never claimed, UNORDERED - while the reference route's
+`Contract.goalViolation P Goal.agreement` is `ProtSat.Reference.authBreak = ¬ agrees`, which demands
+a matching claim strictly earlier with the two roles crossed. `ProtSat/AgreementPredicates.lean`
+proves they are **incomparable** (`ordered_not_le_unordered`, `unordered_not_le_ordered`, each with a
+decided witness), and that the gap is not a missing proof: `AuthInst` carries no `self` and no `idx`,
+so the ordering requirement is **inexpressible** in the vocabulary `AuthBreak` reads
+(`authBreak_carries_too_little`). The consequence for the contract is stated as
+`cnf_route_agreement_target_is_blind`: on `selfAddrP` - one session, a claim and a commit of the same
+triple made by the wrong principal - the unordered reading is silent on all 43 permitted executions
+while the ordered reading finds an attack. So a future CNF `boundedSafeGoals` for an agreement query
+means *no commit triple went unclaimed*, not *no commit went unmatched*, and the two are different
+propositions on a protocol that fits in eight lines. `Goal.agreementInj` is a separate trap:
+`Violation P Goal.agreementInj` is `True`, so `boundedAttackGoals_of_agreementInj` proves every query
+selecting it is attacked - harmless only because `goalEncoded` refuses it before the predicate is
+consulted (`injQ_wellFormed` + `injQ_refused`); the validator does not save it. Note also that
+`Examples.NS.P` declares no authentication event at all (`NS_has_no_auth_events`), so neither monitor
+can witness the Lowe attack as an agreement violation in this model.
 The old `Verdict.safe` is now `Verdict.encodingUnsat`, which is what the solver theorem
 establishes. `Result.boundedSafe` exists in the contract and carries a `SafeEvidence`, and
 `analyzeQuery_ne_boundedSafe` proves that `analyzeQuery` itself never returns it - the CNF
@@ -618,6 +637,7 @@ and the tenth is not enabled.
 | `ProtSat/UnitRefute.lean` | 1719 | the fast producer proved sound: every line unit propagation emits is an initial clause or a resolution of two earlier ones (`AllOK_unitRefutation`), the checker accepts its refutations (`unitRefutation_checkProof`), and pruning preserves both (`prune_checkProof`, `AllOK_prune`) |
 | `ProtSat/DecodeIndex.lean` | 623 | the decoded-run index bridge: `decEvsFrom`/`decCfgsFrom` transported into `evAt`/`cfgAt`, plus `decEv_act_of_decCode` - the repo's action-decoding lemma with the `Sat a (encode P B)` hypothesis dropped |
 | `ProtSat/GoalEncode.lean` | 825 | the violation group indexed by the query's goals: `encodeGoalsOf P B [secrecy] = encode P B` by `rfl`, the correspondence moved onto it by rewriting, agreement soundness reduced to one named hypothesis, and the transport shortcut proved false (`no_transport_from_base`) |
+| `ProtSat/AgreementPredicates.lean` | 971 | the two agreement predicates proved incomparable, the ordering requirement proved inexpressible in `AuthBreak`'s vocabulary, the CNF contract's agreement target proved blind on a concrete model, and the `agreementInj` violation predicate proved to be `True` |
 | `ProtSat/Sound.lean` | 384 | the soundness half: decoded values are universe values, `decoding_runsInUniverse`, and the two-sided `encoding_correct` |
 | `ProtSat/AuthGap.lean` | 524 | the authentication gap as a theorem: safe for secrecy and attacked for agreement at one protocol and one bound (`auth_gap_is_real`, `goal_hypothesis_is_needed`), plus a second model where the secret is real (`auth_gap_is_real_nonvacuous`) |
 | `ProtSat/AuthClauses.lean` | 593 | **prototype, not wired into the analyser**: agreement as CNF clauses - claim/commit read from the model as data, goal-indexed `encodeGoals`, the negative result that the naive conjunction cannot work (`authEncode_not_sat`), and three `Diff` gates cross-checking the CNF verdict against the enumeration verdict. Neither SOUND nor COMPLETE is proved |
