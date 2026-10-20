@@ -209,7 +209,7 @@ The acceptance standard is an exact, explicitly scoped mathematical statement fo
 - Tamarin on the general undecidability/possible nontermination of unbounded analysis: https://tamarin-prover.com/manual/master/book/001_introduction.html
 - Mathlib LRAT proof reconstruction, also present in the pinned local dependency: https://leanprover-community.github.io/mathlib4_docs/Mathlib/Tactic/Sat/FromLRAT.html
 
-## Status ledger (updated 2026-10-20)
+## Status ledger (updated 2026-10-20, second pass)
 
 Reality of the implementation checkout (`protosat`, HEAD 343855e, 3500 kernel-checked theorems,
 26/26 CI gates, axioms `propext, Classical.choice, Quot.sound` only). Each row names the artifact
@@ -220,13 +220,31 @@ that decides it, not an intention.
 | 1 Contract and regressions | **done** | `ProtSat/Contract.lean` verdict algebra (`attack / boundedSafe / invalidModel / unsupportedGoal / unknown`), `ProtSat/Query.lean` with `goalEncoded`, `ProtSat/Regressions.lean` permanent witnesses, README corrected |
 | 2 Reference semantics | **done** | `ProtSat/Reference.lean`: allocation history, action-specific events, ordered role-aware agreement and injective-agreement monitors, credential provisioning; twelve gates that each reverse a `Regressions` witness |
 | 3 One public meaning of bounds | **done** | `ProtSat/Bounded.lean` + `ProtSat/BoundedExec.lean`: the public bounds imply the operational ones (`mem_univ_of_mem`, `secrets_subset_univ`), monotonicity in the bounds |
-| 4 SAT correspondence | **open - headline gap here** | Two-sided correspondence now exists (`Complete.encoding_complete`, `Sound.encoding_sound_bounded'`, `Sound.encoding_correct` for gap-free queries); `hsub` deleted from 18 signatures; `SecretsOK` split with the closed half proved and the store half proved undroppable (`secretsOKStore_not_derivable`). STILL OPEN: agreement is not representable in the CNF at all - `Clauses.violationLits` names leak literals only, and `AuthGap.goal_hypothesis_is_needed` proves `hq` is not droppable; and the xe stride still runs over `U`, keeping `domainGap`/`exprB` |
-| 5 Independently checkable evidence | **done for the UNSAT answer** | `Resolution.checkProof` (checker), `Serialize.proofCode/proofOfCode` (transport), `Refute.saturate`/`refutationOf` with `refute_sound` and `refute_complete` (prover), `CheckedSafe.boundedSafe_of_checkedCode` (certificate to theorem). The SAT answer carries a permitted run instead. Remaining: the analyzer does not yet emit certificates (in progress) |
+| 4 SAT correspondence | **attacked, still open** | Two-sided correspondence now exists (`Complete.encoding_complete`, `Sound.encoding_sound_bounded'`, `Sound.encoding_correct` for gap-free queries); `hsub` deleted from 18 signatures; `SecretsOK` split with the closed half proved and the store half proved undroppable (`secretsOKStore_not_derivable`). Two things moved today: `AuthClauses.lean` puts agreement into the CNF as clauses (claim/commit read from the model as data, goal-indexed `encodeGoals`, and a kernel-decided differential against the enumeration route on three models), and it PROVES the naive form cannot work (`authEncode_not_sat`: the AuthGap model's secrecy violation clause is the empty clause). Still open: SOUND/COMPLETE for the new clauses - every `Encoding` decoding lemma takes `Sat a (encode P B)`, secrecy clause included - and the xe stride over `U` (`domainGap`/`exprB`) |
+| 5 Independently checkable evidence | **done for the UNSAT answer, and now emitted** | `Resolution.checkProof` (checker), `Serialize.proofCode/proofOfCode` (transport), `Refute.saturate`/`refutationOf` with `refute_sound` and `refute_complete` (prover), `CheckedSafe.boundedSafe_of_checkedCode` (certificate to theorem). The SAT answer carries a permitted run instead. `AnalyzerEvidence.lean` now turns a checked code into `boundedSafeGoals q` without a solver replay (a 138-integer certificate for a real 246-variable query, kernel-checked in ~0.3 s against ~20 s for the DPLL replay); what remains is that the fast producer that emitted it is not yet proved sound, and there is no fuel policy turning a missing refutation into `unknown` |
 | 6 Credible examples and non-vacuity | **done** | `ProtSat/Benchmarks.lean` (NS and NSL in the reference language with claim/commit instrumentation and a real declared secret, honest-execution witnesses), `AuthGap.auth_gap_is_real_nonvacuous`, CI non-vacuity gates |
 | 7 Proved refinement | **done** | `ProtSat/Prune.lean`: `explorerAttack_equiv`/`attackFound_equiv` both directions, unconditional - the pruned explorer is the same decision procedure, 11868 nodes to 3 on the secure query; `ProtSat/Compress.lean`: `dropRedundant`, `compress_secrecy`, `compress_agreement` with `CfgEq` congruences |
 | 8 Guarantees about increasing bounds | **done** | `Compress.safe_at_derived_bound_full` and `Prune.secureQ_allLengthsSafe`: safety for every run length up to a bound the kernel derives (16 events secure, 7 agreement-ordered), decided in 0.06 s after pruning |
 | 9 Richer goals, other proof modes | **open** | Same obstruction as stage 4: goal-indexed encoding, then agreement clauses. Unbounded and inductive modes deliberately out of the bounded core |
 
+### Ledger addendum, later on 2026-10-20
+
+* `343855e` `SecretsOK` split: the closed-secret half is a theorem, the store-slot half stays a
+  hypothesis with a counterexample proving it undroppable.
+* `2d10f4f` `AnalyzerEvidence.lean`: the analyser emits a checked refutation certificate; the honest
+  caveat is that the only non-degenerate certificate came from a producer that is not yet proved
+  sound, and the proved-sound engine's decided instance refutes a formula containing the empty clause.
+* `f979e5c` `AuthClauses.lean`: agreement as CNF clauses, goal-indexed `encodeGoals`, and the
+  differential that makes the CNF route and the enumeration route return the same authentication
+  verdict on three models.
+* `8644414` README accuracy pass: six dead theorem names, the `WithinBounds` residual count (now one
+  condition, `exprB`), and two oversellings corrected.
+* `4b4d8d8` the release gate itself: `.github/workflows/ci.yml` claimed to run on a clean machine but
+  nothing ever fetched Mathlib's prebuilt `.olean`s, so a cold runner would have tried to build
+  Mathlib from source inside a 90-minute job. `lake exe cache get` added; a wrong environment now
+  exits 3 as ENVIRONMENT PROBLEM instead of masquerading as a proof failure.
+* Theorem inventory 3496 -> 3580 over the day; every commit independently re-verified (type-check,
+  `#print axioms`, admissions scan, statement read) before landing.
 ### What the headline now reduces to
 
 The original defect - "SAFE returned while an agreement attack was permitted" - is proved, not
