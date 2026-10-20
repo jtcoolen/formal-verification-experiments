@@ -187,6 +187,17 @@ def main : IO Unit := do
   IO.println ("    engine output survives serialization: " ++ toString (Serialize.checkCode
       Resolution.demoF (Refute.demoRefut.length + 1) (Serialize.proofCode Refute.demoRefut)))
   IO.println ""
+  IO.println "THE DERIVED STEP BOUND (ProtSat/Compress.lean): the model's own bound, past which no"
+  IO.println "shorter witness is missing - safety at this bound is safety at every length inside the"
+  IO.println "query's own sessions and message universe (compress_secrecy, compress_agreement)."
+  IO.println ("    secureQ: query asks " ++ toString Compress.secureQ.bounds.steps
+      ++ " steps, derived bound " ++ toString (Compress.derivedSteps Compress.secureQ)
+      ++ " (actions " ++ toString (Compress.actionCount Compress.secureQ.protocol)
+      ++ " + universe " ++ toString (Compress.universeSize Compress.secureQ) ++ ")")
+  IO.println ("    authOrderQ: query asks "
+      ++ toString Compress.authOrderQ.bounds.steps ++ " steps, derived bound "
+      ++ toString (Compress.derivedSteps Compress.authOrderQ))
+  IO.println ""
   IO.println "SOLVER SANITY CHECKS (all by the kernel, see ProtSat/DPLL.lean)"
   IO.println ("    demoUnit      isSome = " ++ toString ((dpll DPLL.demoUnit).isSome))
   IO.println ("    demoConflict  isSome = " ++ toString ((dpll DPLL.demoConflict).isSome))

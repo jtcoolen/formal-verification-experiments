@@ -38,11 +38,19 @@ The three ingredients are:
 
 ## What this module does not do
 
-It does not canonicalise the knowledge representation, and it does not compress traces that witness
-the *authentication* goals: `Inst.idx` records a position in the trace, and shortening a trace
-renumbers every later position, so `authBreak` is not invariant under the removal T3 performs
-without a further argument about reindexing. The compression theorem proved here is the one for
-`Goal.secrecy`, which is the goal the contract's gates and the whole CNF pipeline are built around.
+It does not canonicalise the knowledge representation: the compression T3 performs is stated up to
+the extensional equality `CfgEq` of configurations, not literal equality of the visited lists. It
+does not compress traces of a protocol with jumps or loops, because `actionCount P` is a
+straight-line bound. And the derived bound bounds *witnesses*: what the compression theorems give is
+that a violation inside the query's own message universe has an execution no longer than
+`actionCount P + |univ P B|`, not that every execution is short.
+
+The authentication goals are covered. `Inst.idx` is the position of the claim or commit in the trace,
+so deleting a non-session event renumbers every later authentication event and the two `insts` lists
+are not equal; what makes the compression go through anyway is that neither monitor reads a position,
+only the order between positions (T6a), and that compression preserves the sequence of authentication
+records (T6b). `compress_agreement` and `compress_agreementInj` are the counterparts of
+`compress_secrecy` for `Goal.agreement` and `Goal.agreementInj`.
 
 Nothing here imports the CNF, the SAT solver or the encoding: this is a theorem about the repaired
 reference semantics of `ProtSat.Reference`. Because the *old* semantics declares `Cfg`, `Ev`,
@@ -1657,7 +1665,7 @@ theorem secureQ_derivedSteps : derivedSteps secureQ = 16 := by decide
 a derived bound: three session actions and a seven-message universe. -/
 theorem transientQ_derivedSteps : derivedSteps transientQ = 10 := by decide
 
-/-! ### Idle removal as a literal shortening, and where the authentication goals break -/
+/-! ### Idle removal as a literal shortening -/
 
 /-- **T3 in its literal form: a run whose first event is idle can be shortened.** Unlike a
 redundant deduction, `Ev.idle` really is a no-op (`stepOf P C idle = some C`), so the shortened run
@@ -1683,24 +1691,939 @@ theorem drop_leading_idle {P : Protocol} {tr : List ProtSat.Reference.Ev} {Cs : 
   refine ⟨a, ha, hmem, ?_⟩
   refine ⟨fun ⟨C, hC, hl⟩ => ⟨C, hmem C |>.mp hC, hl⟩,
     fun ⟨C, hC, hl⟩ => ⟨C, hmem C |>.mpr hC, hl⟩⟩
-/-!
-**The precise obstruction for the authentication goals.** The compression T3 performs deletes
-events from the trace, and `ProtSat.Reference.Inst.idx` is the *position* of the action in the
-trace. `claimMatches` compares positions (`r.idx < c.idx`) and `agreesInj` counts them, so the
-authentication events of a compressed trace are those of the original with every index after a
-deletion shifted down. Nothing in the current representation makes that shift invisible: two runs
-can visit extensionally equal configurations and perform the same claims and commits in the same
-order and still have different `insts` lists, because the `idx` fields differ. Extending the
-compression theorem to `Goal.agreement` and `Goal.agreementInj` therefore needs one of
 
-* an index-free formulation of agreement - renumber the events of `insts` by their rank in the
-  list, which is invariant under deleting non-action events; or
-* a proof that deleting a non-session event renumbers `insts` by a strictly monotone map, plus the
-  observation that `claimMatches`, `agrees` and `agreesInj` are invariant under such a renumbering.
+/-! ### T6a: the agreement monitors are invariant under renumbering the trace positions -/
 
-Both are statements about `Inst.idx`, not about the knowledge representation. What this module
-does establish is that the *knowledge* side is already extensional: `CfgEq` is a congruence for
-`stepOf`, `inBounds` and `leaks`, which is the half of the argument the roadmap's warning about
-redundant copies asks for. -/
+/-- The authentication events of the repaired semantics. -/
+abbrev Inst := ProtSat.Reference.Inst
+
+/-- **The authentication record** of an event: everything a claim or a commit says about itself -
+who acted, in which role, against whom, on which tag and which data - except *where in the trace* it
+happened. -/
+structure InstRec where
+  isCommit : Bool
+  sess : Nat
+  role : Nat
+  self : Agent
+  peer : Agent
+  tag : Tag
+  data : Term
+  deriving Repr, DecidableEq
+
+/-- Forget where the event happened. -/
+def instRec (a : Inst) : InstRec :=
+  ⟨a.isCommit, a.sess, a.role, a.self, a.peer, a.tag, a.data⟩
+
+/-- Re-date an event: renum f a puts the same claim or commit at position f a.idx and changes
+nothing else. -/
+def renum (f : Nat -> Nat) (a : Inst) : Inst := {a with idx := f a.idx}
+
+@[simp] theorem renum_isCommit (f : Nat -> Nat) (a : Inst) : (renum f a).isCommit = a.isCommit := rfl
+@[simp] theorem renum_sess (f : Nat -> Nat) (a : Inst) : (renum f a).sess = a.sess := rfl
+@[simp] theorem renum_role (f : Nat -> Nat) (a : Inst) : (renum f a).role = a.role := rfl
+@[simp] theorem renum_self (f : Nat -> Nat) (a : Inst) : (renum f a).self = a.self := rfl
+@[simp] theorem renum_peer (f : Nat -> Nat) (a : Inst) : (renum f a).peer = a.peer := rfl
+@[simp] theorem renum_tag (f : Nat -> Nat) (a : Inst) : (renum f a).tag = a.tag := rfl
+@[simp] theorem renum_data (f : Nat -> Nat) (a : Inst) : (renum f a).data = a.data := rfl
+@[simp] theorem instRec_renum (f : Nat -> Nat) (a : Inst) : instRec (renum f a) = instRec a := rfl
+
+theorem isCommit_congr {a b : Inst} (h : instRec a = instRec b) : a.isCommit = b.isCommit :=
+  congrArg InstRec.isCommit h
+
+theorem bool_eq_false_not_true {b : Bool} (h : b = false) : ¬ (b = true) := by
+  cases b <;> simp_all
+
+/-- incIdx xs: the trace positions the events were recorded at are strictly increasing, i.e. the
+list really is in trace order. -/
+def incIdx : List Inst -> Prop
+  | [] => True
+  | a :: as => (∀ b ∈ as, a.idx < b.idx) ∧ incIdx as
+
+theorem incIdx_nil : incIdx [] := trivial
+
+theorem incIdx_cons {a : Inst} {as : List Inst} (h : ∀ b ∈ as, a.idx < b.idx) (h' : incIdx as) :
+    incIdx (a :: as) := ⟨h, h'⟩
+
+theorem incIdx_tail {a : Inst} {as : List Inst} (h : incIdx (a :: as)) : incIdx as := h.2
+
+theorem incIdx_head {a : Inst} {as : List Inst} (h : incIdx (a :: as)) :
+    ∀ b ∈ as, a.idx < b.idx := h.1
+
+theorem incIdx_append {xs ys : List Inst} (hxs : incIdx xs) (hys : incIdx ys)
+    (h : ∀ x ∈ xs, ∀ y ∈ ys, x.idx < y.idx) : incIdx (xs ++ ys) := by
+  induction xs generalizing ys with
+  | nil => exact hys
+  | cons a as ih =>
+      obtain ⟨h1, h2⟩ := hxs
+      refine ⟨?_, ih h2 hys (fun x hx y hy => h x (List.Mem.tail _ hx) y hy)⟩
+      intro b hb
+      obtain hbs | hy := List.mem_append.mp hb
+      · exact h1 b hbs
+      · exact h a (List.Mem.head _) b hy
+
+/-- In a list whose positions increase, every event of the left half precedes every event of the
+right half. -/
+theorem lt_of_mem_left {p q : List Inst} (h : incIdx (p ++ q)) {x : Inst} (hx : x ∈ p)
+    {y : Inst} (hy : y ∈ q) : x.idx < y.idx := by
+  induction p with
+  | nil => exact absurd hx (by simp)
+  | cons a as ih =>
+      obtain ⟨h1, h2⟩ := h
+      obtain rfl | hxa := List.mem_cons.mp hx
+      · exact h1 y (List.mem_append.mpr (Or.inr hy))
+      · exact ih h2 hxa
+
+/-- In an increasing list, every event before b has a smaller position than b. -/
+theorem lt_of_mem_before {p : List Inst} {b : Inst} {bs : List Inst}
+    (h : incIdx (p ++ b :: bs)) {r : Inst} (hr : r ∈ bs) : b.idx < r.idx := by
+  induction p with
+  | nil =>
+      obtain ⟨h1, _⟩ := h
+      exact h1 r hr
+  | cons a as ih => exact ih (incIdx_tail h)
+
+/-- Split a list at one of its elements. -/
+theorem exists_split_cons {xs : List Inst} (c : Inst) (h : c ∈ xs) :
+    ∃ p rest, xs = p ++ c :: rest := by
+  induction xs with
+  | nil => exact absurd h (by simp)
+  | cons a as ih =>
+      obtain rfl | hmem := List.mem_cons.mp h
+      · exact ⟨[], as, rfl⟩
+      · obtain ⟨p, rest, heq⟩ := ih hmem
+        exact ⟨a :: p, rest, by rw [heq]; rfl⟩
+
+/-- **Renumbering of authentication event lists.** instEquiv xs ys says the two lists hold the same
+sequence of claims and commits - same order, same content - and each is listed with strictly
+increasing trace positions. They differ only in *where* in the trace the events sit. -/
+def instEquiv (xs ys : List Inst) : Prop :=
+  xs.map instRec = ys.map instRec ∧ incIdx xs ∧ incIdx ys
+
+theorem claimMatches_self_false (c : Inst) : ProtSat.Reference.claimMatches c c = false := by
+  rw [ProtSat.Reference.claimMatches]
+  simp
+
+theorem claimMatches_after_false {c r : Inst} (h : c.idx < r.idx) :
+    ProtSat.Reference.claimMatches c r = false := by
+  classical
+  rw [ProtSat.Reference.claimMatches]
+  have : ¬ (r.idx < c.idx) := fun hx => Nat.lt_asymm h hx
+  simp [this]
+
+/-- The commits with the same identity as c that happened before it: these have already consumed the
+claims that could match c. This is the count agreesInj performs. -/
+def consumed (c r : Inst) : Bool :=
+  r.isCommit && ProtSat.Reference.key r == ProtSat.Reference.key c && r.idx < c.idx
+
+theorem consumed_self_false (c : Inst) : consumed c c = false := by
+  rw [consumed]
+  simp
+
+theorem consumed_after_false {c r : Inst} (h : c.idx < r.idx) : consumed c r = false := by
+  classical
+  rw [consumed]
+  have : ¬ (r.idx < c.idx) := fun hx => Nat.lt_asymm h hx
+  simp [this]
+
+theorem key_congr {a b : Inst} (h : instRec a = instRec b) :
+    ProtSat.Reference.key a = ProtSat.Reference.key b := by
+  have h1 : a.isCommit = b.isCommit := congrArg InstRec.isCommit h
+  have h2 : a.tag = b.tag := congrArg InstRec.tag h
+  have h3 : a.role = b.role := congrArg InstRec.role h
+  have h4 : a.self = b.self := congrArg InstRec.self h
+  have h5 : a.peer = b.peer := congrArg InstRec.peer h
+  have h6 : a.data = b.data := congrArg InstRec.data h
+  simp [ProtSat.Reference.key, h1, h2, h3, h4, h5, h6]
+
+theorem claimMatches_congr {a b a' b' : Inst}
+    (h1 : instRec a = instRec a') (h2 : instRec b = instRec b')
+    (h3 : (b.idx < a.idx) ↔ (b'.idx < a'.idx)) :
+    ProtSat.Reference.claimMatches a b = ProtSat.Reference.claimMatches a' b' := by
+  have hA : a.isCommit = a'.isCommit := congrArg InstRec.isCommit h1
+  have hT : a.tag = a'.tag := congrArg InstRec.tag h1
+  have hD : a.data = a'.data := congrArg InstRec.data h1
+  have hS : a.self = a'.self := congrArg InstRec.self h1
+  have hP : a.peer = a'.peer := congrArg InstRec.peer h1
+  have bA : b.isCommit = b'.isCommit := congrArg InstRec.isCommit h2
+  have bT : b.tag = b'.tag := congrArg InstRec.tag h2
+  have bD : b.data = b'.data := congrArg InstRec.data h2
+  have bS : b.self = b'.self := congrArg InstRec.self h2
+  have bP : b.peer = b'.peer := congrArg InstRec.peer h2
+  classical
+  by_cases h : b.idx < a.idx
+  · have h5 : b'.idx < a'.idx := h3.mp h
+    simp only [ProtSat.Reference.claimMatches, bA, bT, bD, bS, bP, hT, hD, hS, hP, h, h5]
+  · have h5 : ¬ b'.idx < a'.idx := fun hx => h (h3.mpr hx)
+    simp only [ProtSat.Reference.claimMatches, bA, bT, bD, bS, bP, hT, hD, hS, hP, h, h5]
+
+theorem consumed_congr {a b a' b' : Inst}
+    (h1 : instRec a = instRec a') (h2 : instRec b = instRec b')
+    (h3 : (b.idx < a.idx) ↔ (b'.idx < a'.idx)) : consumed a b = consumed a' b' := by
+  have hA : b.isCommit = b'.isCommit := congrArg InstRec.isCommit h2
+  have hk : ProtSat.Reference.key b = ProtSat.Reference.key b' := key_congr h2
+  have hka : ProtSat.Reference.key a = ProtSat.Reference.key a' := key_congr h1
+  classical
+  by_cases h : b.idx < a.idx
+  · have h5 : b'.idx < a'.idx := h3.mp h
+    simp only [consumed, hA, hk, hka, h, h5]
+  · have h5 : ¬ b'.idx < a'.idx := fun hx => h (h3.mpr hx)
+    simp only [consumed, hA, hk, hka, h, h5]
+
+/-- Split a list at a distinguished element, and split the other list at the same place. -/
+theorem map_decompose : ∀ (p : List Inst) (xs ys : List Inst) (c : Inst) (rest : List Inst),
+    xs = p ++ c :: rest -> xs.map instRec = ys.map instRec ->
+      ∃ (p' : List Inst) (c' : Inst) (rest' : List Inst),
+        ys = p' ++ c' :: rest' ∧ p.map instRec = p'.map instRec ∧ instRec c = instRec c' ∧
+          rest.map instRec = rest'.map instRec := by
+  intro p
+  induction p with
+  | nil =>
+      intro xs ys c rest hxs hrec
+      rw [List.nil_append] at hxs
+      subst hxs
+      cases ys with
+      | nil => simp at hrec
+      | cons y ys' =>
+          simp only [List.map_cons, List.cons.injEq] at hrec
+          obtain ⟨e1, e2⟩ := hrec
+          exact ⟨[], y, ys', rfl, by simp, e1, e2⟩
+  | cons a as ih =>
+      intro xs ys c rest hxs hrec
+      rw [List.cons_append] at hxs
+      subst hxs
+      cases ys with
+      | nil => simp at hrec
+      | cons y ys' =>
+          simp only [List.map_cons, List.cons.injEq] at hrec
+          obtain ⟨e1, e2⟩ := hrec
+          obtain ⟨p', c', rest', heq, hp', hc', hr'⟩ := ih (as ++ c :: rest) ys' c rest rfl e2
+          refine ⟨y :: p', c', rest', ?_, ?_, hc', hr'⟩
+          · rw [heq]
+            congr
+          · rw [List.map_cons, List.map_cons, e1, hp']
+
+/-! #### Agreement as a statement about the events before each commit -/
+
+/-- agreesPrefix xs: every commit has a matching claim among the events that come *before* it. For a
+list in trace order this is exactly agreement, because a claim at or after the commit cannot match
+it. -/
+def agreesPrefix (xs : List Inst) : Prop :=
+  ∀ (p : List Inst) (c : Inst) (rest : List Inst), xs = p ++ c :: rest →
+    c.isCommit → ∃ r ∈ p, ProtSat.Reference.claimMatches c r = true
+
+theorem agrees_of_agreesPrefix (xs : List Inst) (h : agreesPrefix xs) :
+    ProtSat.Reference.agrees xs := by
+  intro c hc hcom
+  obtain ⟨p, rest, heq⟩ := exists_split_cons c hc
+  obtain ⟨r, hr, hm⟩ := h p c rest heq hcom
+  exact ⟨r, by rw [heq]; exact List.mem_append_left _ hr, hm⟩
+
+theorem agreesPrefix_of_agrees (xs : List Inst) (h : incIdx xs)
+    (hall : ProtSat.Reference.agrees xs) : agreesPrefix xs := by
+  classical
+  intro p c rest hdec hcom
+  have hx : incIdx (p ++ c :: rest) := hdec ▸ h
+  obtain ⟨r, hr, hm⟩ := hall c (by rw [hdec]; exact List.mem_append_right p (List.Mem.head _)) hcom
+  rw [hdec, List.mem_append] at hr
+  obtain h1 | h2 := hr
+  · exact ⟨r, h1, hm⟩
+  · rw [List.mem_cons] at h2
+    obtain hre | h3 := h2
+    · subst hre
+      exact absurd hm (bool_eq_false_not_true (claimMatches_self_false _))
+    · have hlt : c.idx < r.idx := lt_of_mem_before hx h3
+      exact absurd hm (bool_eq_false_not_true (claimMatches_after_false hlt))
+
+theorem agrees_iff_agreesPrefix (xs : List Inst) (h : incIdx xs) :
+    ProtSat.Reference.agrees xs ↔ agreesPrefix xs :=
+  ⟨agreesPrefix_of_agrees xs h, agrees_of_agreesPrefix xs⟩
+
+theorem mem_map_of_mem_map {p q : List Inst} (h : p.map instRec = q.map instRec) {r : Inst}
+    (hr : r ∈ q) : ∃ r' ∈ p, instRec r' = instRec r :=
+  List.mem_map.mp (by rw [h]; exact List.mem_map.mpr ⟨r, hr, rfl⟩)
+
+/-- **T6a (non-injective agreement).** Two renumbered event lists agree or fail together: the
+monitor only reads the *relative* order of the positions, never the positions themselves. -/
+theorem agrees_renumber {xs ys : List Inst} (h : instEquiv xs ys) :
+    ProtSat.Reference.agrees xs ↔ ProtSat.Reference.agrees ys := by
+  classical
+  obtain ⟨hrec, hx, hy⟩ := h
+  refine ((agrees_iff_agreesPrefix xs hx).trans ?_).trans (agrees_iff_agreesPrefix ys hy).symm
+  refine ⟨fun hall p c rest hdec hcom => ?_, fun hall p c rest hdec hcom => ?_⟩
+  · obtain ⟨p', c', rest', heq, hp, hcc, hrest⟩ := map_decompose p ys xs c rest hdec hrec.symm
+    have hy2 : incIdx (p ++ c :: rest) := hdec ▸ hy
+    have hx2 : incIdx (p' ++ c' :: rest') := heq ▸ hx
+    obtain ⟨r, hr, hm⟩ := hall p' c' rest' heq
+      (by rw [← isCommit_congr hcc]; exact hcom)
+    obtain ⟨r', hr', heqr⟩ := mem_map_of_mem_map hp hr
+    refine ⟨r', hr', ?_⟩
+    have hb2 : r'.idx < c.idx := lt_of_mem_left hy2 hr' (List.Mem.head _)
+    have hb1 : r.idx < c'.idx := lt_of_mem_left hx2 hr (List.Mem.head _)
+    rw [claimMatches_congr hcc heqr ⟨fun _ => hb1, fun _ => hb2⟩]
+    exact hm
+  · obtain ⟨p', c', rest', heq, hp, hcc, hrest⟩ := map_decompose p xs ys c rest hdec hrec
+    have hx2 : incIdx (p ++ c :: rest) := hdec ▸ hx
+    have hy2 : incIdx (p' ++ c' :: rest') := heq ▸ hy
+    obtain ⟨r, hr, hm⟩ := hall p' c' rest' heq (by rw [← isCommit_congr hcc]; exact hcom)
+    obtain ⟨r', hr', heqr⟩ := mem_map_of_mem_map hp hr
+    refine ⟨r', hr', ?_⟩
+    have hb2 : r'.idx < c.idx := lt_of_mem_left hx2 hr' (List.Mem.head _)
+    have hb1 : r.idx < c'.idx := lt_of_mem_left hy2 hr (List.Mem.head _)
+    rw [claimMatches_congr hcc heqr ⟨fun _ => hb1, fun _ => hb2⟩]
+    exact hm
+
+/-! #### The injective monitor -/
+
+/-- agreesInjPrefix xs: the injective counting condition of agreesInj, performed against the events
+that come before each commit. -/
+def agreesInjPrefix (xs : List Inst) : Prop :=
+  ∀ (p : List Inst) (c : Inst) (rest : List Inst), xs = p ++ c :: rest → c.isCommit →
+    (p.filter (ProtSat.Reference.claimMatches c)).length > (p.filter (consumed c)).length
+
+theorem filter_cons_of_false {p : Inst -> Bool} {a : Inst} {l : List Inst} (h : p a = false) :
+    List.filter p (a :: l) = List.filter p l := by
+  rw [List.filter_cons_of_neg (by simpa using h)]
+
+theorem filter_tail_eq_nil {bs : List Inst} (p : Inst -> Bool)
+    (hbs : ∀ r ∈ bs, p r = false) : bs.filter p = [] := by
+  induction bs with
+  | nil => rfl
+  | cons a as ih =>
+      rw [filter_cons_of_false (hbs a (List.Mem.head _))]
+      exact ih (fun r hr => hbs r (List.Mem.tail _ hr))
+
+theorem filter_prefix_eq {xs : List Inst} {b : Inst} {bs : List Inst}
+    (p : Inst -> Bool) (hb : p b = false) (hbs : ∀ r ∈ bs, p r = false) :
+    (xs ++ b :: bs).filter p = xs.filter p := by
+  rw [List.filter_append,
+    filter_tail_eq_nil (bs := b :: bs) p (fun r hr => by
+      obtain rfl | hr' := List.mem_cons.mp hr
+      · exact hb
+      · exact hbs r hr'),
+    List.append_nil]
+
+theorem filter_lengths_congr {b c : Inst} : ∀ (p₁ : List Inst), ∀ (p₂ : List Inst),
+    p₁.map instRec = p₂.map instRec -> instRec b = instRec c ->
+      (∀ r ∈ p₁, r.idx < b.idx) -> (∀ r ∈ p₂, r.idx < c.idx) ->
+      (p₁.filter (ProtSat.Reference.claimMatches b)).length =
+        (p₂.filter (ProtSat.Reference.claimMatches c)).length ∧
+      (p₁.filter (consumed b)).length = (p₂.filter (consumed c)).length := by
+  classical
+  intro p₁
+  induction p₁ with
+  | nil =>
+      intro p₂ hp hbc _ _
+      have hp2 : p₂ = [] := by
+        cases p₂ with
+        | nil => rfl
+        | cons a as => exact absurd hp (by simp)
+      subst hp2
+      simp
+  | cons r rs ih =>
+      intro p₂ hp hbc h₁ h₂
+      obtain ⟨r', r's, hp', hr', hrest⟩ : ∃ r' r's, p₂ = r' :: r's ∧ instRec r = instRec r' ∧
+          rs.map instRec = r's.map instRec := by
+        cases p₂ with
+        | nil => exact absurd hp (by simp)
+        | cons r' r's =>
+            simp only [List.map_cons, List.cons.injEq] at hp
+            obtain ⟨e1, e2⟩ := hp
+            exact ⟨r', r's, rfl, e1, e2⟩
+      subst hp'
+      have hcm : ProtSat.Reference.claimMatches b r = ProtSat.Reference.claimMatches c r' :=
+        claimMatches_congr hbc hr' ⟨fun _ => h₂ r' (List.Mem.head _), fun _ => h₁ r (List.Mem.head _)⟩
+      have hcb : consumed b r = consumed c r' :=
+        consumed_congr hbc hr' ⟨fun _ => h₂ r' (List.Mem.head _), fun _ => h₁ r (List.Mem.head _)⟩
+      obtain ⟨h1, h2⟩ := ih r's hrest hbc (fun x hx => h₁ x (List.Mem.tail _ hx))
+        (fun x hx => h₂ x (List.Mem.tail _ hx))
+      refine ⟨?_, ?_⟩
+      · by_cases h : ProtSat.Reference.claimMatches b r = true
+        · rw [List.filter_cons_of_pos h, List.filter_cons_of_pos (by rwa [← hcm])]
+          rw [List.length_cons, List.length_cons, h1]
+        · rw [List.filter_cons_of_neg h, List.filter_cons_of_neg (by rwa [← hcm])]
+          exact h1
+      · by_cases h : consumed b r = true
+        · rw [List.filter_cons_of_pos h, List.filter_cons_of_pos (by rwa [← hcb])]
+          rw [List.length_cons, List.length_cons, h2]
+        · rw [List.filter_cons_of_neg h, List.filter_cons_of_neg (by rwa [← hcb])]
+          exact h2
+
+theorem agreesInj_of_agreesInjPrefix (xs : List Inst) (h : incIdx xs)
+    (hall : agreesInjPrefix xs) : ProtSat.Reference.agreesInj xs := by
+  classical
+  intro c hc hcom
+  obtain ⟨p, rest, heq⟩ := exists_split_cons c hc
+  have hx : incIdx (p ++ c :: rest) := heq ▸ h
+  have e1 : xs.filter (ProtSat.Reference.claimMatches c) = p.filter (ProtSat.Reference.claimMatches c) := by
+    rw [heq, filter_prefix_eq _ (claimMatches_self_false c)
+      (fun r hr => claimMatches_after_false (lt_of_mem_before hx hr))]
+  have e2 : xs.filter (consumed c) = p.filter (consumed c) := by
+    rw [heq, filter_prefix_eq _ (consumed_self_false c)
+      (fun r hr => consumed_after_false (lt_of_mem_before hx hr))]
+  show (xs.filter (ProtSat.Reference.claimMatches c)).length > (xs.filter (consumed c)).length
+  rw [e1, e2]
+  exact hall p c rest heq hcom
+
+theorem agreesInjPrefix_of_agreesInj (xs : List Inst) (h : incIdx xs)
+    (hall : ProtSat.Reference.agreesInj xs) : agreesInjPrefix xs := by
+  classical
+  intro p c rest hdec hcom
+  have hx : incIdx (p ++ c :: rest) := hdec ▸ h
+  have hc : c ∈ xs := by rw [hdec]; exact List.mem_append_right p (List.Mem.head _)
+  have h1 := hall c hc hcom
+  rw [hdec] at h1
+  have e1 : (p ++ c :: rest).filter (ProtSat.Reference.claimMatches c) =
+      p.filter (ProtSat.Reference.claimMatches c) :=
+    filter_prefix_eq (ProtSat.Reference.claimMatches c) (claimMatches_self_false c)
+      (fun r hr => claimMatches_after_false (lt_of_mem_before hx hr))
+  have e2 : (p ++ c :: rest).filter (consumed c) = p.filter (consumed c) :=
+    filter_prefix_eq (consumed c) (consumed_self_false c)
+      (fun r hr => consumed_after_false (lt_of_mem_before hx hr))
+  rw [← e1, ← e2]
+  exact h1
+
+theorem agreesInj_iff_agreesInjPrefix (xs : List Inst) (h : incIdx xs) :
+    ProtSat.Reference.agreesInj xs ↔ agreesInjPrefix xs :=
+  ⟨agreesInjPrefix_of_agreesInj xs h, agreesInj_of_agreesInjPrefix xs h⟩
+
+/-- **T6a (injective agreement).** The counting condition of agreesInj only reads the relative
+order of the positions as well. -/
+theorem agreesInj_renumber {xs ys : List Inst} (h : instEquiv xs ys) :
+    ProtSat.Reference.agreesInj xs ↔ ProtSat.Reference.agreesInj ys := by
+  classical
+  obtain ⟨hrec, hx, hy⟩ := h
+  refine ((agreesInj_iff_agreesInjPrefix xs hx).trans ?_).trans
+    (agreesInj_iff_agreesInjPrefix ys hy).symm
+  refine ⟨fun hall p c rest hdec hcom => ?_, fun hall p c rest hdec hcom => ?_⟩
+  · obtain ⟨p', c', rest', heq, hp, hcc, hrest⟩ := map_decompose p ys xs c rest hdec hrec.symm
+    have hy2 : incIdx (p ++ c :: rest) := hdec ▸ hy
+    have hx2 : incIdx (p' ++ c' :: rest') := heq ▸ hx
+    obtain ⟨l1, l2⟩ := filter_lengths_congr p p' hp hcc
+      (fun r hr => lt_of_mem_left hy2 hr (List.Mem.head _))
+      (fun r hr => lt_of_mem_left hx2 hr (List.Mem.head _))
+    have hcom' : c'.isCommit := by rw [← isCommit_congr hcc]; exact hcom
+    have := hall p' c' rest' heq hcom'
+    rw [l1, l2]
+    exact this
+  · obtain ⟨p', c', rest', heq, hp, hcc, hrest⟩ := map_decompose p xs ys c rest hdec hrec
+    have hx2 : incIdx (p ++ c :: rest) := hdec ▸ hx
+    have hy2 : incIdx (p' ++ c' :: rest') := heq ▸ hy
+    obtain ⟨l1, l2⟩ := filter_lengths_congr p p' hp hcc
+      (fun r hr => lt_of_mem_left hx2 hr (List.Mem.head _))
+      (fun r hr => lt_of_mem_left hy2 hr (List.Mem.head _))
+    have hcom' : c'.isCommit := by rw [← isCommit_congr hcc]; exact hcom
+    have := hall p' c' rest' heq hcom'
+    rw [l1, l2]
+    exact this
+
+/-! ### T6b: compression preserves the sequence of authentication records -/
+
+/-- The authentication record a step performs, with no position attached: the claim or commit that
+event `ev` executes at configuration `C`, if it performs one. Compare
+`ProtSat.Reference.instAt`, which is the same computation with the trace position remembered; the
+arguments are optional in the same way so that the two line up index by index. -/
+def instRecAt (P : Protocol) (C : Option RCfg) (ev : Option ProtSat.Reference.Ev) :
+    Option InstRec :=
+  match ev, C with
+  | some (ProtSat.Reference.Ev.act q), some C₀ =>
+      match P.actionAt q (ProtSat.Reference.pcOf C₀ q), ProtSat.rget P.sessions q with
+      | some (Action.claim tag peer v), some se =>
+          (ProtSat.Reference.authData P C₀ q peer v).map fun (a, d) =>
+            ⟨false, q, se.role, se.self, a, tag, d⟩
+      | some (Action.commit tag peer v), some se =>
+          (ProtSat.Reference.authData P C₀ q peer v).map fun (a, d) =>
+            ⟨true, q, se.role, se.self, a, tag, d⟩
+      | _, _ => none
+  | _, _ => none
+
+theorem instRecAt_congr {P : Protocol} {C D : RCfg} (h : CfgEq C D)
+    (ev : Option ProtSat.Reference.Ev) : instRecAt P (some C) ev = instRecAt P (some D) ev := by
+  cases ev with
+  | some e =>
+      cases e with
+      | act q =>
+          simp only [instRecAt, pcOf_congr_sess h.1 q, authData_congr h]
+      | _ => rfl
+  | none => rfl
+
+theorem instAt_instRec {P : Protocol} {Cs : List RCfg} {tr : List ProtSat.Reference.Ev}
+    {i : Nat} :
+    (ProtSat.Reference.instAt P Cs tr i).map instRec =
+      instRecAt P (ProtSat.rget Cs i) (ProtSat.rget tr i) := by
+  cases h1 : ProtSat.rget tr i with
+  | none => simp [ProtSat.Reference.instAt, instRecAt, h1]
+  | some ev =>
+      cases h2 : ProtSat.rget Cs i with
+      | none => simp [ProtSat.Reference.instAt, instRecAt, h1, h2]
+      | some C =>
+          cases ev with
+          | act q =>
+              cases h3 : P.actionAt q (ProtSat.Reference.pcOf C q) with
+              | none => simp [ProtSat.Reference.instAt, instRecAt, h1, h2, h3]
+              | some act =>
+                  cases h4 : ProtSat.rget P.sessions q with
+                  | none => simp [ProtSat.Reference.instAt, instRecAt, h1, h2, h3, h4]
+                  | some se =>
+                      cases act with
+                      | claim tag peer v =>
+                          cases h5 : ProtSat.Reference.authData P C q peer v with
+                          | none => simp [ProtSat.Reference.instAt, instRecAt, h1, h2, h3, h4, h5]
+                          | some ad =>
+                              cases ad with
+                              | mk a d =>
+                                  simp [ProtSat.Reference.instAt, instRecAt, instRec, h1, h2, h3, h4, h5]
+                      | commit tag peer v =>
+                          cases h5 : ProtSat.Reference.authData P C q peer v with
+                          | none => simp [ProtSat.Reference.instAt, instRecAt, h1, h2, h3, h4, h5]
+                          | some ad =>
+                              cases ad with
+                              | mk a d =>
+                                  simp [ProtSat.Reference.instAt, instRecAt, instRec, h1, h2, h3, h4, h5]
+                      | _ => simp [ProtSat.Reference.instAt, instRecAt, h1, h2, h3, h4]
+          | _ => simp [ProtSat.Reference.instAt, instRecAt, h1, h2]
+
+theorem rget_cons_zero {α : Type} (a : α) (l : List α) : ProtSat.rget (a :: l) 0 = some a := rfl
+theorem rget_cons_succ {α : Type} (a : α) (l : List α) (n : Nat) :
+    ProtSat.rget (a :: l) (Nat.succ n) = ProtSat.rget l n := rfl
+
+theorem range_succ_zero (n : Nat) : List.range n.succ = 0 :: (List.range n).map Nat.succ := by
+  induction n with
+  | zero => rfl
+  | succ n ih =>
+      calc List.range n.succ.succ
+          = List.range n.succ ++ [n.succ] := by rw [List.range_succ]
+        _ = (0 :: List.map Nat.succ (List.range n)) ++ [n.succ] := by rw [ih]
+        _ = 0 :: (List.map Nat.succ (List.range n) ++ [n.succ]) := rfl
+        _ = 0 :: List.map Nat.succ (List.range n ++ [n]) := by
+            rw [List.map_append, List.map_singleton]
+        _ = 0 :: List.map Nat.succ (List.range n.succ) := by rw [List.range_succ]
+
+theorem range_add_one (n : Nat) : List.range (n + 1) = 0 :: (List.range n).map Nat.succ :=
+  range_succ_zero n
+
+theorem filterMap_cons' {f : Nat -> Option Inst} {x : Nat} {l : List Nat} :
+    List.filterMap f (x :: l) = (f x).toList ++ List.filterMap f l := by
+  cases h : f x <;> simp [h]
+
+theorem toList_map_instRec (o : Option Inst) :
+    List.map instRec o.toList = (o.map instRec).toList := by
+  cases o <;> rfl
+
+theorem insts_records_cons (P : Protocol) (C : RCfg) (Cs : List RCfg)
+    (e : ProtSat.Reference.Ev) (tr : List ProtSat.Reference.Ev) :
+    (ProtSat.Reference.insts P (C :: Cs) (e :: tr)).map instRec =
+      (instRecAt P (some C) (some e)).toList ++ (ProtSat.Reference.insts P Cs tr).map instRec := by
+  classical
+  have h0 : (ProtSat.Reference.instAt P (C :: Cs) (e :: tr) 0).map instRec =
+      instRecAt P (some C) (some e) := by
+    rw [instAt_instRec, rget_cons_zero, rget_cons_zero]
+  have hs : ∀ j, (ProtSat.Reference.instAt P (C :: Cs) (e :: tr) (Nat.succ j)).map instRec =
+      (ProtSat.Reference.instAt P Cs tr j).map instRec := by
+    intro j
+    rw [instAt_instRec, instAt_instRec, rget_cons_succ, rget_cons_succ]
+  unfold ProtSat.Reference.insts
+  rw [List.length_cons, range_add_one, filterMap_cons', List.filterMap_map, List.map_append]
+  rw [List.map_filterMap]
+  simp only [Function.comp_apply]
+  rw [toList_map_instRec, h0]
+  rw [List.map_filterMap]
+  rw [List.filterMap_congr (fun x _ => hs x)]
+
+theorem instAt_idx {P : Protocol} {Cs : List RCfg} {tr : List ProtSat.Reference.Ev} {i : Nat}
+    {a : Inst} (h : ProtSat.Reference.instAt P Cs tr i = some a) : a.idx = i := by
+  cases htr : ProtSat.rget tr i with
+  | none => simp [ProtSat.Reference.instAt, htr] at h
+  | some ev =>
+      cases hC : ProtSat.rget Cs i with
+      | none => simp [ProtSat.Reference.instAt, htr, hC] at h
+      | some C =>
+          cases ev with
+          | act q =>
+              simp only [ProtSat.Reference.instAt, htr, hC] at h
+              cases h1 : P.actionAt q (ProtSat.Reference.pcOf C q) with
+              | none => simp [h1] at h
+              | some act =>
+                  cases h2 : ProtSat.rget P.sessions q with
+                  | none => simp [h1, h2] at h
+                  | some se =>
+                      cases act with
+                      | claim tag peer v =>
+                          cases h3 : ProtSat.Reference.authData P C q peer v with
+                          | none => simp [h1, h2, h3] at h
+                          | some ad => cases ad with
+                              | mk a' d =>
+                                  simp [h1, h2, h3] at h
+                                  rw [← h]
+                      | commit tag peer v =>
+                          cases h3 : ProtSat.Reference.authData P C q peer v with
+                          | none => simp [h1, h2, h3] at h
+                          | some ad => cases ad with
+                              | mk a' d =>
+                                  simp [h1, h2, h3] at h
+                                  rw [← h]
+                      | _ => simp [h1, h2] at h
+          | _ => simp [ProtSat.Reference.instAt, htr] at h
+
+theorem filterMap_singleton {f : Nat -> Option Inst} (n : Nat) :
+    List.filterMap f [n] = (f n).toList := by
+  cases h : f n <;> simp [h]
+
+theorem incIdx_filterMap_range {f : Nat -> Option Inst}
+    (hf : ∀ (i : Nat) (a : Inst), f i = some a -> a.idx = i) (n : Nat) :
+    incIdx (List.filterMap f (List.range n)) := by
+  induction n with
+  | zero => exact incIdx_nil
+  | succ n ih =>
+      rw [List.range_succ, List.filterMap_append]
+      refine incIdx_append ih ?_ ?_
+      · cases h : f n <;> simp [h, incIdx]
+      · intro x hx y hy
+        obtain ⟨i, hi, hfi⟩ := List.mem_filterMap.mp hx
+        obtain ⟨k, hk, hfk⟩ := List.mem_filterMap.mp hy
+        have hkn : k = n := by simpa using hk
+        rw [hf i x hfi, hf k y hfk, hkn]
+        exact List.mem_range.mp hi
+
+/-- The authentication events of any trace are listed in trace order. -/
+theorem incIdx_insts (P : Protocol) (Cs : List RCfg) (tr : List ProtSat.Reference.Ev) :
+    incIdx (ProtSat.Reference.insts P Cs tr) := by
+  unfold ProtSat.Reference.insts
+  exact incIdx_filterMap_range (fun i a h => instAt_idx h) _
+
+/-- A run's visited list is determined by its start configuration and its events. -/
+theorem runs_eq {P : Protocol} {C : RCfg} {tr : List ProtSat.Reference.Ev} {Cs Cs' : List RCfg}
+    (h : ProtSat.Reference.Runs P C tr Cs) (h' : ProtSat.Reference.Runs P C tr Cs') : Cs = Cs' := by
+  have h1 : ProtSat.Reference.run P C tr = some Cs := h
+  have h2 : ProtSat.Reference.run P C tr = some Cs' := h'
+  exact Option.some.inj (h1.symm.trans h2)
+
+/-- **T6b: the compressed run is positionally aligned with the original one.** For the compressed
+trace of `runs_dropRedundant`, the sequence of authentication records - claims and commits, with
+their principals, tags and data - is *the same* as the original's. Only the positions differ, and
+T6a says that is invisible to the monitors. -/
+theorem insts_dropRedundant_records {P : Protocol} {C₀ C : RCfg}
+    {tr : List ProtSat.Reference.Ev} {added : List Term}
+    (h₀ : CfgEq C₀ C) (hadd : ∀ t ∈ added, t ∈ C.kn) :
+    ∀ (Cs : List RCfg), ProtSat.Reference.Runs P C tr Cs →
+      ∃ (Cs' : List RCfg), ProtSat.Reference.Runs P C₀ (dropRedundant tr added) Cs' ∧
+        (ProtSat.Reference.insts P Cs' (dropRedundant tr added)).map instRec =
+          (ProtSat.Reference.insts P Cs tr).map instRec := by
+  intro Cs hrun
+  induction tr generalizing C Cs C₀ added with
+  | nil =>
+      have hcs := runs_nil_inv hrun
+      subst hcs
+      refine ⟨[C₀], ProtSat.Reference.runs_nil P C₀, ?_⟩
+      simp [ProtSat.Reference.insts]
+  | cons e rest ih =>
+      cases hstep : ProtSat.Reference.stepOf P C e with
+      | none =>
+          have h2 : ProtSat.Reference.run P C (e :: rest) = none := by
+            rw [ProtSat.Reference.run, hstep]
+          have h3 : ProtSat.Reference.run P C (e :: rest) = some Cs := hrun
+          exact absurd (h2.symm.trans h3) (by simp)
+      | some C' =>
+          obtain ⟨Rest, hcs, hRest⟩ := run_cons hstep hrun
+          subst hcs
+          rw [insts_records_cons]
+          cases e with
+          | idle =>
+              have hc' : C' = C := by
+                have hsid : ProtSat.Reference.stepOf P C ProtSat.Reference.Ev.idle = some C' := hstep
+                have hcc : C = C' := by simpa [ProtSat.Reference.stepOf] using hsid
+                exact hcc.symm
+              subst hc'
+              rw [dropRedundant_idle]
+              obtain ⟨Cs', hrun', hrec'⟩ := ih h₀ hadd Rest hRest
+              refine ⟨Cs', hrun', ?_⟩
+              rw [hrec']
+              simp [instRecAt]
+          | ded t =>
+              have hb : oneStepBool C.kn t = true := by
+                by_cases h : oneStepBool C.kn t = true
+                · exact h
+                · have hnone : ProtSat.Reference.stepOf P C (ProtSat.Reference.Ev.ded t) = none := by
+                    simp [ProtSat.Reference.stepOf, h]
+                  rw [hnone] at hstep
+                  simp at hstep
+              have hc' : C' = ProtSat.Reference.publish C t := by
+                have hpub : ProtSat.Reference.stepOf P C (ProtSat.Reference.Ev.ded t) =
+                    some (ProtSat.Reference.publish C t) := by
+                  simp [ProtSat.Reference.stepOf, hb]
+                exact (Option.some.inj (hpub.symm.trans hstep)).symm
+              subst hc'
+              by_cases hin : t ∈ added
+              · rw [dropRedundant_ded, if_pos hin]
+                obtain ⟨Cs', hrun', hrec'⟩ :=
+                  ih (cfgEq_trans h₀ (cfgEq_publish_self (hadd t hin)))
+                    (fun x hx => List.mem_append_left _ (hadd x hx)) Rest hRest
+                refine ⟨Cs', hrun', ?_⟩
+                rw [hrec']
+                simp [instRecAt]
+              · rw [dropRedundant_ded, if_neg hin]
+                have hadd' : ∀ x ∈ t :: added, x ∈ (ProtSat.Reference.publish C t).kn := by
+                  intro x hx
+                  rw [List.mem_cons] at hx
+                  obtain rfl | hx' := hx
+                  · rw [ProtSat.Reference.publish_kn]
+                    exact List.mem_append_right _ (List.Mem.head _)
+                  · rw [ProtSat.Reference.publish_kn]
+                    exact List.mem_append_left _ (hadd x hx')
+                obtain ⟨Cs', hrun', hrec'⟩ := ih (cfgEq_publish h₀ t) hadd' Rest hRest
+                have hstep₀ : ProtSat.Reference.stepOf P C₀ (ProtSat.Reference.Ev.ded t) =
+                    some (ProtSat.Reference.publish C₀ t) := by
+                  have : oneStepBool C₀.kn t = true := by
+                    rw [oneStepBool_congr h₀.2.2.2 t]
+                    exact hb
+                  simp [ProtSat.Reference.stepOf, this]
+                refine ⟨C₀ :: Cs', ProtSat.Reference.runs_cons hstep₀ hrun', ?_⟩
+                rw [insts_records_cons, hrec']
+                simp [instRecAt]
+          | recv q m =>
+              obtain ⟨C₀', hstep₀, hcv⟩ := stepOf_pres (cfgEq_symm h₀) hstep
+              have hc₀' : CfgEq C₀' C' := cfgEq_symm hcv
+              obtain ⟨Cs', hrun', hrec'⟩ := ih hc₀'
+                (fun x hx => ProtSat.Reference.kn_mono hstep x (hadd x hx)) Rest hRest
+              rw [dropRedundant_recv]
+              refine ⟨C₀ :: Cs', ProtSat.Reference.runs_cons hstep₀ hrun', ?_⟩
+              rw [insts_records_cons, hrec', instRecAt_congr h₀]
+          | generate q n =>
+              obtain ⟨C₀', hstep₀, hcv⟩ := stepOf_pres (cfgEq_symm h₀) hstep
+              have hc₀' : CfgEq C₀' C' := cfgEq_symm hcv
+              obtain ⟨Cs', hrun', hrec'⟩ := ih hc₀'
+                (fun x hx => ProtSat.Reference.kn_mono hstep x (hadd x hx)) Rest hRest
+              rw [dropRedundant_generate]
+              refine ⟨C₀ :: Cs', ProtSat.Reference.runs_cons hstep₀ hrun', ?_⟩
+              rw [insts_records_cons, hrec', instRecAt_congr h₀]
+          | act q =>
+              obtain ⟨C₀', hstep₀, hcv⟩ := stepOf_pres (cfgEq_symm h₀) hstep
+              have hc₀' : CfgEq C₀' C' := cfgEq_symm hcv
+              obtain ⟨Cs', hrun', hrec'⟩ := ih hc₀'
+                (fun x hx => ProtSat.Reference.kn_mono hstep x (hadd x hx)) Rest hRest
+              rw [dropRedundant_act]
+              refine ⟨C₀ :: Cs', ProtSat.Reference.runs_cons hstep₀ hrun', ?_⟩
+              rw [insts_records_cons, hrec', instRecAt_congr h₀]
+
+/-- **T6b as an equivalence.** The compressed run's event list and the original's are related by
+`instEquiv`: the same records in the same order, with the positions renumbered. -/
+theorem instEquiv_dropRedundant {P : Protocol} {C₀ C : RCfg} {tr : List ProtSat.Reference.Ev}
+    {added : List Term} {Cs Cs' : List RCfg} (h₀ : CfgEq C₀ C) (hadd : ∀ t ∈ added, t ∈ C.kn)
+    (hrun : ProtSat.Reference.Runs P C tr Cs)
+    (hrun' : ProtSat.Reference.Runs P C₀ (dropRedundant tr added) Cs') :
+    instEquiv (ProtSat.Reference.insts P Cs' (dropRedundant tr added))
+      (ProtSat.Reference.insts P Cs tr) := by
+  obtain ⟨Cs'', hrun'', hrec⟩ := insts_dropRedundant_records h₀ hadd Cs hrun
+  have hEq : Cs'' = Cs' := runs_eq hrun'' hrun'
+  have hrec' : (ProtSat.Reference.insts P Cs' (dropRedundant tr added)).map instRec =
+      (ProtSat.Reference.insts P Cs tr).map instRec := by
+    rw [← hEq]
+    exact hrec
+  exact ⟨hrec', incIdx_insts P Cs' (dropRedundant tr added), incIdx_insts P Cs tr⟩
+
+
+/-! ### T6c: the compression theorem for the authentication goals -/
+
+/-- **T4 for agreement: every agreement break has a short witness.** The bound is the same derived
+number as for secrecy - `actionCount P + (univ P B).length` - and the witness is the compressed run
+of T3. What makes this possible is T6b and T6a: compression renumbers the authentication events but
+changes neither their records nor their order, and the agreement monitor cannot see the difference.
+-/
+theorem compress_agreement {P : Protocol} {B : Bounded.Bounds} {tr : List ProtSat.Reference.Ev}
+    {Cs : List RCfg} (hrun : ProtSat.Reference.Runs P (ProtSat.Reference.initCfg P) tr Cs)
+    (hb : boundedCfgs P B Cs) (hv : ProtSat.Reference.authBreak P Cs tr) :
+    ∃ (tr' : List ProtSat.Reference.Ev) (Cs' : List RCfg),
+      ProtSat.Reference.Runs P (ProtSat.Reference.initCfg P) tr' Cs' ∧ boundedCfgs P B Cs' ∧
+        tr'.length ≤ actionCount P + (Bounded.univ P B).length ∧
+          ProtSat.Reference.authBreak P Cs' tr' := by
+  classical
+  let added := (ProtSat.Reference.initCfg P).kn.eraseDups
+  have hadd : ∀ t ∈ added, t ∈ (ProtSat.Reference.initCfg P).kn := fun t ht =>
+    List.mem_eraseDups.mp ht
+  obtain ⟨Cs₁, hrun₁, hcov, hcov', hded⟩ :=
+    runs_dropRedundant (cfgEq_refl _) hadd hadd Cs hrun
+  obtain ⟨Cs₂, hrun₂, hrec₂⟩ := insts_dropRedundant_records (cfgEq_refl _) hadd Cs hrun
+  have huniq : Cs₁ = Cs₂ := runs_eq hrun₁ hrun₂
+  have hrec : (ProtSat.Reference.insts P Cs₁ (dropRedundant tr added)).map instRec =
+      (ProtSat.Reference.insts P Cs tr).map instRec := by
+    rw [huniq]
+    exact hrec₂
+  have hbounded : boundedCfgs P B Cs₁ := by
+    intro D hD
+    obtain ⟨E, hE, hde⟩ := hcov D hD
+    exact (inBounds_congr hde).mpr (hb E hE)
+  have hlen1 : (dropRedundant tr added).length + added.length ≤
+      (dedAdded tr added).length + (tr.filter (fun e => isSessEv e = true)).length :=
+    length_dropRedundant tr added
+  have hsess : (tr.filter (fun e => isSessEv e = true)).length ≤ actionCount P :=
+    sessEv_count_le_actionCount hrun
+  have huniv : (dedAdded tr added).Nodup := nodup_dedAdded tr added (List.nodup_eraseDups _)
+  have hsub : ∀ x ∈ dedAdded tr added, x ∈ Bounded.univ P B := by
+    intro x hx
+    obtain h1 | h2 := hded x hx
+    · exact Bounded.initKn_subset_univ P B x (hadd x h1)
+    · obtain ⟨C', hC', hx'⟩ := h2
+      exact (hbounded C' hC').1 x hx'
+  have hda : (dedAdded tr added).length ≤ (Bounded.univ P B).length :=
+    List.length_le_of_nodup_forall_mem (Bounded.univ P B) (univ_nodup P B)
+      (dedAdded tr added) huniv hsub
+  refine ⟨dropRedundant tr added, Cs₁, hrun₁, hbounded, by omega, ?_⟩
+  intro hall
+  exact hv ((agrees_renumber
+    ⟨hrec, incIdx_insts P Cs₁ (dropRedundant tr added), incIdx_insts P Cs tr⟩).mp hall)
+
+/-- **T4 for injective agreement: every injective-agreement break has a short witness.** The
+counting condition of `agreesInj` compares positions and counts them, and T6a shows the counts are
+invariant under the renumbering compression performs, so the same witness works. -/
+theorem compress_agreementInj {P : Protocol} {B : Bounded.Bounds} {tr : List ProtSat.Reference.Ev}
+    {Cs : List RCfg} (hrun : ProtSat.Reference.Runs P (ProtSat.Reference.initCfg P) tr Cs)
+    (hb : boundedCfgs P B Cs) (hv : ProtSat.Reference.authBreakInj P Cs tr) :
+    ∃ (tr' : List ProtSat.Reference.Ev) (Cs' : List RCfg),
+      ProtSat.Reference.Runs P (ProtSat.Reference.initCfg P) tr' Cs' ∧ boundedCfgs P B Cs' ∧
+        tr'.length ≤ actionCount P + (Bounded.univ P B).length ∧
+          ProtSat.Reference.authBreakInj P Cs' tr' := by
+  classical
+  let added := (ProtSat.Reference.initCfg P).kn.eraseDups
+  have hadd : ∀ t ∈ added, t ∈ (ProtSat.Reference.initCfg P).kn := fun t ht =>
+    List.mem_eraseDups.mp ht
+  obtain ⟨Cs₁, hrun₁, hcov, hcov', hded⟩ :=
+    runs_dropRedundant (cfgEq_refl _) hadd hadd Cs hrun
+  obtain ⟨Cs₂, hrun₂, hrec₂⟩ := insts_dropRedundant_records (cfgEq_refl _) hadd Cs hrun
+  have huniq : Cs₁ = Cs₂ := runs_eq hrun₁ hrun₂
+  have hrec : (ProtSat.Reference.insts P Cs₁ (dropRedundant tr added)).map instRec =
+      (ProtSat.Reference.insts P Cs tr).map instRec := by
+    rw [huniq]
+    exact hrec₂
+  have hbounded : boundedCfgs P B Cs₁ := by
+    intro D hD
+    obtain ⟨E, hE, hde⟩ := hcov D hD
+    exact (inBounds_congr hde).mpr (hb E hE)
+  have hlen1 : (dropRedundant tr added).length + added.length ≤
+      (dedAdded tr added).length + (tr.filter (fun e => isSessEv e = true)).length :=
+    length_dropRedundant tr added
+  have hsess : (tr.filter (fun e => isSessEv e = true)).length ≤ actionCount P :=
+    sessEv_count_le_actionCount hrun
+  have huniv : (dedAdded tr added).Nodup := nodup_dedAdded tr added (List.nodup_eraseDups _)
+  have hsub : ∀ x ∈ dedAdded tr added, x ∈ Bounded.univ P B := by
+    intro x hx
+    obtain h1 | h2 := hded x hx
+    · exact Bounded.initKn_subset_univ P B x (hadd x h1)
+    · obtain ⟨C', hC', hx'⟩ := h2
+      exact (hbounded C' hC').1 x hx'
+  have hda : (dedAdded tr added).length ≤ (Bounded.univ P B).length :=
+    List.length_le_of_nodup_forall_mem (Bounded.univ P B) (univ_nodup P B)
+      (dedAdded tr added) huniv hsub
+  refine ⟨dropRedundant tr added, Cs₁, hrun₁, hbounded, by omega, ?_⟩
+  intro hall
+  exact hv ((agreesInj_renumber
+    ⟨hrec, incIdx_insts P Cs₁ (dropRedundant tr added), incIdx_insts P Cs tr⟩).mp hall)
+
+/-- **T4, the prize, for every goal the contract can ask about.** For a query whose selected goals
+are secrecy, agreement or injective agreement, safety at the derived bound is safety at every
+length. The secrecy case is `compress_secrecy`, the authentication cases are
+`compress_agreement` and `compress_agreementInj`. -/
+theorem safe_at_derived_bound_full (q : Query)
+    (hg : ∀ g ∈ q.goals, g = Goal.secrecy ∨ g = Goal.agreement ∨ g = Goal.agreementInj)
+    (h : boundedSafe (derived q)) : allLengthsSafe q := by
+  intro tr Cs hrun hb g hg' hv
+  obtain rfl | rfl | rfl := hg g hg'
+  · obtain ⟨tr', Cs', hrun', hb', hlen', hv'⟩ := compress_secrecy hrun hb hv
+    have hg'' : Goal.secrecy ∈ (derived q).goals := by show Goal.secrecy ∈ q.goals; exact hg'
+    have hlen'' : tr'.length ≤ (derived q).bounds.steps :=
+      Nat.le_trans hlen' (Nat.le_max_right _ _)
+    exact h ⟨Goal.secrecy, hg'', tr', Cs', ⟨hrun', hlen'', hb'⟩,
+      (goalViolation_secrecy (derived q).protocol Cs' tr' |>.mpr hv')⟩
+  · obtain ⟨tr', Cs', hrun', hb', hlen', hv'⟩ := compress_agreement hrun hb hv
+    have hg'' : Goal.agreement ∈ (derived q).goals := by show Goal.agreement ∈ q.goals; exact hg'
+    have hlen'' : tr'.length ≤ (derived q).bounds.steps :=
+      Nat.le_trans hlen' (Nat.le_max_right _ _)
+    exact h ⟨Goal.agreement, hg'', tr', Cs', ⟨hrun', hlen'', hb'⟩,
+      (goalViolation_agreement (derived q).protocol Cs' tr' |>.mpr hv')⟩
+  · obtain ⟨tr', Cs', hrun', hb', hlen', hv'⟩ := compress_agreementInj hrun hb hv
+    have hg'' : Goal.agreementInj ∈ (derived q).goals :=
+      by show Goal.agreementInj ∈ q.goals; exact hg'
+    have hlen'' : tr'.length ≤ (derived q).bounds.steps :=
+      Nat.le_trans hlen' (Nat.le_max_right _ _)
+    exact h ⟨Goal.agreementInj, hg'', tr', Cs', ⟨hrun', hlen'', hb'⟩,
+      (goalViolation_agreementInj (derived q).protocol Cs' tr' |>.mpr hv')⟩
+
+/-! ### T6d: the derived bound on the authentication gate models -/
+
+/-- The contract's ordered authentication model: claim then commit in one role. -/
+def authOrderQ : Query := ProtSat.Reference.Contract.Gates.authOrderQ
+
+/-- The same model with the two actions swapped, which the contract proves attackable. -/
+def authSwappedQ : Query := ProtSat.Reference.Contract.Gates.authSwappedQ
+
+/-- The ordered model instantiates one session whose role has two actions. -/
+theorem authOrderQ_actionCount : actionCount authOrderQ.protocol = 2 := by decide
+
+/-- Its message universe has five messages at the query's own closure bound. -/
+theorem authOrderQ_universeSize : universeSize authOrderQ = 5 := by decide
+
+/-- **The derived bound for the authentication gate, as a closed number: seven events.** The query
+itself asks about two; checking up to seven settles every length inside this universe. -/
+theorem authOrderQ_derivedSteps : derivedSteps authOrderQ = 7 := by decide
+
+/-- The swapped model gets the same derived bound: same sessions, same universe. -/
+theorem authSwappedQ_derivedSteps : derivedSteps authSwappedQ = 7 := by decide
+
+/-- Both authentication gate queries select exactly the agreement goal. -/
+theorem authOrderQ_goals : ∀ g ∈ authOrderQ.goals, g = Goal.agreement := by
+  intro g hg
+  simp [authOrderQ, ProtSat.Reference.Contract.Gates.authOrderQ] at hg
+  obtain rfl : g = Goal.agreement := hg
+  rfl
+
+/-- The derived bound really does apply to an authentication query: at seven events, safety of the
+ordered model is safety at every length. -/
+theorem authOrderQ_allLengthsSafe (h : boundedSafe (derived authOrderQ)) :
+    allLengthsSafe authOrderQ :=
+  safe_at_derived_bound_full authOrderQ (fun g hg => Or.inr (Or.inl (authOrderQ_goals g hg))) h
+
+/-- The swapped model's attack is through the agreement goal. -/
+theorem authSwappedQ_attack_agreement :
+    ProtSat.Reference.Contract.boundedAttackFor authSwappedQ Goal.agreement := by
+  obtain ⟨g, hg, hatk⟩ := ProtSat.Reference.Contract.Gates.authSwappedQ_boundedAttack
+  have hg' : g = Goal.agreement := by
+    simp [authSwappedQ, ProtSat.Reference.Contract.Gates.authSwappedQ] at hg
+    exact hg
+  subst hg'
+  exact hatk
+
+/-- **The short authentication witness, on a real model.** The attack the contract finds on the
+swapped model at two events is, by T6c, witnessed within the derived bound of seven events: the
+number the model itself supplies. -/
+theorem authSwappedQ_short_attack :
+    ProtSat.Reference.Contract.boundedAttackFor (derived authSwappedQ) Goal.agreement := by
+  obtain ⟨tr, Cs, hbrun, hv⟩ := authSwappedQ_attack_agreement
+  obtain ⟨hrun, hlen, hb⟩ := hbrun
+  obtain ⟨tr', Cs', hrun', hb', hlen', hv'⟩ := compress_agreement hrun hb hv
+  refine ⟨tr', Cs', ⟨hrun', Nat.le_trans hlen' (Nat.le_max_right _ _), hb'⟩, ?_⟩
+  exact (goalViolation_agreement _ _ _).mpr hv'
+
+/-! ### How the positional obstruction was closed
+
+The obstruction an earlier pass named here was real: `ProtSat.Reference.Inst.idx` is the *position* of
+the claim or commit in the trace, `claimMatches` compares positions (`r.idx < c.idx`) and `agreesInj`
+counts them, so deleting a non-session event renumbers every later authentication event and the two
+`insts` lists are not equal. What T6a establishes is that they do not have to be. Neither monitor
+reads a position: it reads the order between pairs of positions. Two event lists that hold the same
+records in the same order, each with strictly increasing positions - `instEquiv` - satisfy `agrees`,
+and satisfy `agreesInj`, together. T6b supplies exactly that relation for the compressed run:
+`dropRedundant` deletes only idle and redundant-deduction events, which carry no authentication
+action, and every surviving event sees an extensionally equal configuration, so its record is
+identical and only its position has moved.
+
+No definition in `ProtSat.Reference` inspects an absolute position: apart from `instAt` storing
+`idx := i`, the only uses of `Inst.idx` are the two comparisons inside `claimMatches` and
+`agreesInj`, which is why the invariance route was sufficient and `Reference.lean` did not have to
+change.
+
+What is still not done here: the monitors are proved invariant under renumbering, not under
+*permutation* - the order of authentication events is preserved by compression, and nothing here says
+it could be changed. And the derived bound remains a bound on witnesses inside the query's own message
+universe: `safe_at_derived_bound_full` needs the violating execution to stay inside
+`Bounded.univ q.protocol q.bounds`, which is the analyst's closure choice, not a theorem about the
+protocol. -/
 
 end ProtSat.Compress

@@ -117,6 +117,7 @@ expect 'code decodes back to the same proof: true' 'the serialization round trip
 expect 'evidence bound to a different formula rejected: true' 'evidence transplanted to another formula is rejected'
 expect 'produced by the engine and checked: true' 'the resolution engine emits a refutation the independent checker accepts'
 expect 'engine output survives serialization: true' 'the engine refutation round-trips through the code format and is still accepted'
+expect 'derived bound ' 'the model-derived step bound is reported next to the bound the query chose'
 
 printf '%s\n' '-------------------------'
 printf '%d passed, %d failed\n' "$pass" "$fail"
