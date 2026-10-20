@@ -40,3 +40,4 @@ import ProtSat.AnalyzerEvidence
 import ProtSat.AuthClauses
 import ProtSat.UnitRefute
 import ProtSat.DecodeIndex
+import ProtSat.GoalEncode

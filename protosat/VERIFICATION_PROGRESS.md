@@ -1328,6 +1328,44 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   No `by decide` anywhere in the file, so no kernel replay cost; axioms are
   `[propext, Quot.sound]` for the transport lemmas and `[propext, Classical.choice, Quot.sound]`
   for the two that read satisfaction. Build green, audit clean, 30/30 CI gates green.
+* 2026-10-20 (al) - stage 4, the violation group becomes goal-indexed: `ProtSat/GoalEncode.lean`
+  (825 lines, 58 new kernel-checked theorems), and the shortcut everyone hoped for is PROVED IMPOSSIBLE.
+  `encodeGoalsOf P B gs` is the ten semantic groups plus a violation group selected by `gs`, and the
+  regression gate is definitional rather than empirical: `encodeGoalsOf_secrecy : encodeGoalsOf P B
+  [Goal.secrecy] = encode P B := rfl`. Not a re-proved equality - the two terms are the same term,
+  which is the strongest possible statement that nothing about the existing formula changed. Same for
+  the empty case (`encodeGoalsOf_nil := rfl`), and the empty case is made honest rather than useful:
+  `empty_goals_are_strictly_weaker` exhibits the AuthGap model where the empty-goal formula is
+  satisfiable and `encode P B` is not, so SAT there means 'a permitted run exists' and can never be
+  read as a security answer. The correspondence then moves by rewriting, not reproving:
+  `encoding_correct_goals` is `Sound.encoding_correct` after the rfl, and `sat_encode_of_sat` carries
+  both directions to arbitrary goal lists. The three `AuthClauses.Diff` gates are restated as gates
+  about the goal-indexed formula, again by rewriting.
+  *The obstruction, as a counterexample rather than a complaint.* The obvious route to agreement
+  SOUND was 'a model of the semantic groups is a model of `encode P B`, so reuse `Encoding`'.
+  `no_transport_from_base` proves that lemma FALSE: it exhibits P, B and an assignment satisfying
+  `baseEncode P B` but not `encode P B` (the AuthGap model with `AuthClauses.attackAsg` - the same
+  assignment that witnesses the agreement attack, which is exactly why it cannot satisfy a formula
+  containing the empty secrecy clause). So the `Agrees` induction behind `encoding_complete` genuinely
+  has to be re-stated over the ten semantic groups - `rel_agrees` (Encoding.lean:2775) and about
+  fourteen siblings. That is mechanical work, not a wall, but it is a re-proof and it is now the named
+  remaining task. What was achieved toward it: `exists_commit_candidate`, `authOccLits_true` and
+  `authNoExcuse` are proved with NO `Sat a (encode P B)` anywhere, so the demand clause, the Tseitin
+  definitions and the excuse clauses all behave without the old formula; and
+  `boundedAttackGoals_of_sat_agreement` gives the sound direction modulo one named hypothesis
+  (`DecodedRun` = the decoded trace is a bounded run, plus `CommitsReflect`/`ClaimsReflect` saying the
+  occurrence literals and the decoded events agree). `decodedTrace_is_realised` exhibits a concrete
+  solver-produced assignment where the trace half holds, so that hypothesis is not about an empty class.
+  *A semantic split in the repository that this surfaced.* `Goal.agreement` does not mean one thing
+  here. `Query.Violation P Goal.agreement` is `ProtSat.AuthBreak` (Operational.lean:461) - a commit
+  whose (tag, peer, value) triple was never claimed, UNORDERED - while `Contract.goalViolation P
+  Goal.agreement` is `ProtSat.Reference.authBreak` (Reference.lean:565) = `¬ agrees`, which demands a
+  matching claim STRICTLY EARLIER and with the peer/self roles crossed. The two routes therefore
+  answer slightly different questions under the same constructor name. The consequence for this file:
+  the sound direction pairs with `Matching.tripleOnly`, not with the `orderAware` default, and the
+  theorem is stated that way rather than quietly against the easier target. Reconciling the two
+  predicates - or documenting which one `Goal.agreement` names - is now its own work item.
+  Build green (1895 jobs), audit clean over 3876 theorems, 30/30 CI gates green.
 * Next - the remaining work is now all about the headline, not about hypotheses. (1) *Goal-indexed
   `encode`*: `Encode.violationLits` names leak literals only, so `encode P B` is secrecy-specific by
   construction; the fix is `violationLits sh P gs` plus `encodeGroups` and a `Complete` that is
