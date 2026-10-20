@@ -1298,6 +1298,36 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   inside the kernel budget) and the agreement goal, not soundness of the evidence chain.
   Build green (1892 jobs, 204 s), audit clean over 3750 theorems, 30/30 CI gates green - and this
   was the first real execution of the rewritten gate script, preflight included.
+* 2026-10-20 (ak) - the first domino for agreement SOUND: `ProtSat/DecodeIndex.lean` (623 lines, 36
+  theorems) proves the trace-index bridge that `AuthClauses` named as its missing piece (i), and one
+  of the lemmas came out STRONGER than the hypothesis it replaces.
+  `decEvsFrom`/`decCfgsFrom` build a decoded run BACKWARDS from `B.steps`, while every downstream
+  lemma speaks `evAt tr i` / `cfgAt Cs i` from index 0, so nothing could be transported between the
+  two until now. `decEvsFrom_rget` and `decCfgsFrom_rget` give the index equations
+  (`rget (decEvsFrom P B a n) i = some (decEv ... (B.steps - n + i))`); because `evAt` is
+  `drop`/`headD`-based and `cfgAt` is `cfgGo`-based rather than `rget`-based, the bridges
+  `evAt_eq_rget_getD` and `cfgAt_of_rget` transport them into the vocabulary the proofs actually
+  consume, yielding `evAt_decEvsFrom_steps` and `cfgAt_decCfgsFrom_steps` - and
+  `cfgAt_decCfgsFrom_steps_zero : cfgAt (decCfgsFrom P B a B.steps) 0 = initCfg P` with no
+  hypotheses at all.
+  *The strengthening.* `decCode_of_decEv_act` (`decEv ... i = Ev.act q m d -> decCode P B a i =
+  1 + q`) holds with NO `Sat` hypothesis: `decCode` reads the very `(evOh sh i).decode a` call that
+  `decEv` pattern-matches on, so the hypothesis already grants that a value was decoded. The
+  converse `decEv_act_of_decCode` is `Encoding.decEv_act_of_code` with BOTH `Sat a (encode P B)` and
+  `i < B.steps` dropped. That matters beyond convenience: the whole obstruction to agreement SOUND
+  was that every decoding lemma demanded satisfaction of the secrecy formula, which an
+  agreement-only model cannot supply - and here is a pair of decoding lemmas that never needed it.
+  *Honest negative, recorded rather than papered over.* `decEv = Ev.idle -> decCode = 0` is NOT
+  derivable from the definitions: the deduction branch of `decEv` also returns `Ev.idle` when
+  `instAt` or `valAt` names nothing. Both are impossible for a real `shapeOf P B`, but that is a
+  theorem about `Encode.dedInstsOf`, outside this file. What is proved instead is
+  `decEv_idle_cases` (code 0 or a deduction-instance code). No counterexample was constructed
+  because the statement is true for real shapes - it just is not a syntactic consequence of `decEv`.
+  Only two lemmas in the file still consume `Sat a (encode P B)` (`relAt_decSegment`,
+  `decSegment_rel`), flagged in the header as exactly the ones the goal-indexed encode must re-derive.
+  No `by decide` anywhere in the file, so no kernel replay cost; axioms are
+  `[propext, Quot.sound]` for the transport lemmas and `[propext, Classical.choice, Quot.sound]`
+  for the two that read satisfaction. Build green, audit clean, 30/30 CI gates green.
 * Next - the remaining work is now all about the headline, not about hypotheses. (1) *Goal-indexed
   `encode`*: `Encode.violationLits` names leak literals only, so `encode P B` is secrecy-specific by
   construction; the fix is `violationLits sh P gs` plus `encodeGroups` and a `Complete` that is
