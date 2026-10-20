@@ -1259,6 +1259,45 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   names - is a real restriction of the prototype, decided to hold for every model in the repo.
   Build green, audit clean over 3580 theorems, `AuthGap.lean` and `EndToEnd.lean` re-checked
   unchanged (62 s, 19 s).
+* 2026-10-20 (aj) - stage 6, the last honest caveat in the evidence pipeline is closed:
+  `ProtSat/UnitRefute.lean` (1719 lines, 118 theorems) proves the FAST refutation producer sound.
+  `AnalyzerEvidence` had shipped with a 138-integer certificate that `checkCode` accepts, and the
+  header said plainly that the unit-propagation engine which emitted it was not proved sound - the
+  artifact was trustworthy because the checker accepted it, not because the generator was correct.
+  That is now a theorem, for every formula and every fuel, not an observation about one artifact:
+  `AllOK_unitRefutation` (every emitted line is an initial clause or a resolution of two earlier
+  emitted lines) and `unitRefutation_checkProof` (`unitRefutation f fuel = some p -> checkProof f p
+  = true`, obtained by reusing `Refute.uptoEmpty_checkProof` rather than reproving acceptance).
+  The place this producer could plausibly have been wrong is the citation order in
+  `resolveWithUnit`: `Resolution.lineOK` demands the positive-pivot parent first, and the two
+  polarity branches must both get that right. `lineOK_resolveWithUnit` proves they do. The other two
+  load-bearing lemmas are `rget_unitLines` (the absolute indices `unitSaturate` passes around really
+  are singleton clauses at those indices) and `rget_append` (a citation made in round k still reads
+  back in round k+1), with `AllOK_unitSaturate` doing the fuel induction.
+  *The pruner is sound too, which was the less certain half.* `prune_checkProof` and `AllOK_prune`
+  say dependency-closure pruning preserves legality and cannot lose the empty clause, so the pruned
+  artifact embedded in `AnalyzerEvidence` is a proof and not a coincidence. The hard part was proving
+  `keepClosure`'s fuel bound (`p.length`) actually reaches a fixed point: `keepClosure_succ` shows
+  the recursion IS the iterate of `markParents`, a mask that changes strictly increases `numMarks`,
+  at most `k.length` marks can exist, hence `keepClosure_stable`, hence the fixed mask is closed
+  under `cites` (`markParents_closed`). The other half is `lt_of_mem_cites`: in a justified proof
+  every citation points backwards, which is what makes renumbering safe (`AllOK_restrictFrom`).
+  *What is still hand-carried, and it is one equation.* That the embedded 138 integers ARE what the
+  producer emits for `qg` is not a kernel fact: `decide` on the producer's search costs 65.9 s and
+  needs `maxRecDepth 100000` plus raised heartbeats (the default aborts near 10 s), so it is over
+  the budget this project holds itself to. The link is therefore a conditional -
+  `qg_produced_is_accepted`, `qg_producer_reproduces_is_enough`, `qg_boundedSafe_of_produced` - whose
+  hypothesis the demo program checks at run time, and `qg_prune_is_idempotent`
+  (`proofCode (prune qgProof) = qgCode`) shows the embedded bytes are already dependency-closed.
+  `refutationCodeOf` (the saturation engine) remains the proved-sound emitter whose output is
+  kernel-replayable, but only for the degenerate empty-clause model.
+  Net effect on the objective: a SAFE verdict can now be produced by an engine that is proved to
+  emit checkable evidence, checked by an independent checker, and consumed by a theorem that never
+  mentions a solver - `boundedSafe_of_unitCode`, `analyzeQuery_encodingUnsat_of_unitCode`. The
+  remaining gaps are affordability (neither proved-sound engine refutes a protocol-sized formula
+  inside the kernel budget) and the agreement goal, not soundness of the evidence chain.
+  Build green (1892 jobs, 204 s), audit clean over 3750 theorems, 30/30 CI gates green - and this
+  was the first real execution of the rewritten gate script, preflight included.
 * Next - the remaining work is now all about the headline, not about hypotheses. (1) *Goal-indexed
   `encode`*: `Encode.violationLits` names leak literals only, so `encode P B` is secrecy-specific by
   construction; the fix is `violationLits sh P gs` plus `encodeGroups` and a `Complete` that is

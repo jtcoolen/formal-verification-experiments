@@ -82,14 +82,17 @@ every agreement query and nothing that imports it changes its answer.
 
 `ProtSat/AnalyzerEvidence.lean` wires the analyser's own answer to checked evidence:
 `refutationCodeOf q fuel -> checkCode -> boundedSafeGoals q`, with `analyzeQuery_encodingUnsat_of_code`
-showing the verdict and the certificate are the same fact. The honest limit, stated in that file's
-header: the only non-degenerate certificate in the repository - 138 integers refuting the
-246-variable guarded CNF (`qg_checked`, `qg_boundedSafe`) - was emitted by a unit-propagation producer
-that is **not proved sound**; what makes the artifact trustworthy is that `checkCode` accepts it, not
-who wrote it. The proved-sound engine's own decided instance (`qs_emitted`, `AuthGap.qs`) is a
-one-line refutation of a formula that literally contains the empty clause
-(`AuthGap.why_the_formula_is_unsat`). So: a checked certificate exists, and a producer that is proved
-to always emit one exists, but not yet for the same formula at a size anyone cares about.
+showing the verdict and the certificate are the same fact. `ProtSat/UnitRefute.lean` proves the fast engine correct: `unitRefutation_checkProof` says that for
+ANY formula and ANY fuel, a refutation the unit-propagation producer returns is accepted by
+`Resolution.checkProof`, and `prune_checkProof` says the dependency-closure pruner preserves
+acceptance and cannot lose the empty clause. So the certificate is no longer "bytes the checker
+happens to accept" - it is the output of a proved-sound engine. What remains hand-carried is one
+equation: that these particular 138 integers ARE what the producer emits for `qg`. Replaying that
+search in the kernel costs 65.9 s (measured), so the link is a conditional
+(`UnitRefute.qg_produced_is_accepted`) whose hypothesis the demo program verifies at run time, and
+`qg_prune_is_idempotent` shows the embedded bytes are already dependency-closed. The proved-sound
+saturation engine's own decided instance (`qs_emitted`) remains a one-line refutation of a formula
+that literally contains the empty clause (`AuthGap.why_the_formula_is_unsat`).
 
 `ProtSat/Query.lean` is the layer that keeps the two apart. A `Query` names the protocol, the
 bounds and the **selected goals** (`secrecy`, `agreement`, `agreementInj`);
@@ -571,8 +574,10 @@ and the tenth is not enabled.
   reported as safety in the meantime. The "no certificate to check" objection has been answered in
   form: `Resolution.checkProof` and `Serialize.checkCode` check a refutation instead of replaying
   the search (`encodingUnsat_of_proof`, `boundedSafe_of_checkedCode`), and `Refute.refute_complete`
-  says fuel exists for every unsatisfiable formula. What is not closed is a producer that is both
-  proved sound and affordable at protocol size - see `ProtSat/AnalyzerEvidence.lean`.
+  says fuel exists for every unsatisfiable formula. Two producers are now proved sound - `Refute.saturate` (`refute_sound`) and the unit-propagation
+  engine (`UnitRefute.unitRefutation_checkProof`, `prune_checkProof`). What is not closed is
+  affordability: neither can refute a protocol-sized formula inside the kernel's replay budget, so
+  the emitted certificates are checked artifacts rather than kernel-replayed searches.
 * **No axioms beyond Lean's three.**  `lake env lean Axioms.lean` walks every theorem in the
   `ProtSat` namespace and reports any axiom other than `propext`, `Classical.choice`,
   `Quot.sound`.
@@ -609,7 +614,8 @@ and the tenth is not enabled.
 | `ProtSat/Serialize.lean` | 336 | refutations as a flat integer code: total decoder, round trip (`proofOfCode_proofCode`), injectivity (`proofCode_inj`), `checkCode_sound` |
 | `ProtSat/CheckedSafe.lean` | 147 | the evidence chain at query level: `boundedSafe_of_checkedCode`, `SafeEvidence` from a checked refutation |
 | `ProtSat/Refute.lean` | 1289 | the producer: saturating resolution, `refute_sound` (the checker accepts its output) and `refute_complete` (every unsatisfiable formula has output to accept), so `refute_iff` |
-| `ProtSat/AnalyzerEvidence.lean` | 508 | the analyser emits a checked refutation certificate: `refutationCodeOf` -> `checkCode` -> `boundedSafeGoals`. The 138-integer certificate for the 246-variable guarded query is decided in the kernel (`qg_checked`, `qg_boundedSafe`) - but it came from a unit-propagation producer that is **not proved sound**, and the proved-sound engine's own decided instance (`qs_emitted`) refutes a formula that contains the empty clause |
+| `ProtSat/AnalyzerEvidence.lean` | 508 | the analyser emits a checked refutation certificate: `refutationCodeOf` -> `checkCode` -> `boundedSafeGoals`, with a 138-integer certificate for the 246-variable guarded query decided in the kernel (`qg_checked`, `qg_boundedSafe`) |
+| `ProtSat/UnitRefute.lean` | 1719 | the fast producer proved sound: every line unit propagation emits is an initial clause or a resolution of two earlier ones (`AllOK_unitRefutation`), the checker accepts its refutations (`unitRefutation_checkProof`), and pruning preserves both (`prune_checkProof`, `AllOK_prune`) |
 | `ProtSat/Sound.lean` | 384 | the soundness half: decoded values are universe values, `decoding_runsInUniverse`, and the two-sided `encoding_correct` |
 | `ProtSat/AuthGap.lean` | 524 | the authentication gap as a theorem: safe for secrecy and attacked for agreement at one protocol and one bound (`auth_gap_is_real`, `goal_hypothesis_is_needed`), plus a second model where the secret is real (`auth_gap_is_real_nonvacuous`) |
 | `ProtSat/AuthClauses.lean` | 593 | **prototype, not wired into the analyser**: agreement as CNF clauses - claim/commit read from the model as data, goal-indexed `encodeGoals`, the negative result that the naive conjunction cannot work (`authEncode_not_sat`), and three `Diff` gates cross-checking the CNF verdict against the enumeration verdict. Neither SOUND nor COMPLETE is proved |

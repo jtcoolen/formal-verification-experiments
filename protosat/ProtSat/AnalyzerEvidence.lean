@@ -88,10 +88,13 @@ procedure is called through the FFI.
   `saturate 1` of the same formula is 1150 lines and does not reach the empty clause. Subsumption,
   unit propagation and polarity-directed pivoting are what would close the gap; the first two are
   prototyped here, neither is in the proved-sound engine.
-* **The fast producer is not proved sound.** `unitRefutationCodeOf` is a computation whose output
-  happens to be accepted; `refutationCodeOf` is a computation proved to produce accepted output.
-  Making the fast engine match the proved one - including a proof that pruning preserves
-  acceptance - is the remaining proof work.
+* **The fast producer is proved sound - in `ProtSat/UnitRefute.lean`.** `unitRefutation_checkProof`
+  says that for every formula and every fuel, if `unitRefutation` returns a refutation then
+  `checkProof` accepts it, and `prune_checkProof` says pruning preserves acceptance and keeps the
+  empty clause. What is still hand-carried is narrower than it looks: the single equation that these
+  138 integers ARE what the producer emits for `qg`. Replaying the producer's search in the kernel
+  costs 65.9 s (measured) and so is stated as a conditional - `UnitRefute.qg_produced_is_accepted`
+  - whose hypothesis the demo program checks at run time.
 * **Artifact size.** The unit-propagation producer's unpruned refutation of `qg` is 491 lines and
   3577 integers; the pruned artifact embedded below is 21 lines and 138 integers. Embedding a
   certificate in the source is only viable after pruning, and the proved-sound engine has no
