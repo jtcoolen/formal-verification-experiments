@@ -29,9 +29,9 @@ inside univ P B - the status of each field is:
 | actB, the m and d fields | **not derivable**: rSend, rAssign, rCheck, rSecret, rClaim, rCommit quantify m and d freely, so the event carries dummy fields that may name anything - the defect roadmap stage 2 repairs with action-specific events |
 | exprB | **not derivable from any bound** (Represent.no_bound_discharges_exprB); fixed by the value domain Represent.exprVals, not by the bounds |
 
-withinBounds_of_residual therefore turns the opaque twelve into two dummy-field conditions and
-exprB, and Query.boundedSafe_of_encodingUnsat_of_residual is the bridge with that smaller
-hypothesis.
+withinBounds_of_residual therefore turns the opaque twelve into exprB alone - the dummy-field
+conditions became `actM_of_recv`, `actD_of_fresh` and `actB_of_bounded` - and
+Query.boundedSafe_of_encodingUnsat_of_residual is the bridge with that smaller hypothesis.
 -/
 
 namespace ProtSat.BoundedExec
@@ -490,7 +490,7 @@ theorem actB_of_bounded {P : Protocol} {B : Bounds} {tr : List Ev} {Cs : List Cf
   · rintro ⟨x, N, hact⟩
     exact actD_of_fresh hbt i q he hact
 
-/-- The twelve conditions, now with ten of them theorems. -/
+/-- The twelve conditions, now with eleven of them theorems: only `exprB` is assumed. -/
 theorem withinBounds_of_residual {P : Protocol} {B : Bounds} {tr : List Ev} {Cs : List Cfg}
     (hbt : BoundedTrace P B tr Cs) (hres : Residual P B tr Cs) :
     WithinBounds P B (cfgAt Cs) (evAt tr) := by

@@ -561,12 +561,13 @@ theorem boundedSafe_of_encodingUnsat {q : Query}
   exact analyze_safe_sound hU hsecStore (analyze_of_analyzeQuery_encodingUnsat h)
     ⟨tr, Cs, hbt.1, hbt.2.1, hv, hwb tr Cs hbt⟩
 
-/-- **The bridge with the residual hypothesis.** `WithinBounds` has twelve conditions; ten of
-them are theorems about the public bound (`ProtSat/BoundedExec.lean`), and only two remain: the
-dummy fields of an action event and expression representability. Stating the bridge in terms of
-`BoundedExec.Residual` is therefore a strict weakening of `boundedSafe_of_encodingUnsat`: whatever
-is known about a query's bounded executions now has to be assumed about two named properties, each
-with a documented repair site, instead of about the whole bundle. -/
+/-- **The bridge with the residual hypothesis.** `WithinBounds` has twelve conditions; eleven of
+them are now theorems about the public bound (`ProtSat/BoundedExec.lean`), and exactly one remains:
+expression representability (`Residual.exprB`), the dummy-field half of `actB` having become
+`actB_of_bounded`. Stating the bridge in terms of `BoundedExec.Residual` is therefore a strict
+weakening of `boundedSafe_of_encodingUnsat`: whatever is known about a query's bounded executions
+now has to be assumed about one named property with a documented repair site, instead of about the
+whole bundle. -/
 theorem boundedSafe_of_encodingUnsat_of_residual {q : Query}
     (hq : ∀ g ∈ q.goals, goalEncoded g) (hne : q.goals ≠ [])
     (hU : univClosed (shapeOf q.protocol q.bounds) q.protocol)
@@ -577,7 +578,7 @@ theorem boundedSafe_of_encodingUnsat_of_residual {q : Query}
   boundedSafe_of_encodingUnsat hq hne hU hsecStore
     (fun tr Cs hbt => BoundedExec.withinBounds_of_residual hbt (hres tr Cs hbt)) h
 
-/-- The residual is not vacuously satisfiable in the old semantics: `BoundedExec.residual_not_derivable`
+/-- The residual is not vacuously satisfiable in the old semantics: `BoundedExec.exprB_not_derivable`
 exhibits a bounded execution of a concrete query with no `Residual`, so this hypothesis - like the
 one it replaces - is a real condition, not a formality. -/
 theorem residual_is_a_real_condition :

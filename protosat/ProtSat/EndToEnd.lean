@@ -39,7 +39,7 @@ the reason. Re-deriving `dpll (encode P B) = none` by `decide`:
 
 | instance | variables | clauses | kernel cost of the re-derivation |
 |---|---|---|---|
-| `Examples.KeyDisclosure` (steps 2) | 1263 | 2995 | exceeds the default recursion budget |
+| `Examples.KeyDisclosure` (steps 2) | 1263 | 2767 | exceeds the default recursion budget |
 | a 3-action gated protocol (steps 3) | 828 | 1204 | > 200k heartbeats in 14 s at raised
   `maxRecDepth`; not finished in 2 min |
 | the same gated protocol (steps 2) | 494 | 662 | not finished in 5 min at raised budgets |
