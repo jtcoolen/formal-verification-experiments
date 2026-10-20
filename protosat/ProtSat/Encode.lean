@@ -241,7 +241,7 @@ structure Shape where
   /-- The number of distinct subexpressions over all roles. -/
   nE1 : Nat
   /-- The **extended value domain**: the universe, and possibly more. The store, knowledge,
-  delivery and authentication families read their value stride from shVal (over U); the
+  delivery families read their value stride from shVal (over U); the
   expression families are the only ones that need to name intermediate values, and they read
   their stride from shValX (over V). At shapeOf the two lists are equal, so the generated CNF
   is exactly what it was before this field existed. ProtSat.Represent.shapeX is the shape where

@@ -468,9 +468,9 @@ message any table expression denotes in a universe-valued store - assembled from
 |---|---|
 | `eval_inside_exprVals` | every table expression, in *any* universe-valued store, denotes a nameable value - no run hypothesis, no closure assumption, no bound arithmetic |
 | `stepEval1_inside_exprVals`, `stepEval2_inside_exprVals` | the admissibility content of the two gate equations, as theorems about the domain |
-| `exprB_of_exprVals`, `exprB_of_exprVals_at` | `exprB` holds at `shapeX P B` for every run at once, given only that stores stay in the persistent universe |
+| `eval_valAtX_uIdxX`, `eval_valAtX_uIdxX_at` | `exprB` holds at `shapeX P B` for every run at once, given only that stores stay in the persistent universe |
 | `transient_nameable` | the message `Regressions.gate_clipped` shows unnameable is nameable *at the same bounds that fail* `exprB` |
-| `transient_gate_not_clipped`, `transient_valAt_uIdx` | and it gets an index of its own, which `valAt` reads back - the property `admissible_valAt_uIdx` grants only under `admissible` |
+| `transient_gate_not_clipped`, `transient_valAtX_uIdxX` | and it gets an index of its own, which `valAt` reads back - the property `admissible_valAt_uIdx` grants only under `admissible` |
 | `ixOf_exprVals`, `length_univ_le` | the extension is index-preserving on `U`, so store, knowledge and delivery groups keep their numbering |
 | `no_bound_discharges_exprB` | the negative result above |
 | `exprB_holds_at_X_for_deep_store` | one line: the store that breaks admissibility over `U` is admissible over `exprVals`, at the same bound |

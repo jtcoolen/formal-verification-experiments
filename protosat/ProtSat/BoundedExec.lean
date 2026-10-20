@@ -340,7 +340,7 @@ theorem storeOf_eq_nil_of_not_lt {C : Cfg} {q : Nat} (h : ¬ q < C.sess.length) 
   rw [none_of_not_lt_rget h]
   simp
 
-/-- The store form Represent.exprB_of_exprVals consumes: every session store of a bounded run is
+/-- The store form Represent.eval_valAtX_uIdxX consumes: every session store of a bounded run is
 universe-valued. -/
 theorem storeIn_of_bounded {P : Protocol} {B : Bounds} {tr : List Ev} {Cs : List Cfg}
     (hbt : BoundedTrace P B tr Cs) (i q : Nat) :

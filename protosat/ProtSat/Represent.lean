@@ -30,7 +30,8 @@ universe, even though the value the action actually uses, `fst (pair x x) = x`, 
 
 The reason is structural. `Encode.uIdx` names a value by its position in `sh.U`, and the encoding
 has exactly one value domain, `shVal sh = sh.U.length + 1`, shared by the store, knowledge,
-delivery, authentication *and* expression families. So an intermediate the universe does not contain
+delivery *and* expression families. (There is no authentication family in the CNF: `Encode.violationLits`
+names leak literals only, and `Complete.asgAu` is the store-leak conjunction, not an auth monitor.) So an intermediate the universe does not contain
 has no name, and the Tseitin gate that computes it records "unset".
 
 ## Why raising the bound is not the answer
@@ -60,12 +61,12 @@ closure assumption on `U`. The theorems below assemble that into what the encodi
   a nameable value - no hypothesis about a run, no closure assumption, no bound arithmetic;
 * `stepEval1_inside_exprVals` / `stepEval2_inside_exprVals`: the two facts the completeness proof
   actually consumes. `exprB` is invoked at exactly six sites in three lemmas
-  (ProtSat/Complete.lean:2540, 2551, 3200, 3307, 3359): `rdXe_unary`, `rdXe_binary`, and three uses
-  that only need the published value to be in the universe. The first two become theorems about the
-  domain instead of assumptions about the execution;
-* `exprB_of_exprVals`: `exprB` holds *for every run at once* when the shape's value domain is the
-  extended one;
-* `transient_nameable`, `transient_gate_not_clipped`, `transient_valAt_uIdx`: the message
+  (ProtSat/Complete.lean:2568, 2579, 2580, 3226, 3333, 3385): `rdXe_unary`, `rdXe_binary`, and three
+  uses that only need the published value to be in the universe. The first two become theorems about
+  the domain instead of assumptions about the execution;
+* `eval_valAtX_uIdxX` and its `_at` sibling: the read-back that needs no admissibility hypothesis,
+  i.e. `exprB` holds *for every run at once* when the shape's value domain is the extended one;
+* `transient_nameable`, `transient_gate_not_clipped`, `transient_valAtX_uIdxX`: the message
   `Regressions.gate_clipped` shows the encoding cannot name becomes nameable at the *same* bounds
   that fail `exprB`;
 * `no_bound_discharges_exprB`: and the contrast, proved - no `Bounds.rounds` discharges it.
