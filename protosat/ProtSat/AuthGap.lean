@@ -27,8 +27,8 @@ This module turns the label into a theorem. For the protocol `Authentication.P` 
 
 * the secrecy reading is *proved safe* by the CNF route - `safe_for_secrecy`, derived from the
   unsatisfiability of `encode Authentication.P Authentication.B` through the gap-free bridge
-  `Correspondence.boundedSafe_of_unsat_gapFree`, with all four side conditions discharged in this
-  file;
+  `Correspondence.boundedSafe_of_unsat_gapFree`, with all its side conditions discharged in this
+  file (`univSub` is no longer one of them - `Complete.univSub_shapeOf` proves it);
 * the agreement reading of the same model is *attacked* - `attacked_for_agreement`, from the
   kernel-checked `AuthBreak` witness in `Regressions`;
 * both at once is `auth_gap_is_real`: same protocol, same bounds, safety for one goal and a genuine
@@ -102,12 +102,6 @@ theorem hU : univClosed (shapeOf P B) P :=
   (univClosedBool_iff (shapeOf P B) P).mp
     (analyze_encodingUnsat_facts Authentication.analyze_encodingUnsat).1
 
-/-- **The universe is subterm-closed**, so the attacker's rule instances are enumerated completely.
-Decidable, and decided here: no hypothesis is smuggled in. -/
-theorem hsub : univSub (shapeOf P B) := by
-  unfold univSub
-  decide
-
 /-- **The declared secrets are named by the bounds.** This protocol declares none, so both halves of
 `SecretsOK` are immediate: no store secret needs a slot, and there is no closed secret to place in
 the universe. -/
@@ -129,12 +123,12 @@ bounds, yields a bounded-security theorem: no execution the model permits, withi
 these domains, this universe and this one-event bound, violates the selected goal.
 
 The route is `Correspondence.boundedSafe_of_unsat_gapFree`: the unsatisfiability of `encode P B`
-plus the four side conditions discharged above. No `WithinBounds`, and no hypothesis about any
+plus the side conditions discharged above. No `WithinBounds`, and no hypothesis about any
 particular execution. Read it together with `why_the_formula_is_unsat`: the derivation is genuine,
 and the evidence behind it is thin. -/
 theorem safe_for_secrecy :
     boundedSafeGoals (Query.mk Authentication.P Authentication.B [Goal.secrecy]) :=
-  Correspondence.boundedSafe_of_unsat_gapFree gapFree hU hsub hsec unsat
+  Correspondence.boundedSafe_of_unsat_gapFree gapFree hU hsec unsat
 
 /-- The same statement in the name of the query, for the theorems below that reuse it. -/
 theorem safe_for_secrecy_qs : boundedSafeGoals qs := safe_for_secrecy
@@ -389,14 +383,11 @@ solver had to work. -/
 theorem no_empty_clause2 : ([] : List Lit) ∉ (Encode.encode P2 B2).clauses := by decide
 
 /-- The side conditions of the bridge, all closed for the second model too: the bounds name the
-protocol's closed expressions, the universe is subterm-closed, the declared secret is a universe
-message, and the value domain has no gap. -/
+protocol's closed expressions, the declared secret is a universe message, and the value domain has
+no gap. Subterm-closure of the universe is no longer a side condition to discharge:
+`Complete.univSub_shapeOf` proves it for `P2` and `B2` like for anything else. -/
 theorem hU2 : univClosed (shapeOf P2 B2) P2 := by
   unfold univClosed
-  decide
-
-theorem hsub2 : univSub (shapeOf P2 B2) := by
-  unfold univSub
   decide
 
 theorem hsec2 : SecretsOK (shapeOf P2 B2) P2 := by
@@ -445,7 +436,7 @@ the goal it selected is one the encoding represents, the value domain has no gap
 permitted execution of `P2` within `B2` leaks the declared key. Unlike the first model, there *was*
 a key to leak. -/
 theorem safe_for_secrecy2 : boundedSafeGoals (Query.mk P2 B2 [Goal.secrecy]) :=
-  boundedSafe_of_encodingUnsat_of_gapFree q2_goals q2_ne hU2 hsub2 hsec2 gapFree2
+  boundedSafe_of_encodingUnsat_of_gapFree q2_goals q2_ne hU2 hsec2 gapFree2
     cnf_answer_is_encodingUnsat2
 
 /-- **(4) continued.** And yet the same model, at the same bounds, has a bounded attack on

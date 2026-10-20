@@ -72,12 +72,11 @@ runs. -/
 theorem boundedSafeGoals_of_unsat {q : Query}
     (hq : ∀ g ∈ q.goals, goalEncoded g) (hne : q.goals ≠ [])
     (hU : univClosed (shapeOf q.protocol q.bounds) q.protocol)
-    (hsub : univSub (shapeOf q.protocol q.bounds))
     (hsec : SecretsOK (shapeOf q.protocol q.bounds) q.protocol)
     (hgap : domainGap q.protocol q.bounds = false)
     (h : ProtSat.Unsat (encode q.protocol q.bounds)) : boundedSafeGoals q :=
   boundedSafeGoals_of_secrecy hq hne
-    (Correspondence.boundedSafe_of_unsat_gapFree hgap hU hsub hsec h)
+    (Correspondence.boundedSafe_of_unsat_gapFree hgap hU hsec h)
 
 /-- **From a checked refutation to the verdict.** The formula fact is supplied by the independent
 checker: `checkProof` walked a list of resolution steps and accepted. No solver appears anywhere
@@ -85,11 +84,10 @@ in the chain. -/
 theorem boundedSafe_of_checkedProof {q : Query}
     (hq : ∀ g ∈ q.goals, goalEncoded g) (hne : q.goals ≠ [])
     (hU : univClosed (shapeOf q.protocol q.bounds) q.protocol)
-    (hsub : univSub (shapeOf q.protocol q.bounds))
     (hsec : SecretsOK (shapeOf q.protocol q.bounds) q.protocol)
     (hgap : domainGap q.protocol q.bounds = false) {p : List Line}
     (hp : checkProof (encode q.protocol q.bounds) p = true) : boundedSafeGoals q :=
-  boundedSafeGoals_of_unsat hq hne hU hsub hsec hgap (checkProof_sound hp)
+  boundedSafeGoals_of_unsat hq hne hU hsec hgap (checkProof_sound hp)
 
 /-- **From serialized evidence to the verdict.** The input is a flat list of integers - what a
 prover would write to disk - and the conclusion is the security statement for the query. This is
@@ -97,11 +95,10 @@ the architecture the roadmap asks for, closed end to end except for the producer
 theorem boundedSafe_of_checkedCode {q : Query}
     (hq : ∀ g ∈ q.goals, goalEncoded g) (hne : q.goals ≠ [])
     (hU : univClosed (shapeOf q.protocol q.bounds) q.protocol)
-    (hsub : univSub (shapeOf q.protocol q.bounds))
     (hsec : SecretsOK (shapeOf q.protocol q.bounds) q.protocol)
     (hgap : domainGap q.protocol q.bounds = false) {k : Nat} {c : List Int}
     (hc : checkCode (encode q.protocol q.bounds) k c = true) : boundedSafeGoals q :=
-  boundedSafeGoals_of_unsat hq hne hU hsub hsec hgap (checkCode_sound hc)
+  boundedSafeGoals_of_unsat hq hne hU hsec hgap (checkCode_sound hc)
 
 /-- **A safety verdict with its evidence.** `SafeEvidence` pairs the statement with the query it is
 about, so a verdict cannot be detached from the question it answers. `Query.lean` notes that
@@ -109,34 +106,31 @@ nothing constructs one; this does, from a checked refutation. -/
 def safeEvidenceOfProof {q : Query}
     (hq : ∀ g ∈ q.goals, goalEncoded g) (hne : q.goals ≠ [])
     (hU : univClosed (shapeOf q.protocol q.bounds) q.protocol)
-    (hsub : univSub (shapeOf q.protocol q.bounds))
     (hsec : SecretsOK (shapeOf q.protocol q.bounds) q.protocol)
     (hgap : domainGap q.protocol q.bounds = false) (p : List Line)
     (hp : checkProof (encode q.protocol q.bounds) p = true) : SafeEvidence where
   query := q
-  safe := boundedSafe_of_checkedProof hq hne hU hsub hsec hgap hp
+  safe := boundedSafe_of_checkedProof hq hne hU hsec hgap hp
 
 /-- The evidence is about the query it names - the field that makes a verdict inseparable from its
 question. -/
 theorem safeEvidenceOfProof_query {q : Query}
     (hq : ∀ g ∈ q.goals, goalEncoded g) (hne : q.goals ≠ [])
     (hU : univClosed (shapeOf q.protocol q.bounds) q.protocol)
-    (hsub : univSub (shapeOf q.protocol q.bounds))
     (hsec : SecretsOK (shapeOf q.protocol q.bounds) q.protocol)
     (hgap : domainGap q.protocol q.bounds = false) (p : List Line)
     (hp : checkProof (encode q.protocol q.bounds) p = true) :
-    (safeEvidenceOfProof hq hne hU hsub hsec hgap p hp).query = q := rfl
+    (safeEvidenceOfProof hq hne hU hsec hgap p hp).query = q := rfl
 
 /-- And an answer built from that evidence is a security answer, by the definition the contract
 uses to tell security verdicts apart from formula facts. -/
 theorem boundedSafe_is_security {q : Query}
     (hq : ∀ g ∈ q.goals, goalEncoded g) (hne : q.goals ≠ [])
     (hU : univClosed (shapeOf q.protocol q.bounds) q.protocol)
-    (hsub : univSub (shapeOf q.protocol q.bounds))
     (hsec : SecretsOK (shapeOf q.protocol q.bounds) q.protocol)
     (hgap : domainGap q.protocol q.bounds = false) (p : List Line)
     (hp : checkProof (encode q.protocol q.bounds) p = true) :
-    securityResult (Result.boundedSafe (safeEvidenceOfProof hq hne hU hsub hsec hgap p hp)) = true :=
+    securityResult (Result.boundedSafe (safeEvidenceOfProof hq hne hU hsec hgap p hp)) = true :=
   rfl
 
 /-- **The shape of the end-to-end claim on a real protocol.** For the guarded example of
@@ -146,7 +140,7 @@ that emits such a code; the conclusion no longer mentions a solver. -/
 theorem qg_safe_of_code (k : Nat) (c : List Int)
     (h : checkCode (encode EndToEnd.qg.protocol EndToEnd.qg.bounds) k c = true) :
     boundedSafeGoals EndToEnd.qg :=
-  boundedSafe_of_checkedCode (by decide) (by decide) EndToEnd.qg_hU EndToEnd.qg_hsub
+  boundedSafe_of_checkedCode (by decide) (by decide) EndToEnd.qg_hU
     EndToEnd.qg_hsec EndToEnd.qg_gap h
 
 end ProtSat.CheckedSafe

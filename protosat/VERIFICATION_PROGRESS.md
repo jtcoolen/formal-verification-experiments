@@ -1118,6 +1118,22 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   extrapolating 2.3x per event). R2 (universe as a parameter) was skipped: its 190x win was
   measured in the evaluator and never demonstrated in the kernel.
   Build green (1885 jobs), audit clean over 3501 theorems, 26/26 CI gates green.
+* 2026-10-20 (af) - stage 4 deletion completed: `hsub` is gone from every downstream signature.
+  `univSub_shapeOf` and its 12 supporting lemmas moved from `Closure.lean` into `Complete.lean`
+  (names unchanged; `Closure` imports `Complete`, so the reverse would be a cycle), and 18 `hsub`
+  parameters were removed - `Complete.encoding_complete`, `Analyzer` (2), `Correspondence` (3),
+  `CheckedSafe` (6), `Sound.encoding_correct`, `Refute` (2), `Query` (3). No conclusion changed
+  anywhere: the three `sat_*` applications inside `encoding_complete` now pass `univSub_shapeOf P B`
+  and the bridges simply dropped an argument they forwarded. Five concrete `unfold univSub; decide`
+  gates were deleted rather than kept as cross-checks, because re-deciding a concrete universe adds
+  no independent evidence once the structural argument is kernel-checked (count 3501 -> 3496).
+  SEVEN sites deliberately KEPT their hypothesis and reported instead of faked: `dedInstsOf_complete`,
+  `dedIx_exists`, `rdEv_lt`, `sat_evOh`, `sat_oneHot`, `sat_ded`, `sat_knSupport` take
+  `{sh : Shape} (hsub : univSub sh)` for an ABSTRACT shape, and `Shape.U` is a free list field, so
+  `univSub sh` is simply false for a bare Shape (`U = [pair a b]` without `a`, `b`). Deleting those
+  would have asserted enumeration completeness over arbitrary universes. `univSub_shapeOf` still
+  depends only on [propext, Quot.sound].
+  Build green (1885 jobs), audit clean over 3496 theorems, 26/26 CI gates green.
 * Next - stage 6 is nearly closed: the checker (`Resolution`), the binding of evidence to its
   formula (`checkAgainst`), and the serialization (`Serialize`) are proved, and a checked code now
   reaches `boundedSafeGoals q` (`CheckedSafe.boundedSafe_of_checkedCode`). What is missing is a

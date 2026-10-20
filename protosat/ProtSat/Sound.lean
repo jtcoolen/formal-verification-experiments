@@ -70,8 +70,9 @@ same hypothesis `encoding_sound` already assumes, so nothing is added to the sou
 * It does not extend the violation clause. `Encode.violationLits` names leaks only, so the goal
   obtained is `Goal.secrecy`; an `AuthBreak` conclusion does not follow from a satisfying
   assignment and is not claimed here.
-* It does not discharge `univClosed`, `univSub` or `SecretsOK`; they remain hypotheses (decidable
-  ones, which the analyser computes - see `ProtSat.Analyzer`).
+* It does not discharge `univClosed` or `SecretsOK`; they remain hypotheses (decidable ones, which
+  the analyser computes - see `ProtSat.Analyzer`). `univSub` is no longer a hypothesis at all:
+  `Complete.univSub_shapeOf` proves it of `shapeOf P B` for every protocol and bounds.
 -/
 
 namespace ProtSat.Sound
@@ -355,13 +356,13 @@ module's `encoding_correct_sound`; the backward direction is `Complete.encoding_
 `WithinBounds` derived from the public bound and the query's gap check. -/
 theorem encoding_correct {P : Protocol} {B : Bounds}
     (hgap : domainGap P B = false) (hU : univClosed (shapeOf P B) P)
-    (hsub : univSub (shapeOf P B)) (hsec : SecretsOK (shapeOf P B) P) :
+    (hsec : SecretsOK (shapeOf P B) P) :
     Satisfiable (encode P B) ↔ boundedAttackGoals (Query.mk P B [Goal.secrecy]) :=
   ⟨fun hs => encoding_correct_sound hU hs, fun ⟨g, hg, tr, Cs, hbt, hv⟩ => by
       have hgeq : g = Goal.secrecy := by simpa using hg
       subst hgeq
       rw [violation_secrecy] at hv
-      exact encoding_complete (P := P) (B := B) (tr := tr) (Cs := Cs) hU hsub hsec
+      exact encoding_complete (P := P) (B := B) (tr := tr) (Cs := Cs) hU hsec
         hbt.1 hbt.2.1 hv (withinBounds_of_bounded hbt hgap)⟩
 
 /-! ### The general theorem, instantiated -/

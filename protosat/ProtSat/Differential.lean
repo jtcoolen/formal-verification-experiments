@@ -97,10 +97,6 @@ theorem leak_hU : univClosed (shapeOf EndToEnd.Leak EndToEnd.GB) EndToEnd.Leak :
   unfold univClosed
   decide
 
-theorem leak_hsub : univSub (shapeOf EndToEnd.Leak EndToEnd.GB) := by
-  unfold univSub
-  decide
-
 theorem leak_hsec : SecretsOK (shapeOf EndToEnd.Leak EndToEnd.GB) EndToEnd.Leak := by
   refine ⟨fun q x h => ?_, ?_⟩
   · have heq : Secret.store q x = Secret.closed (Expr.shrk 0 0) := List.mem_singleton.mp h
@@ -112,7 +108,7 @@ formula - no `WithinBounds` hypothesis, because `withinBounds_of_bounded` derive
 public bound and the gap check. -/
 theorem leak_sat : Satisfiable (encode EndToEnd.Leak EndToEnd.GB) :=
   encoding_complete (P := EndToEnd.Leak) (B := EndToEnd.GB) (tr := Ltr) (Cs := LCs) leak_hU
-    leak_hsub leak_hsec L_runs (by decide) L_leaks
+    leak_hsec L_runs (by decide) L_leaks
     (withinBounds_of_bounded L_bounded leak_gap)
 
 /-- **The correspondence, both directions, on the instance that actually attacks.** -/

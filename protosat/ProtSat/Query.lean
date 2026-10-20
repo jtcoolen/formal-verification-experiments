@@ -549,7 +549,6 @@ per-execution side condition the compiler adds, not something the public bounded
 theorem boundedSafe_of_encodingUnsat {q : Query}
     (hq : ∀ g ∈ q.goals, goalEncoded g) (hne : q.goals ≠ [])
     (hU : univClosed (shapeOf q.protocol q.bounds) q.protocol)
-    (hsub : univSub (shapeOf q.protocol q.bounds))
     (hsec : SecretsOK (shapeOf q.protocol q.bounds) q.protocol)
     (hwb : ∀ (tr : List Ev) (Cs : List Cfg), BoundedTrace q.protocol q.bounds tr Cs ->
         WithinBounds q.protocol q.bounds (cfgAt Cs) (evAt tr))
@@ -559,7 +558,7 @@ theorem boundedSafe_of_encodingUnsat {q : Query}
   rw [goalEncoded_iff] at henc
   subst henc
   rw [violation_secrecy] at hv
-  exact analyze_safe_sound hU hsub hsec (analyze_of_analyzeQuery_encodingUnsat h)
+  exact analyze_safe_sound hU hsec (analyze_of_analyzeQuery_encodingUnsat h)
     ⟨tr, Cs, hbt.1, hbt.2.1, hv, hwb tr Cs hbt⟩
 
 /-- **The bridge with the residual hypothesis.** `WithinBounds` has twelve conditions; ten of
@@ -571,12 +570,11 @@ with a documented repair site, instead of about the whole bundle. -/
 theorem boundedSafe_of_encodingUnsat_of_residual {q : Query}
     (hq : ∀ g ∈ q.goals, goalEncoded g) (hne : q.goals ≠ [])
     (hU : univClosed (shapeOf q.protocol q.bounds) q.protocol)
-    (hsub : univSub (shapeOf q.protocol q.bounds))
     (hsec : SecretsOK (shapeOf q.protocol q.bounds) q.protocol)
     (hres : ∀ (tr : List Ev) (Cs : List Cfg), BoundedTrace q.protocol q.bounds tr Cs →
         BoundedExec.Residual q.protocol q.bounds tr Cs)
     (h : analyzeQuery q = Result.encodingUnsat) : boundedSafeGoals q :=
-  boundedSafe_of_encodingUnsat hq hne hU hsub hsec
+  boundedSafe_of_encodingUnsat hq hne hU hsec
     (fun tr Cs hbt => BoundedExec.withinBounds_of_residual hbt (hres tr Cs hbt)) h
 
 /-- The residual is not vacuously satisfiable in the old semantics: `BoundedExec.residual_not_derivable`
@@ -597,11 +595,10 @@ theorem residual_is_a_real_condition :
 theorem boundedSafe_of_encodingUnsat_of_gapFree {q : Query}
     (hq : ∀ g ∈ q.goals, goalEncoded g) (hne : q.goals ≠ [])
     (hU : univClosed (shapeOf q.protocol q.bounds) q.protocol)
-    (hsub : univSub (shapeOf q.protocol q.bounds))
     (hsec : SecretsOK (shapeOf q.protocol q.bounds) q.protocol)
     (hgap : Represent.domainGap q.protocol q.bounds = false)
     (h : analyzeQuery q = Result.encodingUnsat) : boundedSafeGoals q :=
-  boundedSafe_of_encodingUnsat hq hne hU hsub hsec
+  boundedSafe_of_encodingUnsat hq hne hU hsec
     (fun tr Cs hbt => BoundedExec.withinBounds_of_bounded hbt hgap) h
 
 /-! ### Display -/

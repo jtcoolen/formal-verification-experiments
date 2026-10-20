@@ -955,22 +955,20 @@ non-empty, and the three representability conditions on the shape. -/
 theorem boundedSafe_of_refutation {q : Query}
     (hq : ∀ g ∈ q.goals, goalEncoded g) (hne : q.goals ≠ [])
     (hU : univClosed (shapeOf q.protocol q.bounds) q.protocol)
-    (hsub : univSub (shapeOf q.protocol q.bounds))
     (hsec : SecretsOK (shapeOf q.protocol q.bounds) q.protocol)
     (hgap : domainGap q.protocol q.bounds = false) {k : Nat} {p : List Line}
     (h : refutationOf (encode q.protocol q.bounds) k = some p) : boundedSafeGoals q :=
-  boundedSafe_of_checkedProof hq hne hU hsub hsec hgap (refute_sound h)
+  boundedSafe_of_checkedProof hq hne hU hsec hgap (refute_sound h)
 
 /-- The same verdict as evidence: a `SafeEvidence` whose refutation was produced here rather than
 supplied by hand. -/
 def safeEvidence_of_refutation {q : Query}
     (hq : ∀ g ∈ q.goals, goalEncoded g) (hne : q.goals ≠ [])
     (hU : univClosed (shapeOf q.protocol q.bounds) q.protocol)
-    (hsub : univSub (shapeOf q.protocol q.bounds))
     (hsec : SecretsOK (shapeOf q.protocol q.bounds) q.protocol)
     (hgap : domainGap q.protocol q.bounds = false) {k : Nat} {p : List Line}
     (h : refutationOf (encode q.protocol q.bounds) k = some p) : SafeEvidence :=
-  safeEvidenceOfProof hq hne hU hsub hsec hgap p (refute_sound h)
+  safeEvidenceOfProof hq hne hU hsec hgap p (refute_sound h)
 
 /-- **The engine's own output survives the byte round trip.** Serialize the refutation the engine
 emitted, hand the integers back to the decoder, and the checker still accepts: bytes -> proof ->

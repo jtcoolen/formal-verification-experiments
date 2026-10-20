@@ -58,14 +58,14 @@ formula. `WithinBounds` is not assumed: `BoundedExec.withinBounds_of_bounded` de
 public bound and the query's gap check. -/
 theorem encoding_complete_gapFree {P : Protocol} {B : Bounded.Bounds}
     (hgap : domainGap P B = false) (hU : univClosed (shapeOf P B) P)
-    (hsub : univSub (shapeOf P B)) (hsec : SecretsOK (shapeOf P B) P)
+    (hsec : SecretsOK (shapeOf P B) P)
     (h : boundedAttackGoals (Query.mk P B [Goal.secrecy])) :
     Satisfiable (encode P B) := by
   obtain ⟨g, hg, tr, Cs, hbt, hv⟩ := h
   have hgeq : g = Goal.secrecy := by simpa using hg
   subst hgeq
   rw [violation_secrecy] at hv
-  exact encoding_complete (P := P) (B := B) (tr := tr) (Cs := Cs) hU hsub hsec
+  exact encoding_complete (P := P) (B := B) (tr := tr) (Cs := Cs) hU hsec
     hbt.1 hbt.2.1 hv (withinBounds_of_bounded hbt hgap)
 
 /-- **The implication the objective asks for.** No satisfying assignment, therefore no permitted
@@ -74,10 +74,10 @@ execution violating the selected goal - for every gap-free query. This is
 property of the formula, so it no longer depends on how the answer was produced. -/
 theorem boundedSafe_of_unsat_gapFree {P : Protocol} {B : Bounded.Bounds}
     (hgap : domainGap P B = false) (hU : univClosed (shapeOf P B) P)
-    (hsub : univSub (shapeOf P B)) (hsec : SecretsOK (shapeOf P B) P)
+    (hsec : SecretsOK (shapeOf P B) P)
     (h : ProtSat.Unsat (encode P B)) :
     boundedSafeGoals (Query.mk P B [Goal.secrecy]) :=
-  fun hat => h (encoding_complete_gapFree hgap hU hsub hsec hat)
+  fun hat => h (encoding_complete_gapFree hgap hU hsec hat)
 
 /-- **Evidence, not search.** A checked resolution refutation of the generated formula is enough
 to conclude bounded safety. Nothing here runs, or re-runs, a solver: the only fact about the
@@ -86,15 +86,15 @@ realized - search (ours or an external prover's) emits evidence, a linear check 
 the evidence refutes *this* formula, and the verdict follows from the check. -/
 theorem boundedSafe_of_refutation {P : Protocol} {B : Bounded.Bounds}
     (hgap : domainGap P B = false) (hU : univClosed (shapeOf P B) P)
-    (hsub : univSub (shapeOf P B)) (hsec : SecretsOK (shapeOf P B) P)
+    (hsec : SecretsOK (shapeOf P B) P)
     (p : List Line) (hp : checkProof (encode P B) p = true) :
     boundedSafeGoals (Query.mk P B [Goal.secrecy]) :=
-  boundedSafe_of_unsat_gapFree hgap hU hsub hsec (checkProof_sound hp)
+  boundedSafe_of_unsat_gapFree hgap hU hsec (checkProof_sound hp)
 
 /-- The general theorem, instantiated on the guarded protocol from `EndToEnd`: bounded safety
 derived from the formula's unsatisfiability alone, without the analyser's verdict equation. -/
 theorem guard_safe_from_unsat : boundedSafeGoals EndToEnd.qg :=
-  boundedSafe_of_unsat_gapFree EndToEnd.qg_gap EndToEnd.qg_hU EndToEnd.qg_hsub
+  boundedSafe_of_unsat_gapFree EndToEnd.qg_gap EndToEnd.qg_hU
     EndToEnd.qg_hsec (DPLL.dpll_complete EndToEnd.qg_unsat)
 
 /-- And the same conclusion the old bridge gives, for comparison: it needs the verdict equation,

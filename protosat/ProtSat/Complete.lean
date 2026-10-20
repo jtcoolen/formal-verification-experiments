@@ -1730,9 +1730,162 @@ theorem Oh.sat_range {o : Oh Nat} {a : Assignment} {k K : Nat}
 /-- The universe of a shape is subterm-closed when every subterm of every universe message is
 again a universe message.  This is the property that makes the enumeration of attacker rule
 instances complete: the premises of a rule whose conclusion the universe contains are subterms
-of it, so they too have names.  ProtSat.Bounded.univ is built subterm-closed on purpose; the
-analyser checks the condition on the shape it is about to encode. -/
+of it, so they too have names.  ProtSat.Bounded.univ is built subterm-closed on purpose, and
+ProtSat.Complete.univSub_shapeOf below proves it - so the condition is a theorem of the
+construction, not a hypothesis a query has to arrange. -/
 def univSub (sh : Shape) : Prop := ∀ t ∈ sh.U, ∀ u ∈ subtermsL t, u ∈ sh.U
+
+/-! ### The universe is subterm-closed by construction
+
+`univSub` used to be carried as a hypothesis by `encoding_complete` and by every bridge that
+consumes it, each of them discharging it by `decide` on a concrete protocol - which proved the
+fact about an example and said nothing about the construction. But the construction **is** the
+reason it is true. `Bounded.univ` is built as
+
+    (closeOne P.agents (domainKeys P.agents))^[B.rounds] (subtermClosureL (seeds P)) |>.eraseDups
+
+whose base is subterm-closed by `Bounded.subtermClosureL_closed`, whose seeds already contain
+every agent and every domain key, and whose one round only ever builds `pair x y`, `encS m k`,
+`encA m a` and `hash m` out of messages the round already has - so the subterms of anything it
+adds were already present. The lemmas below turn that into `univSub_shapeOf`, and `hsub` is
+gone from every signature downstream. -/
+
+/-- A list of messages is **subterm-closed** when it contains the subterms of each of its members.
+`univSub` is this predicate read at a shape's universe. -/
+def SubtermClosed (L : List Term) : Prop := ∀ t ∈ L, ∀ u ∈ subtermsL t, u ∈ L
+
+/-- The subterm closure of any seed list is subterm-closed: that is what `subtermClosureL` is for. -/
+theorem subtermClosureL_SubtermClosed (S : List Term) : SubtermClosed (subtermClosureL S) := by
+  intro t ht u hu
+  exact subtermClosureL_closed ht hu
+
+/-- A message of the base list survives every closure round: `closeOne` never removes anything. -/
+theorem mem_iterate_closeOne {ag : List Agent} {ks : List Key} {U : List Term} (t : Term)
+    (ht : t ∈ U) : ∀ n, t ∈ ((fun W => closeOne ag ks W)^[n] U) := by
+  intro n
+  induction n with
+  | zero => exact ht
+  | succ n ih =>
+      rw [Function.iterate_succ_apply']
+      exact mem_closeOne ih
+
+theorem mem_closeOne_pair {ag : List Agent} {ks : List Key} {U : List Term} {x y : Term}
+    (hx : x ∈ U) (hy : y ∈ U) : Term.pair x y ∈ closeOne ag ks U := by
+  simp only [closeOne, List.mem_eraseDups, List.mem_append, List.mem_flatMap, List.mem_map]
+  exact Or.inl (Or.inl (Or.inl (Or.inr ⟨x, hx, y, hy, rfl⟩)))
+
+theorem mem_closeOne_encS {ag : List Agent} {ks : List Key} {U : List Term} {m : Term} {k : Key}
+    (hm : m ∈ U) (hk : k ∈ ks) : Term.encS m k ∈ closeOne ag ks U := by
+  simp only [closeOne, List.mem_eraseDups, List.mem_append, List.mem_flatMap, List.mem_map]
+  exact Or.inl (Or.inl (Or.inr ⟨m, hm, k, hk, rfl⟩))
+
+theorem mem_closeOne_encA {ag : List Agent} {ks : List Key} {U : List Term} {m : Term} {a : Agent}
+    (hm : m ∈ U) (ha : a ∈ ag) : Term.encA m a ∈ closeOne ag ks U := by
+  simp only [closeOne, List.mem_eraseDups, List.mem_append, List.mem_flatMap, List.mem_map]
+  exact Or.inl (Or.inr ⟨m, hm, a, ha, rfl⟩)
+
+theorem mem_closeOne_hash {ag : List Agent} {ks : List Key} {U : List Term} {m : Term}
+    (hm : m ∈ U) : Term.hash m ∈ closeOne ag ks U := by
+  simp only [closeOne, List.mem_eraseDups, List.mem_append, List.mem_map]
+  exact Or.inr ⟨m, hm, rfl⟩
+
+/-- **One closure round adds nothing whose subterms were not already present.** Each generated
+message is built from a base message, so its parts are base messages or their subterms; the agents
+and keys it may mention are in the base by hypothesis. -/
+theorem subtermsL_subset_closeOne {ag : List Agent} {ks : List Key} {U : List Term}
+    (hU : SubtermClosed U) (hag : ∀ a ∈ ag, Term.agent a ∈ U)
+    (hks : ∀ k ∈ ks, Term.key k ∈ U) {t : Term} (ht : t ∈ closeOne ag ks U) :
+    subtermsL t ⊆ closeOne ag ks U := by
+  have hUin : ∀ s, s ∈ U -> s ∈ closeOne ag ks U := fun s hs => mem_closeOne hs
+  have hsubU : ∀ s, s ∈ U -> subtermsL s ⊆ closeOne ag ks U := fun s hs u hu =>
+    mem_closeOne (hU s hs u hu)
+  simp only [closeOne, List.mem_eraseDups, List.mem_append, List.mem_flatMap, List.mem_map] at ht
+  intro u hu
+  rcases ht with (((hU' | ⟨x, hx, y, hy, rfl⟩) | ⟨m, hm, k, hk, rfl⟩) | ⟨m, hm, a, ha, rfl⟩)
+    | ⟨m, hm, rfl⟩
+  · exact hsubU t hU' hu
+  · have hmem : u ∈ Term.pair x y :: subtermsL x ++ subtermsL y := hu
+    simp only [List.mem_cons, List.mem_append] at hmem
+    rcases hmem with (rfl | hz) | hz
+    · exact mem_closeOne_pair hx hy
+    · exact hsubU x hx hz
+    · exact hsubU y hy hz
+  · have hmem : u ∈ Term.encS m k :: subtermsL m ++ [Term.key k] := hu
+    simp only [List.mem_cons, List.mem_append] at hmem
+    rcases hmem with (rfl | hz) | (rfl | hnil)
+    · exact mem_closeOne_encS hm hk
+    · exact hsubU m hm hz
+    · exact hUin _ (hks k hk)
+    · cases hnil
+  · have hmem : u ∈ Term.encA m a :: subtermsL m ++ [Term.agent a] := hu
+    simp only [List.mem_cons, List.mem_append] at hmem
+    rcases hmem with (rfl | hz) | (rfl | hnil)
+    · exact mem_closeOne_encA hm ha
+    · exact hsubU m hm hz
+    · exact hUin _ (hag a ha)
+    · cases hnil
+  · have hmem : u ∈ Term.hash m :: subtermsL m := hu
+    simp only [List.mem_cons] at hmem
+    rcases hmem with rfl | hz
+    · exact mem_closeOne_hash hm
+    · exact hsubU m hm hz
+
+/-- **One closure round preserves subterm-closure**, provided the agents and keys it closes under
+are already present - which they are, because the seeds put them in the base. -/
+theorem SubtermClosed.mono_closeOne {ag : List Agent} {ks : List Key} {U : List Term}
+    (hU : SubtermClosed U) (hag : ∀ a ∈ ag, Term.agent a ∈ U)
+    (hks : ∀ k ∈ ks, Term.key k ∈ U) : SubtermClosed (closeOne ag ks U) := fun t ht u hu =>
+  subtermsL_subset_closeOne hU hag hks ht hu
+
+/-- Subterm-closure survives every number of closure rounds. -/
+theorem SubtermClosed.iterate {ag : List Agent} {ks : List Key} {U : List Term}
+    (hU : SubtermClosed U) (hag : ∀ a ∈ ag, Term.agent a ∈ U)
+    (hks : ∀ k ∈ ks, Term.key k ∈ U) :
+    ∀ n, SubtermClosed ((fun W => closeOne ag ks W)^[n] U) := by
+  intro n
+  induction n with
+  | zero => exact hU
+  | succ n ih =>
+      rw [Function.iterate_succ_apply']
+      refine ih.mono_closeOne ?_ ?_
+      · intro a ha
+        exact mem_iterate_closeOne _ (hag a ha) n
+      · intro k hk
+        exact mem_iterate_closeOne _ (hks k hk) n
+
+/-- Removing duplicates preserves subterm-closure. -/
+theorem SubtermClosed.eraseDups {U : List Term} (h : SubtermClosed U) :
+    SubtermClosed U.eraseDups := by
+  intro t ht u hu
+  apply List.mem_eraseDups.mpr
+  exact h t (List.mem_eraseDups.mp ht) u hu
+
+/-- **The universe of a protocol under any bounds is subterm-closed.** The base is the subterm
+closure of the seeds, the seeds already contain every agent and every domain key, and each round
+only builds messages out of parts it already had. -/
+theorem univ_SubtermClosed (P : Protocol) (B : Bounds) : SubtermClosed (univ P B) := by
+  have hbase : SubtermClosed (subtermClosureL (seeds P)) := subtermClosureL_SubtermClosed _
+  have hag : ∀ a ∈ P.agents, Term.agent a ∈ subtermClosureL (seeds P) := by
+    intro a ha
+    exact mem_subtermClosureL (mem_seeds_agent ha)
+  have hks : ∀ k ∈ domainKeys P.agents, Term.key k ∈ subtermClosureL (seeds P) := by
+    intro k hk
+    refine mem_subtermClosureL ?_
+    show Term.key k ∈ seeds P
+    simp only [seeds, List.mem_append, List.mem_map]
+    exact Or.inl (Or.inl (Or.inl (Or.inr ⟨k, hk, rfl⟩)))
+  have hI := hbase.iterate hag hks
+  have huniv : univ P B =
+      ((fun W => closeOne P.agents (domainKeys P.agents) W)^[B.rounds]
+        (subtermClosureL (seeds P))).eraseDups := rfl
+  rw [huniv]
+  exact (hI B.rounds).eraseDups
+
+/-- **`univSub` is a theorem of the construction, not a hypothesis about the query.** Every subterm
+of every universe message is itself a universe message, for every protocol and every bounds. -/
+theorem univSub_shapeOf (P : Protocol) (B : Bounds) : univSub (shapeOf P B) := by
+  intro t ht u hu
+  exact univ_SubtermClosed P B t ht u hu
 
 /-! ### Completeness of the deduction-instance enumeration -/
 
@@ -4294,11 +4447,12 @@ bounds the two statements are the same statement.
 The hypotheses are the bounds conditions of specification section 4, collected in
 ProtSat.Complete.RunOK (the run stays inside the shape), ProtSat.Encode.univClosed (the universe
 names the messages the protocol computes), ProtSat.Complete.univSub (the universe is closed under
-subterms, needed to enumerate the attacker's rule instances) and ProtSat.Complete.SecretsOK (the
+subterms, needed to enumerate the attacker's rule instances - now discharged by
+ProtSat.Complete.univSub_shapeOf, so it is no longer a hypothesis) and ProtSat.Complete.SecretsOK (the
 bounds can name the declared secrets).  None of them is a technicality: a run that leaves the
 universe has no finite name, and a violation the encoding cannot mention cannot be found. -/
 theorem encoding_complete {P : Protocol} {B : Bounds} {tr : List Ev} {Cs : List Cfg}
-    (hU : univClosed (shapeOf P B) P) (hsub : univSub (shapeOf P B))
+    (hU : univClosed (shapeOf P B) P)
     (hsec : SecretsOK (shapeOf P B) P)
     (hrun : Runs P (initCfg P) tr Cs) (hlen : tr.length ≤ B.steps)
     (hleak : runsLeaks P Cs) (hbnd : WithinBounds P B (cfgAt Cs) (evAt tr)) :
@@ -4320,14 +4474,15 @@ theorem encoding_complete {P : Protocol} {B : Bounds} {tr : List Ev} {Cs : List 
     exact ⟨i, hbnd, by rw [cfgAt_eq_of_rget Cs i C hrg]; exact hleakC⟩
   simp only [encodeGroups, List.mem_cons, List.not_mem_nil, or_false] at hg
   rcases hg with rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl | rfl
-  · exact sat_oneHot (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd hsub hrel cl hc
+  · exact sat_oneHot (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd (univSub_shapeOf P B) hrel cl hc
   · exact sat_init (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd hcfg0 cl hc
   · exact sat_frame (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd hrel cl hc
   · exact sat_eval (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd cl hc
   · exact sat_step (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd hrel cl hc
-  · exact sat_ded (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd hsub hrel cl hc
+  · exact sat_ded (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd (univSub_shapeOf P B) hrel cl hc
   · exact sat_pubAux (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd cl hc
-  · exact sat_knSupport (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd hsub U_nodup hrel cl hc
+  · exact sat_knSupport (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd (univSub_shapeOf P B) U_nodup
+      hrel cl hc
   · exact sat_fresh (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd
       (fun N hN => nonces_subset_univ P B N hN) hrel cl hc
   · exact sat_leakAux (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd cl hc

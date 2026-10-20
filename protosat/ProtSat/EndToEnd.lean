@@ -74,10 +74,6 @@ theorem hU_safe : univClosed (shapeOf KeyDisclosure.PSafe KeyDisclosure.B)
   unfold univClosed
   decide
 
-theorem hsub_safe : univSub (shapeOf KeyDisclosure.PSafe KeyDisclosure.B) := by
-  unfold univSub
-  decide
-
 theorem hsec_safe : SecretsOK (shapeOf KeyDisclosure.PSafe KeyDisclosure.B)
     KeyDisclosure.PSafe := by
   refine ⟨fun q x h => ?_, ?_⟩
@@ -96,7 +92,7 @@ This is the implication the review said was missing, established for the class o
 value domain has no gap - a class the tool now decides. -/
 theorem boundedSafe_of_gapFree (hvs : analyzeQuery qsafe = Result.encodingUnsat) :
     boundedSafeGoals qsafe :=
-  boundedSafe_of_encodingUnsat_of_gapFree hgoals hne hU_safe hsub_safe hsec_safe gapFree_safe hvs
+  boundedSafe_of_encodingUnsat_of_gapFree hgoals hne hU_safe hsec_safe gapFree_safe hvs
 
 /-- The same statement in the public vocabulary: no execution the model permits, within the
 declared universe and event bound, leaks a declared secret. -/
@@ -154,10 +150,6 @@ theorem qg_hU : univClosed (shapeOf Guard GB) Guard := by
   unfold univClosed
   decide
 
-theorem qg_hsub : univSub (shapeOf Guard GB) := by
-  unfold univSub
-  decide
-
 theorem qg_hsec : SecretsOK (shapeOf Guard GB) Guard := by
   refine ⟨fun q x h => ?_, ?_⟩
   · have heq : Secret.store q x = Secret.closed (Expr.shrk 0 0) := List.mem_singleton.mp h
@@ -190,7 +182,7 @@ solver-answer hypothesis: for every execution this model permits, within these s
 compromises, this universe and this event bound, no selected goal is violated. That is the
 sentence the objective asked SAFE to mean, proved end to end on the CNF route. -/
 theorem qg_safe : boundedSafeGoals qg :=
-  boundedSafe_of_encodingUnsat_of_gapFree qg_goals qg_ne qg_hU qg_hsub qg_hsec qg_gap qg_verdict
+  boundedSafe_of_encodingUnsat_of_gapFree qg_goals qg_ne qg_hU qg_hsec qg_gap qg_verdict
 
 /-- In the public vocabulary: no permitted execution leaks a declared secret. -/
 theorem qg_noLeak :
