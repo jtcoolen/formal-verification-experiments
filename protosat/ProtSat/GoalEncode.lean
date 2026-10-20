@@ -74,7 +74,7 @@ supports. Retargeting `Query.Violation` (or adding a fourth `Goal`) is a change 
 | `no_attack_without_goals`, `empty_goals_are_strictly_weaker` | what the empty goal list means, and that it is not a security answer |
 | `Diff.diff_*_goals` | the three `AuthClauses.Diff` differential gates, restated about `encodeGoalsOf` |
 | `exists_commit_candidate`, `authOccLits_true`, `authNoExcuse` | the agreement clauses do their job: demand satisfied, Tseitin definitions correct, no excusing claim complete - all with no `Sat a (encode P B)` |
-| `boundedAttackGoals_of_sat_agreement` | **SOUND for the agreement goal**, modulo `DecodedRun` |
+| `boundedAttackGoals_of_sat_agreement` | **SOUND for the agreement goal**, modulo `DecodedRun` - which `ProtSat/AgreesBase.lean` now discharges (`decodedRun_of_sat_agreement`), making the soundness direction unconditional apart from two shape hypotheses |
 | `no_transport_from_base` | the obstruction: the bridge cannot be a one-line transport, because that transport is FALSE |
 | `decodedTrace_of_sat_encode`, `decodedTrace_of_sat_goals` | the trace half of `DecodedRun` for the old formula, and for any secrecy-selecting goal list |
 | `decodedTrace_is_realised` | that trace half is inhabited by a concrete solver-produced assignment, so the bridge is not a hypothesis about an empty class |
@@ -85,6 +85,16 @@ kernel replay on a 10-core developer machine; the two `elem` decisions in `encod
 negligible). No gate here exceeds a second, and none bypasses the kernel.
 
 ## What is NOT proved here, and exactly why
+
+**Update (2026-10-20): the bridge below has been discharged.** `ProtSat/AgreesBase.lean` proves
+`decodedRun_of_sat_agreement` from `Sat a (encodeGoalsOfM P B [Goal.agreement] tripleOnly)` plus two
+shape hypotheses (`univClosed`, `authNameable`), by re-stating the decoding cone over the ten semantic
+groups - the dependency cone of `decRun_trace` is 78 lemmas and not one of them reads the violation
+clause, which is why the re-statement works. So `boundedAttackGoals_of_sat_agreement` below is no
+longer conditional in substance; what remains unproved in this area is the COMPLETENESS direction for
+agreement, and the ordered notion of agreement, which is inexpressible over `Operational` (see
+`ProtSat/AgreementPredicates.lean`). The rest of this section is kept as the record of what the
+obstacle was and why the one-line transport is false.
 
 The sound direction for agreement needs two things no lemma in the repository provides for a
 goal-indexed formula. They are isolated as `DecodedRun P B a`; `decodedTrace_of_sat_encode` proves
@@ -721,8 +731,11 @@ agreement goal of the query. Everything the *clauses* have to do is done here: t
 supplies a commit candidate, the Tseitin definitions make its four literals true, the excuse
 clauses make sure no claim occurrence with all its literals true excuses it, and `ClaimsReflect`
 turns "the run has a claim of that triple" into "some claim occurrence has all its literals true" -
-contradiction. What is assumed is `DecodedRun`, and the module header says exactly why it is not
-yet provable from `Sat a (encodeGoalsOfM P B [Goal.agreement] Matching.tripleOnly)` alone. -/
+contradiction. The only assumption is `DecodedRun`, and it is no longer an assumption in substance:
+`AgreesBase.decodedRun_of_sat_agreement` derives it from this same satisfaction hypothesis plus
+`univClosed` and `authNameable`, and `AgreesBase.boundedAttackGoals_of_sat_agreement_discharged` is
+the corollary with the bridge discharged. Note the conclusion is the UNORDERED `AuthBreak` reading of
+`Goal.agreement` - see `ProtSat/AgreementPredicates.lean`. -/
 theorem boundedAttackGoals_of_sat_agreement {P : Protocol} {B : Bounds} {a : Assignment}
     (h : Sat a (encodeGoalsOfM P B [Goal.agreement] Matching.tripleOnly))
     (hd : DecodedRun P B a) :
@@ -812,8 +825,10 @@ theorem agreement_group_is_a_real_demand :
 /-- **The trace half of the bridge is realised, not hypothetical.** The leaky query of
 `ProtSat.EndToEnd` has a model of `encode P B` - an assignment the solver produced and the kernel
 checked (`Differential.leak_sat`) - and every model of that formula decodes to a bounded trace. So
-`DecodedRun`'s first component is inhabited by a concrete witness; what is not established anywhere
-in this file is the two authentication components, whose obstacles the header names. -/
+`DecodedRun`'s first component is inhabited by a concrete witness; the two authentication
+components are established in `ProtSat/AgreesBase.lean` (`commitsReflect_of_sat`,
+`claimsReflect_of_sat`), and `AgreesBase.authGap_boundedAttackGoals_agreement` is the decided instance
+on the AuthGap model. -/
 theorem decodedTrace_is_realised :
     ∃ (a : Assignment), Sat a (encode EndToEnd.Leak EndToEnd.GB) ∧
       BoundedTrace EndToEnd.Leak EndToEnd.GB

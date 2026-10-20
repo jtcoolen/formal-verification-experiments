@@ -42,3 +42,4 @@ import ProtSat.UnitRefute
 import ProtSat.DecodeIndex
 import ProtSat.GoalEncode
 import ProtSat.AgreementPredicates
+import ProtSat.AgreesBase

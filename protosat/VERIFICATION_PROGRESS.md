@@ -1407,6 +1407,45 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   occurrences/10 files, Goal.agreement 119/10, Violation 101/8, boundedSafeGoals 68/11.
   All 47 decide gates are cheap (slowest tactic replay 155 ms; whole file 2.4 s). Build green,
   audit clean over 3966 theorems, 30/30 CI gates green.
+* 2026-10-20 (an) - **agreement SOUND is proved.** `ProtSat/AgreesBase.lean` (2789 lines, 108
+  theorems) discharges `DecodedRun`, the single remaining hypothesis in the goal-indexed soundness
+  direction, so a model of the agreement-selecting CNF formula now yields a bounded attack on the
+  agreement goal with no bridge assumed:
+  `decodedRun_of_sat_agreement : univClosed -> authNameable -> Sat a (encodeGoalsOfM P B
+  [Goal.agreement] tripleOnly) -> DecodedRun P B a`, and
+  `boundedAttackGoals_of_sat_agreement_discharged` with the same hypotheses and the attack as the
+  conclusion. Together with `Sound`-side results this closes the direction that `AuthGap` showed was
+  missing - for the notion of agreement the contract actually names (see (am): that is the UNORDERED
+  `AuthBreak`, and the file says so in its statements, not only in prose).
+  *The prediction that made this tract.* GoalEncode had proved `no_transport_from_base`: a model of
+  the ten semantic groups need not satisfy `encode P B`, so the decoding chain could not be reused by
+  transport. The question was whether the chain actually READS the violation clause. It does not: the
+  dependency cone of `decRun_trace` is 78 lemmas taking `Sat a (encode P B)`, and not one of them
+  mentions `sat_violation`, `sat_leakAux` or `violation_leak`. So the cone was restated verbatim over
+  `baseEncode` - 9 group extractors, then 69 lemmas with suffix `_b` including `rel_agrees_b` (635
+  lines) and `decRun_trace_b`. Mechanical, as predicted, but 78 lemmas of mechanical.
+  *The authentication bridge.* Both directions `DecodedRun` consumes are proved, and neither reads
+  the agreement clauses: `commitsReflect_of_sat` (literals true -> the decoded run performs the
+  commit) needs only 2 of the 4 literals, because under `authNameable` the annotations are closed
+  constants and `eval_eq_constVal` evaluates them in every store; `claimsReflect_of_sat` (decoded
+  claim -> all four literals true) is the direction soundness consumes and the one that needs
+  `authNameable`, with the value literals supplied by a new 12-line lemma `vxe_konst_true` - the
+  constant half of `xe_konst` read as a literal rather than as a decoded value.
+  *It has a decided instance, which is the standard this project holds itself to.* On the AuthGap
+  model: `authGap_univClosed` and `authGap_authNameable` decide in ~0.1 s each, `authGap_sat_asg` (the
+  whole clause list against `attackAsg`) decides in ~11.3 s, giving `authGap_decodedRun` and
+  `authGap_boundedAttackGoals_agreement` - the CNF-produced cross-check of
+  `AuthClauses.Diff.diff_authentication`. Notably `attackAsg` satisfies the TRIPLE-ONLY formula too,
+  so no new assignment was needed. Whole file 14.6 s; no gate nears 60 s.
+  *What is still open, stated plainly.* Completeness for agreement (an attack must yield a model) is
+  untouched - it needs `assignOf` lemmas making the auth occurrence auxiliaries true. The ordered
+  notion of agreement is not reachable over `Operational` at all, per (am). `authNameable` is a
+  hypothesis of the corollary, decided only for the AuthGap model. And the `Encoding` lemmas outside
+  the cone (`violation_leak`, `encoding_sound`, the `Analyzer` bridges) still take `Sat a (encode P B)
+  and cannot be restated over `baseEncode` - nothing here needs them.
+  GoalEncode's header and the doc comment on `boundedAttackGoals_of_sat_agreement` are corrected in
+  the same commit: their caveats had become false as prose while the theorems stayed correct.
+  Build green (1899 jobs), audit clean over 4138 theorems, 30/30 CI gates green.
 * Next - the remaining work is now all about the headline, not about hypotheses. (1) *Goal-indexed
   `encode`*: `Encode.violationLits` names leak literals only, so `encode P B` is secrecy-specific by
   construction; the fix is `violationLits sh P gs` plus `encodeGroups` and a `Complete` that is
