@@ -220,7 +220,7 @@ that decides it, not an intention.
 | 1 Contract and regressions | **done** | `ProtSat/Contract.lean` verdict algebra (`attack / boundedSafe / invalidModel / unsupportedGoal / unknown`), `ProtSat/Query.lean` with `goalEncoded`, `ProtSat/Regressions.lean` permanent witnesses, README corrected |
 | 2 Reference semantics | **done** | `ProtSat/Reference.lean`: allocation history, action-specific events, ordered role-aware agreement and injective-agreement monitors, credential provisioning; twelve gates that each reverse a `Regressions` witness |
 | 3 One public meaning of bounds | **done** | `ProtSat/Bounded.lean` + `ProtSat/BoundedExec.lean`: the public bounds imply the operational ones (`mem_univ_of_mem`, `secrets_subset_univ`), monotonicity in the bounds |
-| 4 SAT correspondence | **attacked, still open** | Two-sided correspondence now exists (`Complete.encoding_complete`, `Sound.encoding_sound_bounded'`, `Sound.encoding_correct` for gap-free queries); `hsub` deleted from 18 signatures; `SecretsOK` split with the closed half proved and the store half proved undroppable (`secretsOKStore_not_derivable`). Two things moved today: `AuthClauses.lean` puts agreement into the CNF as clauses (claim/commit read from the model as data, goal-indexed `encodeGoals`, and a kernel-decided differential against the enumeration route on three models), and it PROVES the naive form cannot work (`authEncode_not_sat`: the AuthGap model's secrecy violation clause is the empty clause). Still open: SOUND/COMPLETE for the new clauses - every `Encoding` decoding lemma takes `Sat a (encode P B)`, secrecy clause included - and the xe stride over `U` (`domainGap`/`exprB`) |
+| 4 SAT correspondence | **soundness closed for agreement; completeness open** | Two-sided correspondence for secrecy (`Complete.encoding_complete`, `Sound.encoding_correct`), `hsub` deleted, `SecretsOK` split with the store half proved undroppable. Then, same day: `AuthClauses.lean` put agreement into the CNF as clauses and proved the naive conjunctive form cannot work (`authEncode_not_sat`); `GoalEncode.lean` made the violation group goal-indexed with `encodeGoalsOf P B [secrecy] = encode P B` **by `rfl`**, and proved the hoped-for transport shortcut FALSE (`no_transport_from_base`); `AgreesBase.lean` then discharged the decoded-run bridge, so **a model of the agreement-selecting formula is now a proved bounded attack on the agreement goal** (`boundedAttackGoals_of_sat_agreement_discharged`), with a kernel-decided instance on the AuthGap model. Two caveats keep this honest: the notion discharged is the UNORDERED `AuthBreak` that `Query.Violation` names - `AgreementPredicates.lean` proves that notion incomparable with the reference route's ordered one and structurally unable to express ordering - and completeness for agreement is untouched. The xe stride over `U` (`domainGap`/`exprB`) also remains |
 | 5 Independently checkable evidence | **done for the UNSAT answer, and now emitted** | `Resolution.checkProof` (checker), `Serialize.proofCode/proofOfCode` (transport), `Refute.saturate`/`refutationOf` with `refute_sound` and `refute_complete` (prover), `CheckedSafe.boundedSafe_of_checkedCode` (certificate to theorem). The SAT answer carries a permitted run instead. `AnalyzerEvidence.lean` now turns a checked code into `boundedSafeGoals q` without a solver replay (a 138-integer certificate for a real 246-variable query, kernel-checked in ~0.3 s against ~20 s for the DPLL replay); what remains is that the fast producer that emitted it is not yet proved sound, and there is no fuel policy turning a missing refutation into `unknown` |
 | 6 Credible examples and non-vacuity | **done** | `ProtSat/Benchmarks.lean` (NS and NSL in the reference language with claim/commit instrumentation and a real declared secret, honest-execution witnesses), `AuthGap.auth_gap_is_real_nonvacuous`, CI non-vacuity gates |
 | 7 Proved refinement | **done** | `ProtSat/Prune.lean`: `explorerAttack_equiv`/`attackFound_equiv` both directions, unconditional - the pruned explorer is the same decision procedure, 11868 nodes to 3 on the secure query; `ProtSat/Compress.lean`: `dropRedundant`, `compress_secrecy`, `compress_agreement` with `CfgEq` congruences |
@@ -245,6 +245,28 @@ that decides it, not an intention.
   exits 3 as ENVIRONMENT PROBLEM instead of masquerading as a proof failure.
 * Theorem inventory 3496 -> 3580 over the day; every commit independently re-verified (type-check,
   `#print axioms`, admissions scan, statement read) before landing.
+### Second addendum, 2026-10-20 (evening)
+
+* `cf1d60a` `GoalEncode.lean`: the violation group is goal-indexed, `encodeGoalsOf P B [secrecy] =`
+  `encode P B` holds **by `rfl`**, and `no_transport_from_base` proves the shortcut false.
+* `08d6242` `AgreementPredicates.lean`: `Goal.agreement` names two **incomparable** predicates; the
+  ordering requirement is **inexpressible** in `AuthBreak`'s vocabulary; the CNF contract's agreement
+  target is proved blind on a concrete role-confusion model (`selfAddrP`). Also
+  `Violation P Goal.agreementInj = True` - every query selecting it is attacked, refused only by
+  `goalEncoded`, not by the validator - and `Examples.NS.P` declares no authentication event at all.
+* `f49dcdb` `AgreesBase.lean`: **agreement SOUND**. The 78-lemma decoding cone does not read the
+  violation clause, so it was restated over the ten semantic groups; the claim/commit reflection
+  bridge is proved both ways; `DecodedRun` discharged; kernel-decided instance on the AuthGap model.
+* `cf0a1ea` the CI cold-detection false positive (C objects are not re-elaborated Lean modules); the
+  first real workflow run confirmed `lake exe cache get` works on a clean runner.
+* Inventory over the day: 3496 -> 4138 theorems, 30/30 gates green at every step.
+
+**Where the headline stands.** The original defect - SAFE returned while an agreement attack was
+permitted - is answered in the direction that matters: for the agreement goal, a satisfiable
+goal-indexed formula *is* a permitted attack, proved rather than assumed. What keeps stage 4 open:
+(i) completeness for agreement; (ii) the unordered/ordered predicate decision, which is a contract
+decision and not a proof; (iii) wiring `encodeGoalsOf` into the analyser so a verdict carries the
+goal it was proved about.
 ### What the headline now reduces to
 
 The original defect - "SAFE returned while an agreement attack was permitted" - is proved, not
