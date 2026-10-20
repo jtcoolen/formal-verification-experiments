@@ -36,3 +36,4 @@ import ProtSat.Benchmarks
 import ProtSat.Compress
 import ProtSat.Closure
 import ProtSat.Prune
+import ProtSat.AnalyzerEvidence

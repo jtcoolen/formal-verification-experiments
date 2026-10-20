@@ -523,6 +523,7 @@ and the tenth is not enabled.
 | `ProtSat/AuthGap.lean` | 310 | the authentication gap as a theorem: safe for secrecy and attacked for agreement at one protocol and one bound |
 | `ProtSat/Closure.lean` | 84 | narrative and instances for the universe being subterm-closed by construction; the lemma itself is `Complete.univSub_shapeOf` |
 | `ProtSat/Prune.lean` | 829 | stage 8 proved refinement: pruning idle and redundant deductions, `explorerAttack_equiv` both ways, and `secureQ_allLengthsSafe` decided by the kernel |
+| `ProtSat/AnalyzerEvidence.lean` | 508 | the analyser emits a checked refutation certificate: `refutationCodeOf` -> `checkCode` -> `boundedSafeGoals`, with a 138-integer certificate for a real 246-variable query decided in the kernel |
 | `ProtSat/Complete.lean` (SecretsOK split) | — | the closed-secret half proved a theorem (`secretsClosed_subset_univ`); the store-slot half kept as a hypothesis with a counterexample proving it undroppable (`secretsOKStore_not_derivable`) |
 | `ProtSat/Refute.lean` | 1291 | the producer: saturating resolution, `refute_sound` (the checker accepts its output) and `refute_complete` (every unsatisfiable formula has output to accept), so `refute_iff` |
 | `ProtSat/Benchmarks.lean` | 868 | NS and NSL in the reference language: contract verdicts by exhaustion, honest-execution non-vacuity, adverse controls |

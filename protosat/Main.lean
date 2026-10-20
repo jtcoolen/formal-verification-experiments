@@ -4,6 +4,7 @@ Licensed under the MIT License. See the file LICENSE in the project root for
 license information.
 -/
 import ProtSat
+import ProtSat.AnalyzerEvidence
 
 /-!
 # ProtSat: the command-line analyser
@@ -186,6 +187,32 @@ def main : IO Unit := do
       ++ " lines the engine emitted itself)")
   IO.println ("    engine output survives serialization: " ++ toString (Serialize.checkCode
       Resolution.demoF (Refute.demoRefut.length + 1) (Serialize.proofCode Refute.demoRefut)))
+  IO.println ""
+  IO.println "EVIDENCE-BEARING ANALYSIS (ProtSat/AnalyzerEvidence.lean): the analyser's safety answer"
+  IO.println "carried by a checked certificate, so the kernel never replays the search. The certificate"
+  IO.println "below is the one embedded in that file; the gate `AnalyzerEvidence.qg_checked` is a"
+  IO.println "`decide` over these integers, and `AnalyzerEvidence.qg_boundedSafe` derives"
+  IO.println "`boundedSafeGoals` for the query from the checked code alone."
+  IO.println ("    guarded query (" ++ toString (AnalyzerEvidence.formulaOf EndToEnd.qg).clauses.length
+      ++ "-clause CNF): analyser answer " ++ describe (analyzeQuery EndToEnd.qg))
+  IO.println ("    certificate: " ++ toString AnalyzerEvidence.qgCode.length ++ " integers, "
+      ++ toString (AnalyzerEvidence.codeLines AnalyzerEvidence.qgCheckFuel AnalyzerEvidence.qgCode)
+      ++ " resolution lines, of which "
+      ++ toString (AnalyzerEvidence.codeOrigins AnalyzerEvidence.qgCheckFuel AnalyzerEvidence.qgCode)
+      ++ " are original clauses and "
+      ++ toString (AnalyzerEvidence.codeLiterals AnalyzerEvidence.qgCheckFuel AnalyzerEvidence.qgCode)
+      ++ " are literal occurrences")
+  IO.println ("    the independent checker accepts the certificate: " ++ toString (Serialize.checkCode
+      (AnalyzerEvidence.formulaOf EndToEnd.qg) AnalyzerEvidence.qgCheckFuel AnalyzerEvidence.qgCode))
+  IO.println ("    the same bytes against the leaky variant of the model, rejected: "
+      ++ toString (! Serialize.checkCode (encode EndToEnd.Leak EndToEnd.GB)
+        AnalyzerEvidence.qgCheckFuel AnalyzerEvidence.qgCode))
+  IO.println ("    two lines of decode fuel short, rejected: " ++ toString (! Serialize.checkCode
+      (AnalyzerEvidence.formulaOf EndToEnd.qg) 20 AnalyzerEvidence.qgCode))
+  IO.println ("    the producer re-run emits exactly these bytes: "
+      ++ toString AnalyzerEvidence.qg_producer_reproduces)
+  IO.println ("    the proved-sound saturation engine emits something for the authentication query at"
+      ++ " fuel 0: " ++ toString (AnalyzerEvidence.emitted AuthGap.qs 0))
   IO.println ""
   IO.println "THE DERIVED STEP BOUND (ProtSat/Compress.lean): the model's own bound, past which no"
   IO.println "shorter witness is missing - safety at this bound is safety at every length inside the"

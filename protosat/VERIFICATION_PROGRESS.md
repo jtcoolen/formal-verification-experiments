@@ -1162,6 +1162,58 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   agreement goals are not represented in the CNF at all.
   Build green (1885 jobs), audit clean over 3500 theorems, 26/26 CI gates green.
 
+* 2026-10-20 (ah) - stage 6, the wire the log has been promising: `ProtSat/AnalyzerEvidence.lean`,
+  so a safety verdict arrives with a checked certificate instead of a solver replay. Item (4) of
+  "Next" said the plumbing was a call away. It was, and it is made - with a measurement that changed
+  what the plumbing can carry.
+  *The emitter*, `refutationCodeOf q fuel`, saturates `encode q.protocol q.bounds`, reads off the
+  lines up to the empty clause and serializes them with `Serialize.proofCode`.
+  `checkCode_of_refutationCodeOf` proves the emitted code is accepted at the decode fuel the proof
+  itself needs (`refute_sound` plus `checkCode_iff_checkProof`; no solver),
+  `boundedSafe_of_emittedCode` is the implication from certificate to `boundedSafeGoals q` through
+  `CheckedSafe.boundedSafe_of_checkedCode`, and `safeEvidence_of_emittedCode` /
+  `resultOf_emittedCode` finally construct the `SafeEvidence` that
+  `Query.analyzeQuery_ne_boundedSafe` records the solver route can never produce.
+  `analyze_encodingUnsat_of_code` runs the implication the other way: from checked bytes to the
+  analyser's own answer, so `analyzeQuery_encodingUnsat_of_code` derives
+  `analyzeQuery q = Result.encodingUnsat` without ever deciding `dpll = none`.
+  *Two decided examples, both on models already in the repo.* `AuthGap.qs` exercises the
+  proved-sound engine: `qs_emitted` is a `decide` that the emitter emits, and `qs_boundedSafe`
+  is `boundedSafeGoals` with no solver anywhere. Honest caveat, inherited from
+  `AuthGap.why_the_formula_is_unsat`: that model declares no secret, its violation clause is the
+  empty disjunction, so its refutation is one line and the formula is degenerate. `EndToEnd.qg` is
+  the non-degenerate case - 246 variables, 291 clauses, no empty clause - decided by a 138-integer,
+  21-line certificate: `qg_checked`, `qg_boundedSafe`, `qg_verdict_from_code` and
+  `qg_verdict_and_certificate_agrees`, which is the equation `EndToEnd.qg_verdict` reaches through
+  DPLL, now reached from the certificate. Three negative controls say the bytes are evidence and not
+  a token: rejected against `EndToEnd.Leak`, rejected two lines short of the decode fuel, rejected
+  with its last terminator erased.
+  *What had to be added for the second example, and what is not proved.* Saturation cannot refute a
+  real protocol formula at any affordable fuel: `saturate 1 (encode Guard GB)` is 1150 lines and
+  misses the empty clause, `saturate 2` is 37167 lines and still misses it (`Refute`'s own
+  measurement, first round reproduced here). The file therefore carries a second producer - unit
+  propagation with backward dependency pruning - which refutes the same formula with 200 derived lines
+  and prunes to 21. It is a producer, not a proved engine: nothing shows in general that its output is
+  accepted; what makes the artifact trustworthy is that `checkCode` accepts it, and
+  `checkCode_sound` asks nothing about who wrote the bytes. Pruning is likewise unproved.
+  *Costs.* Whole file, `lake env lean ProtSat/AnalyzerEvidence.lean`: about 3 s. Gates timed alone
+  against the import baseline: `qg_checked` 0.3 s, `qs_emitted` 0.6 s, `qg_size` 0.1 s, the leak
+  rejection under 0.1 s - against the ~20 s `EndToEnd.qg_unsat` costs to replay the solver on the
+  same formula. Axioms: the safety theorems [propext, Classical.choice, Quot.sound], the `decide`
+  gates [propext, Quot.sound]. No `sorry`, no `native_decide`, no new axiom, and `Analyzer.lean`
+  was not touched - the emitter is a function on `Query`, not a new field of `Verdict`.
+  *Still missing, stated plainly.* (1) No fuel policy: `refutationCodeOf` takes fuel from the caller
+  and a `none` is not turned into `Result.unknown resourceExhausted`, which is still defined and
+  still never produced. (2) The fast producer is not proved sound, so the kernel checks a *specific*
+  artifact rather than "whatever the engine emits"; closing it means proving `unitSaturate` emits
+  `lineOK` lines and that `prune` preserves acceptance. (3) Certificates live in the source: no
+  file I/O, and the unpruned qg certificate is 3577 integers, which the kernel cannot replay as a
+  literal. (4) The headline gap is untouched - every theorem here still carries
+  `∀ g ∈ q.goals, goalEncoded g`, so an agreement query is refused rather than certified.
+  (5) `ProtSat.lean` does not import the new module, so the axiom audit and the theorem inventory do
+  not see it yet; that is one line in a file this change was not permitted to touch.
+  `Main.lean` prints the certificate's size and the checker's answer, and four new CI gates pin them.
+
 * Next - the remaining work is now all about the headline, not about hypotheses. (1) *Goal-indexed
   `encode`*: `Encode.violationLits` names leak literals only, so `encode P B` is secrecy-specific by
   construction; the fix is `violationLits sh P gs` plus `encodeGroups` and a `Complete` that is

@@ -117,6 +117,10 @@ expect 'code decodes back to the same proof: true' 'the serialization round trip
 expect 'evidence bound to a different formula rejected: true' 'evidence transplanted to another formula is rejected'
 expect 'produced by the engine and checked: true' 'the resolution engine emits a refutation the independent checker accepts'
 expect 'engine output survives serialization: true' 'the engine refutation round-trips through the code format and is still accepted'
+expect 'certificate: 138 integers, 21 resolution lines' 'the analyser emits a serialized refutation certificate for a real query'
+expect 'the independent checker accepts the certificate: true' 'the emitted certificate is accepted by the checker, with no solver replay'
+expect 'the same bytes against the leaky variant of the model, rejected: true' 'the certificate is bound to the formula it was emitted for'
+expect 'the producer re-run emits exactly these bytes: true' 'the embedded certificate is reproducible by the producer that emitted it'
 expect 'derived bound ' 'the model-derived step bound is reported next to the bound the query chose'
 expect 'attackFoundP = false' 'the pruned enumerator decides safety at the model-derived bound'
 
