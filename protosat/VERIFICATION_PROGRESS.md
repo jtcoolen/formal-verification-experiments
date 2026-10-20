@@ -1051,6 +1051,29 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   `safe_at_derived_bound` is currently a reduction from 'unbounded' to '16', not a decision
   procedure - the logic is closed and the performance is not, which is the same shape as stage 6.
   Build green (1881 jobs), audit clean over 3306 theorems, 24/24 CI gates green.
+* 2026-10-20 (ac) - stage 9 finished: agreement compresses too, and the obstruction closed the right
+  way. The parent asked for invariance rather than redefinition, and the finding that made it work is
+  worth recording because it is checkable in one grep: nothing in ProtSat.Reference reads an
+  ABSOLUTE position. Apart from instAt storing idx := i, the only uses of Inst.idx are the two
+  comparisons r.idx < c.idx in claimMatches and in the counted filter of agreesInj. So the monitors
+  are invariant under strictly monotone renumbering and Reference.lean never had to change.
+  T6a: InstRec (the record without idx), incIdx, instEquiv (same record sequence, both listed with
+  strictly increasing positions), then agrees_renumber and agreesInj_renumber - via restating each
+  monitor as a PREFIX property (agrees_iff_agreesPrefix) and transferring the match test and both
+  counts. T6b: insts_dropRedundant_records - the compressed run's insts have exactly the original's
+  record sequence, because the deleted events (idle, redundant ded) carry no authentication record
+  and every survivor sees a CfgEq-equal configuration - upgraded to instEquiv_dropRedundant using
+  runs_eq (a run's visited list is unique). T6c: compress_agreement and compress_agreementInj, same
+  derived bound as secrecy, and safe_at_derived_bound_full for queries selecting secrecy, agreement
+  OR injective agreement - the restriction the previous pass had to state is now gone, and injective
+  agreement did follow (the counts transfer under renumbering). T6d: derivedSteps authOrderQ = 7,
+  derivedSteps authSwappedQ = 7, and authSwappedQ_short_attack transporting the contract's own
+  2-event attack inside the derived bound, so the instance is not vacuous.
+  The headline now: for every goal the contract can ask, boundedSafe at the model-derived bound
+  implies allLengthsSafe - no execution of ANY length inside the query's sessions and message
+  universe violates a selected goal. Demo prints the derived bound beside the bound the query chose
+  (secureQ: asks 3, derived 16; authOrderQ: asks 2, derived 7), and CI gates on it: 25 gates.
+  Build green, audit clean over 3405 theorems.
 * Next - stage 6 is nearly closed: the checker (`Resolution`), the binding of evidence to its
   formula (`checkAgainst`), and the serialization (`Serialize`) are proved, and a checked code now
   reaches `boundedSafeGoals q` (`CheckedSafe.boundedSafe_of_checkedCode`). What is missing is a
