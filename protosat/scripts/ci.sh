@@ -136,24 +136,33 @@ if lake build > "$BUILD_LOG" 2>&1; then
     # lake prints "Nothing to build." when every target trace already matches.
     if grep -qF 'Nothing to build.' "$BUILD_LOG"; then jobs=0; else jobs='?'; fi
   fi
-  # Did the build compile a dependency from source?  lake logs one line per
-  # executed job, e.g. "Built Mathlib.Algebra.Group.Basic"; up-to-date jobs are
-  # not logged at the default level, so any such line means the Mathlib cache
-  # was incomplete.  A handful is a partial miss; hundreds means Mathlib is
-  # being rebuilt from source, which is an environment problem, not a proof one.
-  deps_re='Built (Mathlib|Batteries|Aesop|Qq|ImportGraph|ProofWidgets|LeanSearchClient|Plausible|Cli)\b'
+  # Did the build RE-ELABORATE a dependency from source?  lake logs one line per executed
+  # job, and the FACET matters.  "Built Mathlib.Algebra.Group.Basic" (or the same name with
+  # :lean) is a Lean module being elaborated - that is what a Mathlib cache miss looks like.
+  # "Built Batteries.Tactic.Alias:c.o" is only the C object being compiled, and mathlib's
+  # cache serves .olean and .trace artifacts but NOT .o files, so every fresh runner
+  # legitimately recompiles the C parts of its transitive dependencies.  Counting those as a
+  # cache failure is a false positive: the first real CI run (Linux, 2026-10-20) reported 893
+  # of them while all 8548 .oleans were present and no Lean module was re-elaborated.  So the
+  # facet-less count is the gate and the C-object count is information.
+  deps_re='Built (Mathlib|Batteries|Aesop|Qq|ImportGraph|ProofWidgets|LeanSearchClient|Plausible|Cli)[A-Za-z0-9_.]*(:lean)?([[:space:]]|$)'
   deps_built=$(grep -cE "$deps_re" "$BUILD_LOG" 2>/dev/null)
   [ -n "$deps_built" ] || deps_built=0
-  own_built=$(grep -cE 'Built (ProtSat|Main)\b' "$BUILD_LOG" 2>/dev/null)
+  cobjects=$(grep -cE 'Built (Mathlib|Batteries|Aesop|Qq|ImportGraph|ProofWidgets|LeanSearchClient|Plausible|Cli)[A-Za-z0-9_.]*:c\.(o|dynlib|a)([[:space:]]|$)' "$BUILD_LOG" 2>/dev/null)
+  [ -n "$cobjects" ] || cobjects=0
+  own_built=$(grep -cE 'Built (ProtSat|Main)[A-Za-z0-9_.]*(:lean)?([[:space:]]|$)' "$BUILD_LOG" 2>/dev/null)
   [ -n "$own_built" ] || own_built=0
   COLD_DEPS_MAX=${PROTSAT_CI_COLD_DEPS_MAX:-200}
+  if [ "$cobjects" -gt 0 ]; then
+    printf 'ENV   %s dependency C objects compiled (expected on a fresh runner: the Mathlib cache holds .olean and .trace, not .o)\n' "$cobjects"
+  fi
   if [ "$deps_built" -gt 0 ]; then
-    printf 'WARN  %s dependency modules compiled from source (Mathlib cache incomplete; limit %s)\n' \
+    printf 'WARN  %s dependency Lean modules re-elaborated from source (Mathlib cache incomplete; limit %s)\n' \
       "$deps_built" "$COLD_DEPS_MAX"
   fi
   if [ "$deps_built" -gt "$COLD_DEPS_MAX" ] && [ -z "${PROTSAT_CI_ALLOW_COLD_MATHLIB:-}" ]; then
-    sample=$(grep -E "$deps_re" "$BUILD_LOG" | head -5)
-    env_problem "lake build compiled $deps_built dependency modules from source (limit $COLD_DEPS_MAX): the Mathlib cache was not usable." \
+    sample=$(grep -E "$deps_re" "$BUILD_LOG" 2>/dev/null | sed -n '1,5p')
+    env_problem "lake build re-elaborated $deps_built dependency Lean modules (limit $COLD_DEPS_MAX): the Mathlib cache was not usable." \
       "That is an environment failure, not a proof failure - the build gate tested nothing." \
       "Run: cd protosat && lake exe cache get   (then re-run this script)." \
       "First offending lines:" "$sample"

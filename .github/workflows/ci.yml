@@ -7,7 +7,16 @@ name: ProtSat verification gate
 #   Mathlib's PREBUILT .oleans - and then runs that script.  The script is the
 #   gate; this file is only the machine setup.
 #
-#   This workflow has not been executed yet.  Every duration below is an
+#   First real execution: 2026-10-20 on an ubuntu-latest runner.  'lake exe cache get'
+#   worked - the preflight found all 8548 Mathlib .oleans - and the build itself
+#   succeeded, but the cold-detection gate misfired: it counted 893 'Built X:c.o' lines
+#   as a Mathlib cache miss.  Those are C objects, which mathlib's cache does not serve
+#   (.olean and .trace only), so every fresh runner legitimately recompiles them.  ci.sh
+#   now distinguishes the two facets and reports C objects as information.  The gate
+#   doing its job on a false positive is still not the gate doing its job on a true one:
+#   the detection is tested against synthetic lake logs, not against a real cold cache.
+
+#   (previously:) This workflow has not been executed yet.  Every duration below is an
 #   estimate extrapolated from local measurements, not a measured CI time.  If an
 #   assumption fails (no toolchain, no Mathlib cache, unwritable log dir) ci.sh
 #   exits 3 with "ENVIRONMENT PROBLEM" rather than reporting a proof failure, so
