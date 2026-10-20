@@ -208,3 +208,44 @@ The acceptance standard is an exact, explicitly scoped mathematical statement fo
 - Tamarin property definitions and compromise policies: https://tamarin-prover.com/manual/master/book/007_property-specification.html
 - Tamarin on the general undecidability/possible nontermination of unbounded analysis: https://tamarin-prover.com/manual/master/book/001_introduction.html
 - Mathlib LRAT proof reconstruction, also present in the pinned local dependency: https://leanprover-community.github.io/mathlib4_docs/Mathlib/Tactic/Sat/FromLRAT.html
+
+## Status ledger (updated 2026-10-20)
+
+Reality of the implementation checkout (`protosat`, HEAD 343855e, 3500 kernel-checked theorems,
+26/26 CI gates, axioms `propext, Classical.choice, Quot.sound` only). Each row names the artifact
+that decides it, not an intention.
+
+| Stage | State | Deciding artifact |
+|---|---|---|
+| 1 Contract and regressions | **done** | `ProtSat/Contract.lean` verdict algebra (`attack / boundedSafe / invalidModel / unsupportedGoal / unknown`), `ProtSat/Query.lean` with `goalEncoded`, `ProtSat/Regressions.lean` permanent witnesses, README corrected |
+| 2 Reference semantics | **done** | `ProtSat/Reference.lean`: allocation history, action-specific events, ordered role-aware agreement and injective-agreement monitors, credential provisioning; twelve gates that each reverse a `Regressions` witness |
+| 3 One public meaning of bounds | **done** | `ProtSat/Bounded.lean` + `ProtSat/BoundedExec.lean`: the public bounds imply the operational ones (`mem_univ_of_mem`, `secrets_subset_univ`), monotonicity in the bounds |
+| 4 SAT correspondence | **open - headline gap here** | Two-sided correspondence now exists (`Complete.encoding_complete`, `Sound.encoding_sound_bounded'`, `Sound.encoding_correct` for gap-free queries); `hsub` deleted from 18 signatures; `SecretsOK` split with the closed half proved and the store half proved undroppable (`secretsOKStore_not_derivable`). STILL OPEN: agreement is not representable in the CNF at all - `Clauses.violationLits` names leak literals only, and `AuthGap.goal_hypothesis_is_needed` proves `hq` is not droppable; and the xe stride still runs over `U`, keeping `domainGap`/`exprB` |
+| 5 Independently checkable evidence | **done for the UNSAT answer** | `Resolution.checkProof` (checker), `Serialize.proofCode/proofOfCode` (transport), `Refute.saturate`/`refutationOf` with `refute_sound` and `refute_complete` (prover), `CheckedSafe.boundedSafe_of_checkedCode` (certificate to theorem). The SAT answer carries a permitted run instead. Remaining: the analyzer does not yet emit certificates (in progress) |
+| 6 Credible examples and non-vacuity | **done** | `ProtSat/Benchmarks.lean` (NS and NSL in the reference language with claim/commit instrumentation and a real declared secret, honest-execution witnesses), `AuthGap.auth_gap_is_real_nonvacuous`, CI non-vacuity gates |
+| 7 Proved refinement | **done** | `ProtSat/Prune.lean`: `explorerAttack_equiv`/`attackFound_equiv` both directions, unconditional - the pruned explorer is the same decision procedure, 11868 nodes to 3 on the secure query; `ProtSat/Compress.lean`: `dropRedundant`, `compress_secrecy`, `compress_agreement` with `CfgEq` congruences |
+| 8 Guarantees about increasing bounds | **done** | `Compress.safe_at_derived_bound_full` and `Prune.secureQ_allLengthsSafe`: safety for every run length up to a bound the kernel derives (16 events secure, 7 agreement-ordered), decided in 0.06 s after pruning |
+| 9 Richer goals, other proof modes | **open** | Same obstruction as stage 4: goal-indexed encoding, then agreement clauses. Unbounded and inductive modes deliberately out of the bounded core |
+
+### What the headline now reduces to
+
+The original defect - "SAFE returned while an agreement attack was permitted" - is proved, not
+asserted: `ProtSat/AuthGap.lean` exhibits a model that is `boundedSafe` for its secrecy goals and
+attacked for agreement, and proves the general statement `goal_hypothesis_is_needed` false if the
+hypothesis is dropped. Closing it needs three things, in order:
+
+1. **Goal-indexed violation clauses.** `violationLits sh P` becomes `violationLits sh P gs`, with
+   `gs = [secrecy]` reducing to today's formula (a byte-identical regression gate protects the
+   3500 existing theorems). Blast radius measured 2026-10-20: 28 `violationLits` mentions across 11
+   files, ~180 `encode` mentions across 16 files, concentrated in `Encoding.lean` (91).
+2. **Agreement clauses that the CNF can express.** Inter-session equality is available through the
+   per-session value literals (`vau sh i q x u`), so claim/commit data can be demanded and matched;
+   the honest-execution side ("some honest session committed") is the part with no existing
+   mechanism and is where the design work is.
+3. **Re-indexed correspondence.** `Complete`/`Sound` per goal, so `boundedSafeGoals q` is a statement
+   about exactly the goals `q.goals` selects and `hq` becomes a fact about the encoding rather than
+   an assumption about the query.
+
+Explicitly dropped as not worth the kernel cost, recorded so it is not retried: a two-principal NS
+model (850-variable CNF, kernel replay over 600 s), and the universe-as-parameter refinement (a 190x
+evaluator win that never materialised in the kernel).
