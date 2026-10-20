@@ -1074,6 +1074,23 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   universe violates a selected goal. Demo prints the derived bound beside the bound the query chose
   (secureQ: asks 3, derived 16; authOrderQ: asks 2, derived 7), and CI gates on it: 25 gates.
   Build green, audit clean over 3405 theorems.
+* 2026-10-20 (ad) - stage 4/1, the cheapest deletion in the audit: `ProtSat/Closure.lean` proves
+  `univSub` is a theorem of the universe construction rather than a condition the query must satisfy.
+  `Complete.univSub` is carried as a hypothesis by `encoding_complete` and by every bridge that
+  consumes it - `Correspondence`, `CheckedSafe`, `Sound`, `Refute`, `AuthGap` - and until now each
+  site discharged it by `decide` on a concrete protocol, which proves the fact about an example and
+  says nothing about the construction. The route: `SubtermClosed` as a predicate on lists;
+  `subtermClosureL` gives a closed base; `mem_seeds_agent` and the key block of `seeds` put every
+  agent and every domain key in that base; `subtermsL_subset_closeOne` checks each of the five
+  blocks a round builds (base, pairs, symmetric and asymmetric encryptions, hashes) and observes
+  that every part of a generated message was already present - `encS m k` contributes `m`'s subterms
+  and `key k`, and `k` is in the base; hence `SubtermClosed.mono_closeOne`, then `iterate`, then
+  `eraseDups`, giving `univSub_shapeOf : univSub (shapeOf P B)` for EVERY protocol and bounds.
+  Fully constructive: `#print axioms` is `[propext, Quot.sound]` - not even `Classical.choice`.
+  Two `example`s instantiate it on `Represent.plainP` and on the transient-pair model, so the
+  generic theorem is seen to cover a universe with a real pairing intermediate.
+  The deletion of `hsub` from the ~15 signatures is now a one-line substitution at each site and is
+  the next step. Build green (1883 jobs), audit clean over 3439 theorems, 25/25 CI gates green.
 * Next - stage 6 is nearly closed: the checker (`Resolution`), the binding of evidence to its
   formula (`checkAgainst`), and the serialization (`Serialize`) are proved, and a checked code now
   reaches `boundedSafeGoals q` (`CheckedSafe.boundedSafe_of_checkedCode`). What is missing is a

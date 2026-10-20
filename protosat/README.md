@@ -521,6 +521,7 @@ and the tenth is not enabled.
 | `ProtSat/CheckedSafe.lean` | 152 | the evidence chain at query level: `boundedSafe_of_checkedCode`, `SafeEvidence` from a checked refutation |
 | `ProtSat/Sound.lean` | 380 | the soundness half: decoded values are universe values, `decoding_runsInUniverse`, and the two-sided `encoding_correct` |
 | `ProtSat/AuthGap.lean` | 310 | the authentication gap as a theorem: safe for secrecy and attacked for agreement at one protocol and one bound |
+| `ProtSat/Closure.lean` | 201 | the universe is subterm-closed by construction: `univSub_shapeOf`, so `hsub` is a theorem and not a hypothesis |
 | `ProtSat/Refute.lean` | 1291 | the producer: saturating resolution, `refute_sound` (the checker accepts its output) and `refute_complete` (every unsatisfiable formula has output to accept), so `refute_iff` |
 | `ProtSat/Benchmarks.lean` | 868 | NS and NSL in the reference language: contract verdicts by exhaustion, honest-execution non-vacuity, adverse controls |
 | `ProtSat/Compress.lean` | 2629 | stage 9: the step bound derived from the model - `compress_secrecy`, `compress_agreement`, `compress_agreementInj`, and `safe_at_derived_bound_full`: safety at the derived bound is safety at every length, for every goal |

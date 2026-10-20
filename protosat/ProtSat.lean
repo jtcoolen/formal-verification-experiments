@@ -34,3 +34,4 @@ import ProtSat.AuthGap
 import ProtSat.Refute
 import ProtSat.Benchmarks
 import ProtSat.Compress
+import ProtSat.Closure
