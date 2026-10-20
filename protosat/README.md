@@ -523,6 +523,7 @@ and the tenth is not enabled.
 | `ProtSat/AuthGap.lean` | 310 | the authentication gap as a theorem: safe for secrecy and attacked for agreement at one protocol and one bound |
 | `ProtSat/Refute.lean` | 1291 | the producer: saturating resolution, `refute_sound` (the checker accepts its output) and `refute_complete` (every unsatisfiable formula has output to accept), so `refute_iff` |
 | `ProtSat/Benchmarks.lean` | 868 | NS and NSL in the reference language: contract verdicts by exhaustion, honest-execution non-vacuity, adverse controls |
+| `ProtSat/Compress.lean` | 1706 | stage 9: the step bound derived from the model - `compress_secrecy`, `safe_at_derived_bound`, safety for every length inside the query's own universe |
  refutations as a flat integer code: total decoder, round trip, injectivity, `checkCode_sound` |
 | `ProtSat/ExprDomain.lean` | 310 | finite per-expression domains: `evalDomain`, `eval_mem_evalDomain`, the transient pair handled |
 | `ProtSat/BoundedCert.lean` | 170 | `checkBounded`: certificates that carry their bounds, sound to `BoundedAttack` |

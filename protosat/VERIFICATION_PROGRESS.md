@@ -1019,6 +1019,38 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   keeping these as checked theorems instead of hypotheses, and it is the strongest argument in this
   log for the proved refinements of stage 8.
   Build green (1879 jobs, 174 s), audit clean over 3184 theorems, 24/24 CI gates green.
+* 2026-10-20 (ab) - stage 9, the compression theorem: `ProtSat/Compress.lean` (1706 lines, all
+  structural - the module elaborates in 3 s, no kernel enumeration). The step bound stops being a
+  number the analyst picked. T1: `actionCount P` = sum of role lengths over instantiated sessions,
+  with `rel_ev_cases` (a step either leaves the session vector alone or advances exactly one
+  session's counter by one) giving `sessEv_count_le_actionCount`; the language does not loop, so
+  this is the correct bound, not a weakened one. T2: `ded_steps_le_univ` - a chain of deductions
+  each adding a genuinely new message has length at most |univ P B| (needed `List.nodup_eraseDups`
+  and `List.length_le_of_nodup_forall_mem`, which neither core nor this project's imports provide).
+  T3: the honest wall - `stepOf P C (Ev.ded t) = some (publish C t)` and `publish C t` is a
+  DIFFERENT list, so a redundant deduction is not literally removable; removal is therefore proved
+  against `CfgEq` (sessions, allocation history, obligations equal and knowledge equal AS A SET),
+  and `CfgEq` is proved a congruence for `stepOf`, `actStep`, `oneStepBool`, `actionUsable`,
+  `authData`, `leaks` and `inBounds`. `drop_leading_idle` covers the literal case where no
+  extensional argument is needed. T4: `compress_secrecy` - every leaking execution inside the
+  universe has a leaking witness with at most actionCount + |univ| events - and the prize,
+  `safe_at_derived_bound : (∀ g ∈ q.goals, g = Goal.secrecy) -> boundedSafe (derived q) ->
+  allLengthsSafe q`, where `allLengthsSafe` quantifies over executions of EVERY length that stay
+  inside the query's own sessions and universe. `boundedSafe_of_derived` reuses the existing
+  `Contract.boundedSafe_mono_bounds` rather than reproving monotonicity. T5: closed numbers -
+  `derivedSteps secureQ = 16` where the query itself asks about 3, `derivedSteps transientQ = 10`.
+
+  Two limits, both stated in the file. (i) Agreement does NOT compress: `Inst.idx` is the trace
+  POSITION, `claimMatches` compares positions and `agreesInj` counts them, so deleting a non-session
+  event renumbers every later authentication event; two runs can visit extensionally equal
+  configurations and perform the same claims and commits in the same order and still have different
+  `insts`. Finishing it needs an index-free (rank-renumbered) formulation of agreement or positional
+  alignment plus monotone-renumbering invariance - a statement about `Inst.idx`, not about the
+  knowledge representation. (ii) The derived bound is a real number the search still cannot reach:
+  16 steps where exhaustion manages about 3 events before the node count is already 11,868. So
+  `safe_at_derived_bound` is currently a reduction from 'unbounded' to '16', not a decision
+  procedure - the logic is closed and the performance is not, which is the same shape as stage 6.
+  Build green (1881 jobs), audit clean over 3306 theorems, 24/24 CI gates green.
 * Next - stage 6 is nearly closed: the checker (`Resolution`), the binding of evidence to its
   formula (`checkAgainst`), and the serialization (`Serialize`) are proved, and a checked code now
   reaches `boundedSafeGoals q` (`CheckedSafe.boundedSafe_of_checkedCode`). What is missing is a
