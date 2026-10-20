@@ -994,6 +994,31 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   formula yet - that needs subsumption, unit propagation and polarity pivoting, or a DPLL that emits
   resolution proofs directly. `boundedSafe_of_refutation` is the explicit-hypothesis form.
   Build green, audit clean over 3109 theorems, 24/24 CI gates green.
+* 2026-10-19 (aa) - stage 7: `ProtSat/Benchmarks.lean`, 75 closed theorems, NS and NSL rebuilt in the
+  REFERENCE language with explicit authentication instrumentation and a real declared secret (B's
+  fresh nonce via a `secret` action), so the safety story is no longer a hand-written certificate in
+  the old semantics. What the contract itself answers, by *running* its enumerator in the kernel:
+  `NSL2cqE_boundedSafe` and `NSL2cqE_verdict` (BOUNDED SAFE with its `SafeEvidence`) at
+  `steps := 3, rounds := 0`; `NS2cq_verdict` and `NSL2cNoCheckQ_verdict` (ATTACK, witness replayed
+  by `checkWitness`) at `steps := 14`; and `NSL2earlyQ_attackFound_true`, where the enumerator FINDS
+  an attack on a mutation of NSL and the violation is the agreement goal, not secrecy
+  (`NSL2earlyQ_witness_is_auth` + `_not_leak`). `exhaustion_pair` is the executable discrimination:
+  same goals, same bounds, one BOUNDED SAFE and one ATTACK, both by exhaustion. Non-vacuity is
+  proved, not assumed: `nsl2_honest_reaches_commit` (obligation `[nb]`, exactly one claim and one
+  commit), `nsl2_honest_events` pins both `Inst` records including the ordering the monitor needs,
+  and `nsl2c_honest_permitted` shows the honest run is a *bounded* run, so the exhaustion bound does
+  not exclude the honest case by accident. Lowe's script is proved not an execution of NSL at all
+  (`run NSL2c ... = none`) and erasing exactly the identity check makes it one again.
+
+  Stated plainly in the module, because it is the interesting part: the literal ask - NS attacked and
+  NSL safe at ONE common bound - is NOT delivered and cannot be at these costs. The faithful NS model
+  needs `rounds := 1`, where the universe has 1415 messages and a single kernel-side `inBoundsBool`
+  exceeds 30 minutes; exhaustion reaches ~3 events at `rounds := 0`, and at that bound NS is safe too
+  (`NS2cqE_boundedSafe`) - which is said rather than hidden. Measured cost of the whole module:
+  168 s to elaborate, and the project's clean build goes from seconds to 174 s. That is the price of
+  keeping these as checked theorems instead of hypotheses, and it is the strongest argument in this
+  log for the proved refinements of stage 8.
+  Build green (1879 jobs, 174 s), audit clean over 3184 theorems, 24/24 CI gates green.
 * Next - stage 6 is nearly closed: the checker (`Resolution`), the binding of evidence to its
   formula (`checkAgainst`), and the serialization (`Serialize`) are proved, and a checked code now
   reaches `boundedSafeGoals q` (`CheckedSafe.boundedSafe_of_checkedCode`). What is missing is a

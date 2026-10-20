@@ -522,6 +522,7 @@ and the tenth is not enabled.
 | `ProtSat/Sound.lean` | 380 | the soundness half: decoded values are universe values, `decoding_runsInUniverse`, and the two-sided `encoding_correct` |
 | `ProtSat/AuthGap.lean` | 310 | the authentication gap as a theorem: safe for secrecy and attacked for agreement at one protocol and one bound |
 | `ProtSat/Refute.lean` | 1291 | the producer: saturating resolution, `refute_sound` (the checker accepts its output) and `refute_complete` (every unsatisfiable formula has output to accept), so `refute_iff` |
+| `ProtSat/Benchmarks.lean` | 868 | NS and NSL in the reference language: contract verdicts by exhaustion, honest-execution non-vacuity, adverse controls |
  refutations as a flat integer code: total decoder, round trip, injectivity, `checkCode_sound` |
 | `ProtSat/ExprDomain.lean` | 310 | finite per-expression domains: `evalDomain`, `eval_mem_evalDomain`, the transient pair handled |
 | `ProtSat/BoundedCert.lean` | 170 | `checkBounded`: certificates that carry their bounds, sound to `BoundedAttack` |
