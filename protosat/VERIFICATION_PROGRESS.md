@@ -1214,6 +1214,51 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   not see it yet; that is one line in a file this change was not permitted to touch.
   `Main.lean` prints the certificate's size and the checker's answer, and four new CI gates pin them.
 
+* 2026-10-20 (ai) - stage 4, the headline gap attacked: `ProtSat/AuthClauses.lean` puts agreement
+  into the CNF as clauses, and in doing so proves that the obvious way to do it cannot work.
+  *The negative result first.* `encode P B ++ <agreement clauses>` is unsatisfiable on the AuthGap
+  attack model for a reason that has nothing to do with agreement: `Regressions.Authentication.P`
+  declares no secret, so `violationLits` is empty and the secrecy violation clause is the empty
+  disjunction (`AuthGap.empty_clause_in_encode`), and conjoining better clauses to an unsatisfiable
+  formula gives an unsatisfiable formula. `authEncode_empty_clause` and `authEncode_not_sat` prove
+  this in the kernel. The consequence is structural: the violation group has to become GOAL-INDEXED,
+  which is why the file also prototypes `encodeGoals P B gs`, with the regression theorems
+  `encodeGoals P B [secrecy] = encode P B` and `encodeGoals P B [agreement] = agreementEncode P B`.
+  *The clauses.* The claim/commit specification is DATA, not a hypothesis: `authPositions P` reads
+  the claim and commit annotations out of the same `Protocol` record `Reference.insts` reads, so the
+  CNF and the reference monitor are asked about the same events by construction. One selector aux
+  variable per commit occurrence (`andNDef` over `evAct`/`vpc`/`vxe data`/`vxe peer` - the same
+  literals the send and check clauses already use), one demand clause saying some commit happens, and
+  one excuse clause per (commit, matching claim) pair forbidding both. The matcher is a two-constructor
+  enum: `orderAware` mirrors `Reference.claimMatches` (same tag, same data, strictly earlier, claimer
+  is the peer believed and vice versa), `tripleOnly` mirrors the older unordered `AuthBreak` that
+  `AuthGap` is stated in - so the ordering requirement is a property of the clauses, testable rather
+  than asserted. Aux variables are allocated above `Encode.nVarsAll`, so no existing block moves.
+  *The gates, and how they avoid the cost wall.* SAT is proved from an EXPLICIT 205-pair assignment
+  that the kernel checks against all 802 clauses (`gate_agreement_attack_found`, ~12 s) - the solver
+  is not trusted. UNSAT is proved by refuting a 34-clause SUBFORMULA `orderCore` and transferring
+  along a decided clause-subset (`gate_order_unsat`, ~3 s). `by decide` on `dpll` of the full formula
+  exceeded 10 minutes on three attempts and was abandoned: compiled `#eval` does the same call in
+  under a second, so this is kernel replay cost, not solver difficulty.
+  *The differential that makes it mean something.* `Diff.diff_authentication`, `diff_authSwapped`,
+  `diff_authOrder`: on three models the CNF verdict and the reference-enumeration verdict
+  (`attackFound` for `[Goal.agreement]`) agree - attacked, attacked, safe. This is precisely what
+  `AuthGap` said was impossible: the scalable route now answers the authentication question and
+  agrees with the exhaustive route. Anti-vacuity gates say the generator really emits excuse clauses
+  and that every model's demand clause is a non-empty disjunction.
+  *Not proved, and why.* Neither SOUND nor COMPLETE. The obstruction is structural, not effort: every
+  decoding lemma in `ProtSat/Encoding.lean` takes its hypothesis as `Sat a (encode P B)` - the whole
+  formula, secrecy clause included - so a model of the agreement-only encoding cannot feed them, and
+  on the AuthGap model no such model exists. The file header lists the four pieces needed (trace-index
+  lemmas for `decEvsFrom`/`decCfgsFrom`, recovering `decCode = 1 + q` from a decoded `Ev.act`, using
+  `xe_konst` + `decXe_some_vxe` to turn a decoded claim into its four literals under `authNameable`,
+  and assembly through `commitsOf`/`claimsOf` + `Sound.boundedTrace_decRun`).
+  Two corrections to the brief as issued: the polarity of an agreement violation in this repo is an
+  UNMATCHED COMMIT (`Reference.agrees`: every commit has a matching earlier claim), not a claim with
+  no commit; and `authNameable` - claim and commit annotations must be closed constants the universe
+  names - is a real restriction of the prototype, decided to hold for every model in the repo.
+  Build green, audit clean over 3580 theorems, `AuthGap.lean` and `EndToEnd.lean` re-checked
+  unchanged (62 s, 19 s).
 * Next - the remaining work is now all about the headline, not about hypotheses. (1) *Goal-indexed
   `encode`*: `Encode.violationLits` names leak literals only, so `encode P B` is secrecy-specific by
   construction; the fix is `violationLits sh P gs` plus `encodeGroups` and a `Complete` that is
