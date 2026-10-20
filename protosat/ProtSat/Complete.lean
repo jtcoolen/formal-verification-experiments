@@ -4290,13 +4290,101 @@ theorem sat_fresh (hok : RunOK sh P cfg ev)
           rw [h] at h4
           exact absurd h4 (by simp)
 
-/-- **The secret hypothesis.**  The bounds must be able to name the declared secrets: every
-secret store variable has a store slot in the shape, and every closed secret message is a
-universe message.  Without this the violation clause of the encoding could not even mention the
-leak - the same kind of bound hypothesis specification section 4 asks for. -/
+/-- **The store-slot half of the secret hypothesis.**  Every secret declared as a store cell
+`Secret.store q x` has its variable index inside the shape's store stride: `x < shV sh`.
+
+This is the half that is a genuine bound-adequacy precondition, and it stays a hypothesis.
+`ProtSat.Encode.shapeOf` sizes the stride from the variables the roles actually write or read
+(`Protocol.Action.written` and `Protocol.Expr.vars`), and nothing in the construction forces a
+hand-written `P.secrets` entry to stay inside that range: a protocol may declare
+`Secret.store q x` for a variable no action of session `q` ever touches, and then the violation
+clause cannot state the leak.  That is a property the model author owes the analysis, not a
+property the universe has - contrast `ProtSat.Complete.secretsClosed_subset_univ` below, which
+proves the other half of the conjunction for every protocol and every bounds. -/
+def SecretsOKStore (sh : Shape) (P : Protocol) : Prop :=
+  ∀ q x, (Secret.store q x) ∈ P.secrets → x < shV sh
+
+/-- **The nameability half of the secret hypothesis.**  Every closed secret message of the protocol
+is a message of the shape's universe, so the leak literal "the attacker knows `s`" can be built.
+This is *not* an assumption a query has to arrange: `ProtSat.Complete.secretsClosed_subset_univ`
+proves it of `shapeOf P B` for every protocol and every bounds.  It is kept as a named predicate
+because `ProtSat.Complete.sat_violation` is stated for an arbitrary shape, where the fact is not
+free. -/
+def SecretsOKClosed (sh : Shape) (P : Protocol) : Prop :=
+  ∀ s ∈ P.closedSecretTerms, s ∈ sh.U
+
+/-- **The secret hypothesis.**  The bounds must be able to name the declared secrets: every secret
+store variable has a store slot in the shape (`ProtSat.Complete.SecretsOKStore`), and every closed
+secret message is a universe message (`ProtSat.Complete.SecretsOKClosed`).  Without this the
+violation clause of the encoding could not even mention the leak - the same kind of bound
+hypothesis specification section 4 asks for.
+
+The two halves are no longer on the same footing: the second is a theorem of the construction
+(`ProtSat.Complete.secretsClosed_subset_univ`), so every bridge downstream asks for the first one
+alone.  The conjunction is kept, same two fields in the same order, so a proof that destructs it
+(`ProtSat.Complete.sat_violation`) is unchanged. -/
 def SecretsOK (sh : Shape) (P : Protocol) : Prop :=
-  (∀ q x, (Secret.store q x) ∈ P.secrets → x < shV sh) ∧
-    (∀ s ∈ P.closedSecretTerms, s ∈ sh.U)
+  SecretsOKStore sh P ∧ SecretsOKClosed sh P
+
+/-! ### Every closed declared secret is nameable, by construction
+
+`SecretsOK` used to be carried whole as a hypothesis by `encoding_complete` and by every bridge
+that consumes it, and each concrete use discharged the closed-secret half by `decide` on an
+example - which proved the fact about that protocol and said nothing about the construction.  The
+construction is the reason it is true.  `Bounded.univ P B` is
+
+    ((closeOne P.agents (domainKeys P.agents))^[B.rounds] (subtermClosureL (seeds P))).eraseDups
+
+and `Bounded.seeds` contains `P.closedSecretTerms` by definition (`Bounded.mem_secrets_seeds`),
+so every closed secret lies in the subterm closure of the seeds and therefore in the universe
+(`Bounded.mem_univ_of_mem`).  `Bounded.secrets_subset_univ` already says that; the lemma below is
+the same fact read at the shape the encoding actually uses, which is what lets the closed half
+disappear from every signature downstream. -/
+
+/-- **The nameability half is a theorem of the universe construction, not a hypothesis about the
+query.**  For every protocol and every bounds, every closed declared secret is a message of the
+universe of `shapeOf P B`, so the encoding can name the leak of a closed secret without being
+told to. -/
+theorem secretsClosed_subset_univ (P : Protocol) (B : Bounds) :
+    ∀ s ∈ P.closedSecretTerms, s ∈ (shapeOf P B).U := by
+  intro s hs
+  exact secrets_subset_univ P B s hs
+
+/-! ### The store-slot half is not a theorem of the construction
+
+The asymmetry between the two halves is worth exhibiting, because it is the honest content of the
+hypothesis that remains.  `ProtSat.Encode.shapeOf` sizes the store stride from the protocol's
+*roles*: `nV1` is the largest variable index any action writes or reads, and `shV = nV1 + 1`.
+`P.secrets` is a separate hand-written list, and nothing in the definitions ties a
+`Secret.store q x` declaration to that maximum.  The model below declares its secret in variable 5
+while its role only ever touches variable 0; for it `SecretsOKStore` is decidable, and false.  So
+what `encoding_complete` still asks for is a condition on the model - where specification section 4
+puts it - and not something a better universe construction could hand over for free. -/
+
+/-- A role that touches only variable 0: it receives into that slot and sends it back. -/
+def storeGapP : Protocol :=
+  { roles := [{ acts := [Action.recv 0 0, Action.send 0 (Expr.var 0)] }],
+    sessions := [{ role := 0, self := 0, peer := 0 }],
+    agents := [0], nonceDomain := [0], compromised := [],
+    secrets := [Secret.store 0 5], auths := [] }
+
+/-- Bounds for it: two events, one closure round. -/
+def storeGapB : Bounds := { steps := 2, rounds := 1 }
+
+/-- Its store stride is one slot wide: variable 0 is the only variable the role mentions. -/
+theorem storeGap_shV : shV (shapeOf storeGapP storeGapB) = 1 := by decide
+
+/-- **The store-slot half is a real hypothesis.**  `storeGapP` declares its secret in variable 5,
+which the shape has no slot for, so `SecretsOKStore` fails for this protocol at these bounds.  The
+condition `encoding_complete` keeps is therefore not derivable from the construction: unlike the
+closed-secret half, it can genuinely not hold, and a model that violates it is a model whose declared
+leak the generated formula cannot mention. -/
+theorem secretsOKStore_not_derivable :
+    ¬ SecretsOKStore (shapeOf storeGapP storeGapB) storeGapP := by
+  intro h
+  have h5 : (5 : Nat) < shV (shapeOf storeGapP storeGapB) := h 0 5 (by decide)
+  rw [storeGap_shV] at h5
+  omega
 
 /-- Reading an in-range position of a run gives one of its configurations. -/
 theorem cfgAt_lt : ∀ (Cs : List Cfg) (i : Nat), i < Cs.length ->
@@ -4448,12 +4536,16 @@ The hypotheses are the bounds conditions of specification section 4, collected i
 ProtSat.Complete.RunOK (the run stays inside the shape), ProtSat.Encode.univClosed (the universe
 names the messages the protocol computes), ProtSat.Complete.univSub (the universe is closed under
 subterms, needed to enumerate the attacker's rule instances - now discharged by
-ProtSat.Complete.univSub_shapeOf, so it is no longer a hypothesis) and ProtSat.Complete.SecretsOK (the
-bounds can name the declared secrets).  None of them is a technicality: a run that leaves the
-universe has no finite name, and a violation the encoding cannot mention cannot be found. -/
+ProtSat.Complete.univSub_shapeOf, so it is no longer a hypothesis) and
+ProtSat.Complete.SecretsOKStore (every secret stored in a session variable has a slot for that
+variable in the shape).  The other half of what used to be ProtSat.Complete.SecretsOK - every closed
+declared secret is a universe message - is discharged here by
+ProtSat.Complete.secretsClosed_subset_univ, so it is no longer a hypothesis either.  What is left is
+not a technicality: a run that leaves the universe has no finite name, and a violation the encoding
+cannot mention cannot be found. -/
 theorem encoding_complete {P : Protocol} {B : Bounds} {tr : List Ev} {Cs : List Cfg}
     (hU : univClosed (shapeOf P B) P)
-    (hsec : SecretsOK (shapeOf P B) P)
+    (hsecStore : SecretsOKStore (shapeOf P B) P)
     (hrun : Runs P (initCfg P) tr Cs) (hlen : tr.length ≤ B.steps)
     (hleak : runsLeaks P Cs) (hbnd : WithinBounds P B (cfgAt Cs) (evAt tr)) :
     Satisfiable (encode P B) := by
@@ -4486,6 +4578,7 @@ theorem encoding_complete {P : Protocol} {B : Bounds} {tr : List Ev} {Cs : List 
   · exact sat_fresh (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd
       (fun N hN => nonces_subset_univ P B N hN) hrel cl hc
   · exact sat_leakAux (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd cl hc
-  · exact sat_violation (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd hsec hleak' cl hc
+  · exact sat_violation (shapeOf P B) P (cfgAt Cs) (evAt tr) hbnd
+      ⟨hsecStore, secretsClosed_subset_univ P B⟩ hleak' cl hc
 
 end ProtSat.Complete

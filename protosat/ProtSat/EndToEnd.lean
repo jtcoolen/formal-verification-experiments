@@ -74,12 +74,11 @@ theorem hU_safe : univClosed (shapeOf KeyDisclosure.PSafe KeyDisclosure.B)
   unfold univClosed
   decide
 
-theorem hsec_safe : SecretsOK (shapeOf KeyDisclosure.PSafe KeyDisclosure.B)
+theorem hsec_safe : SecretsOKStore (shapeOf KeyDisclosure.PSafe KeyDisclosure.B)
     KeyDisclosure.PSafe := by
-  refine ⟨fun q x h => ?_, ?_⟩
-  · have heq : Secret.store q x = Secret.closed (Expr.nonce 5) := List.mem_singleton.mp h
-    cases heq
-  · decide
+  intro q x h
+  have heq : Secret.store q x = Secret.closed (Expr.nonce 5) := List.mem_singleton.mp h
+  cases heq
 
 theorem hgoals : ∀ g ∈ qsafe.goals, goalEncoded g := by decide
 
@@ -150,11 +149,10 @@ theorem qg_hU : univClosed (shapeOf Guard GB) Guard := by
   unfold univClosed
   decide
 
-theorem qg_hsec : SecretsOK (shapeOf Guard GB) Guard := by
-  refine ⟨fun q x h => ?_, ?_⟩
-  · have heq : Secret.store q x = Secret.closed (Expr.shrk 0 0) := List.mem_singleton.mp h
-    cases heq
-  · decide
+theorem qg_hsec : SecretsOKStore (shapeOf Guard GB) Guard := by
+  intro q x h
+  have heq : Secret.store q x = Secret.closed (Expr.shrk 0 0) := List.mem_singleton.mp h
+  cases heq
 
 theorem qg_goals : ∀ g ∈ qg.goals, goalEncoded g := by decide
 

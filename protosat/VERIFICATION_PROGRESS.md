@@ -1134,15 +1134,43 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   would have asserted enumeration completeness over arbitrary universes. `univSub_shapeOf` still
   depends only on [propext, Quot.sound].
   Build green (1885 jobs), audit clean over 3496 theorems, 26/26 CI gates green.
-* Next - stage 6 is nearly closed: the checker (`Resolution`), the binding of evidence to its
-  formula (`checkAgainst`), and the serialization (`Serialize`) are proved, and a checked code now
-  reaches `boundedSafeGoals q` (`CheckedSafe.boundedSafe_of_checkedCode`). What is missing is a
-  PROVER, so a safety answer arrives with a refutation instead of being re-run in the kernel:
-  `ProtSat/Refute.lean` - a saturating resolution engine whose output `checkProof` accepts. Then
-  the xe stride flip onto `Shape.V` (szXe, szAxe, vxe, axe, xeOh, f1, f2, evalGate,
-  evalLeafGate), after which `domainGap` is no longer a restriction on the protocol and
-  `Residual` is empty - it is now the *only* hypothesis separating the CNF route from an
-  unconditional statement. Then agreement violations in the CNF at all: until that is done a CNF
-  `boundedSafe` is a statement about secrecy only, which is why the label says `encodingUnsat`
-  and why `Sound.encoding_correct` is indexed by `[Goal.secrecy]`. Then stage 7: NS/NSL
-  authentication instrumentation with honest-execution witnesses..
+* 2026-10-20 (ag) - stage 4, final hypothesis audit: `Complete.SecretsOK` was the last pipeline
+  hypothesis that read like a proof obligation and was never argued for. It is a conjunction of two
+  unrelated things with different statuses, and they are now separated.
+  *Closed secrets are in the universe* is a theorem of the construction: `Bounded.seeds` contains
+  `P.closedSecretTerms`, `Bounded.mem_univ_of_mem` lifts seed-closure members into `univ P B`, and
+  `(shapeOf P B).U` is `Bounded.univ P B`. So `secretsClosed_subset_univ : ∀ s ∈ P.closedSecretTerms,
+  s ∈ (shapeOf P B).U` needs no hypothesis [propext, Classical.choice, Quot.sound], and the closed
+  half is gone from every signature that carried it. *Every declared secret has a variable slot* is a
+  genuine precondition - `Encode.shapeOf` sizes `shV` from the variables the roles touch while
+  `P.secrets` is an independent hand-written list - and rather than assert that, the split ships a
+  counterexample: `storeGapP` is a role that only touches variable 0 and declares `Secret.store 0 5`,
+  with `storeGap_shV : shV (shapeOf storeGapP storeGapB) = 1` and
+  `secretsOKStore_not_derivable : ¬ SecretsOKStore (shapeOf storeGapP storeGapB) storeGapP`
+  [propext, Quot.sound]. A model can be written that the analyser's own shape cannot name - the
+  concrete form of the warning `AuthGap.violationLits_nonempty` makes in the abstract.
+  `SecretsOK := SecretsOKStore ∧ SecretsOKClosed` keeps the field order, so `sat_violation` - the only
+  site needing both halves, stated for an ABSTRACT `Shape` where the closed half is not free - is
+  untouched, and `encoding_complete` takes the store half alone and rebuilds the pair internally.
+  Nineteen signatures narrowed across `Sound`, `Analyzer`, `Correspondence`, `Query`, `CheckedSafe`,
+  `Refute` and `Differential`; five concrete store gates kept because each is now the only evidence
+  for its model's store half; four concrete gates on the closed half deleted (`AuthGap.hsec`,
+  `AuthGap.hsec2`, `EndToEnd.hsec_safe`, `EndToEnd.qg_hsec`, `Differential.leak_hsec` each lost a
+  branch). HONEST SCOPE: nothing left the pipeline's hypothesis list - the store half is still carried,
+  because it can fail. What changed is that the half which was always a theorem is now proved and the
+  half that is a precondition now has a counterexample. The headline gap is untouched: `hq` still says
+  agreement goals are not represented in the CNF at all.
+  Build green (1885 jobs), audit clean over 3500 theorems, 26/26 CI gates green.
+
+* Next - the remaining work is now all about the headline, not about hypotheses. (1) *Goal-indexed
+  `encode`*: `Encode.violationLits` names leak literals only, so `encode P B` is secrecy-specific by
+  construction; the fix is `violationLits sh P gs` plus `encodeGroups` and a `Complete` that is
+  complete per goal (~160 call sites in 15 files), gated by a byte-identical-formula regression check
+  for `[Goal.secrecy]`. (2) *The xe stride flip* onto `Shape.V` (`szXe`, `szAxe`, `vxe`, `axe`, `xeOh`,
+  `f1`, `f2`, `evalGate`, `evalLeafGate`), after which `domainGap` stops restricting the protocol and
+  `Residual` is empty - it is the only hypothesis still separating the CNF route from an
+  unconditional statement; needs `Represent.exprVals` Nodup fixed first. (3) *Agreement violation
+  clauses in the CNF*, so `AuthGap`'s gap closes and a CNF `boundedSafe` stops meaning secrecy-only.
+  (4) *Wire the analyzer to emit evidence*: `Analyzer` still returns a bare verdict, while
+  `Refute.refutationOf` + `Serialize` + `CheckedSafe.boundedSafe_of_checkedCode` already give a
+  kernel-checked certificate for any formula - the plumbing is a call away..

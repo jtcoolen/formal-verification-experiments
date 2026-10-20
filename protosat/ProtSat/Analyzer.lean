@@ -256,8 +256,10 @@ open ProtSat.Complete
 `encodingUnsat` then there is no trace of at most B.steps steps that ProtSat.Operational accepts
 from the initial configuration and whose visited configurations **leak a declared secret** -
 provided the bounds can name such a run (ProtSat.Complete.WithinBounds) and cover the protocol's
-declarations (ProtSat.Encode.univClosed, ProtSat.Complete.SecretsOK); the subterm-closure condition
-`Complete.univSub` is no longer asked for - `Complete.univSub_shapeOf` proves it of the shape.
+declarations (ProtSat.Encode.univClosed, ProtSat.Complete.SecretsOKStore); the subterm-closure
+condition `Complete.univSub` is no longer asked for - `Complete.univSub_shapeOf` proves it of the
+shape - and neither is the closed-secret half of `Complete.SecretsOK`, proved of the shape by
+`Complete.secretsClosed_subset_univ`.
 
 This is deliberately not stated as "the protocol has no bounded attack":
 ProtSat.Bounded.BoundedAttack also counts a violation of non-injective agreement, and the
@@ -279,14 +281,14 @@ certificate checker, but a SAFE verdict is a statement about the secrecy violati
 asks for. -/
 theorem analyze_safe_sound {P : Protocol} {B : Bounds}
     (hU : univClosed (shapeOf P B) P)
-    (hsec : SecretsOK (shapeOf P B) P) (h : analyze P B = Verdict.encodingUnsat) :
+    (hsecStore : SecretsOKStore (shapeOf P B) P) (h : analyze P B = Verdict.encodingUnsat) :
     ¬ ∃ (tr : List Ev) (Cs : List Cfg),
         Runs P (initCfg P) tr Cs ∧ tr.length ≤ B.steps ∧ runsLeaks P Cs ∧
           WithinBounds P B (cfgAt Cs) (evAt tr) := by
   intro hsafe
   obtain ⟨tr, Cs, hrun, hlen, hleak, hbnd⟩ := hsafe
   obtain ⟨a, ha⟩ :=
-    encoding_complete (P := P) (B := B) (tr := tr) (Cs := Cs) hU hsec hrun hlen hleak hbnd
+    encoding_complete (P := P) (B := B) (tr := tr) (Cs := Cs) hU hsecStore hrun hlen hleak hbnd
   -- a SAFE verdict means the solver answered none
   have hnone : dpll (encode P B) = none := by
     rw [analyze] at h
@@ -306,13 +308,13 @@ something other than SAFE.  Stated this way the theorem is the one a user of the
 needs: the only way to see SAFE is that no bounded attack exists. -/
 theorem analyze_not_safe_of_attack {P : Protocol} {B : Bounds}
     (hU : univClosed (shapeOf P B) P)
-    (hsec : SecretsOK (shapeOf P B) P)
+    (hsecStore : SecretsOKStore (shapeOf P B) P)
     (tr : List Ev) (Cs : List Cfg) (hrun : Runs P (initCfg P) tr Cs)
     (hlen : tr.length ≤ B.steps) (hleak : runsLeaks P Cs)
     (hbnd : WithinBounds P B (cfgAt Cs) (evAt tr)) :
     analyze P B ≠ Verdict.encodingUnsat := by
   intro hsafe
-  exact (analyze_safe_sound hU hsec hsafe) ⟨tr, Cs, hrun, hlen, hleak, hbnd⟩
+  exact (analyze_safe_sound hU hsecStore hsafe) ⟨tr, Cs, hrun, hlen, hleak, hbnd⟩
 
 /-! ### Specification 8H: termination of the four stages -/
 

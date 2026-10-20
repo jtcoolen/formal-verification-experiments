@@ -102,13 +102,15 @@ theorem hU : univClosed (shapeOf P B) P :=
   (univClosedBool_iff (shapeOf P B) P).mp
     (analyze_encodingUnsat_facts Authentication.analyze_encodingUnsat).1
 
-/-- **The declared secrets are named by the bounds.** This protocol declares none, so both halves of
-`SecretsOK` are immediate: no store secret needs a slot, and there is no closed secret to place in
-the universe. -/
-theorem hsec : SecretsOK (shapeOf P B) P := by
-  refine ⟨fun q x h => ?_, fun s hs => ?_⟩
-  · exact absurd h (by simp [Authentication.P])
-  · exact absurd hs (by simp [Authentication.P, Protocol.closedSecretTerms])
+/-- **The declared store secrets are named by the bounds.** This protocol declares no store secret
+at all, so no session variable needs a slot and the hypothesis is vacuous here. It is still a real
+side condition in general - `Encode.shapeOf` sizes the store stride from the variables the roles
+touch, not from the secret declarations - and it is the only half of the old `SecretsOK` that is not
+a theorem of the construction: the other half, that every closed declared secret is a universe
+message, is `Complete.secretsClosed_subset_univ`, so it is no longer asked for. -/
+theorem hsec : SecretsOKStore (shapeOf P B) P := by
+  intro q x h
+  exact absurd h (by simp [Authentication.P])
 
 /-- **No representability gap.** The protocol cannot build a value the CNF's value domain does not
 name, so every bounded execution of it has a name in the formula. This is the decidable form of what
@@ -383,18 +385,19 @@ solver had to work. -/
 theorem no_empty_clause2 : ([] : List Lit) ∉ (Encode.encode P2 B2).clauses := by decide
 
 /-- The side conditions of the bridge, all closed for the second model too: the bounds name the
-protocol's closed expressions, the declared secret is a universe message, and the value domain has
-no gap. Subterm-closure of the universe is no longer a side condition to discharge:
-`Complete.univSub_shapeOf` proves it for `P2` and `B2` like for anything else. -/
+protocol's closed expressions, every store secret has a slot, and the value domain has no gap.
+Subterm-closure of the universe is no longer a side condition to discharge:
+`Complete.univSub_shapeOf` proves it for `P2` and `B2` like for anything else. Neither is the
+condition that the declared secret `sec` is a universe message:
+`Complete.secretsClosed_subset_univ` proves that of every protocol and every bounds, which is why
+`hsec2` below is only the store-slot half and no longer has to put `sec` in the universe by
+`decide`. -/
 theorem hU2 : univClosed (shapeOf P2 B2) P2 := by
   unfold univClosed
   decide
 
-theorem hsec2 : SecretsOK (shapeOf P2 B2) P2 := by
-  refine ⟨fun q x h => absurd h (by simp [P2]), fun s hs => ?_⟩
-  have heq : s = sec := List.mem_singleton.mp hs
-  rw [heq]
-  decide
+theorem hsec2 : SecretsOKStore (shapeOf P2 B2) P2 :=
+  fun q x h => absurd h (by simp [P2])
 
 theorem gapFree2 : domainGap P2 B2 = false := by decide
 

@@ -56,9 +56,11 @@ are the surviving spot-checks that the generic statement really does read off th
 
 It says nothing about the other two shape conditions. `Encode.univClosed` is a genuine bound-
 adequacy property - a too-small universe is exactly what it rules out, and the analyser reports it
-as `boundsTooSmall` rather than proving it. And `Complete.SecretsOK` is half bound-adequacy (a
-declared secret the CNF cannot name makes the violation clause empty, which is what
-`AuthGap.violationLits_nonempty` is about) and half provable; splitting it is separate work.
+as `boundsTooSmall` rather than proving it. `Complete.SecretsOK` has since been split: the
+closed-secret half is now the theorem `Complete.secretsClosed_subset_univ`, while the store-slot half
+stays a hypothesis because it genuinely can fail - `Complete.secretsOKStore_not_derivable` exhibits a
+model declaring its secret in a variable the shape has no slot for. A declared secret the CNF cannot
+name makes the violation clause empty, which is what `AuthGap.violationLits_nonempty` is about.
 The generic-shape helpers in `Complete.lean` (`dedInstsOf_complete`, `dedIx_exists`, `rdEv_lt`,
 `sat_evOh`, `sat_oneHot`, `sat_ded`, `sat_knSupport`) still take `univSub sh` for an *abstract*
 shape: that hypothesis is not removable there, because a bare `Shape` may carry any universe at

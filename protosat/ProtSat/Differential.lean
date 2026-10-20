@@ -97,11 +97,10 @@ theorem leak_hU : univClosed (shapeOf EndToEnd.Leak EndToEnd.GB) EndToEnd.Leak :
   unfold univClosed
   decide
 
-theorem leak_hsec : SecretsOK (shapeOf EndToEnd.Leak EndToEnd.GB) EndToEnd.Leak := by
-  refine ⟨fun q x h => ?_, ?_⟩
-  · have heq : Secret.store q x = Secret.closed (Expr.shrk 0 0) := List.mem_singleton.mp h
-    cases heq
-  · decide
+theorem leak_hsec : SecretsOKStore (shapeOf EndToEnd.Leak EndToEnd.GB) EndToEnd.Leak := by
+  intro q x h
+  have heq : Secret.store q x = Secret.closed (Expr.shrk 0 0) := List.mem_singleton.mp h
+  cases heq
 
 /-- **Completeness, applied.** The attack produces a satisfying assignment of the generated
 formula - no `WithinBounds` hypothesis, because `withinBounds_of_bounded` derived it from the
