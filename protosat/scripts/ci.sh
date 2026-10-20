@@ -15,13 +15,53 @@
 #
 # Run it directly (protosat/scripts/ci.sh) or through .github/workflows/ci.yml.
 #
+# ---------------------------------------------------------------------------
+# What this script assumes about the machine (step 0 checks these rather than
+# trusting them):
+#
+#   * lake, lean, git and curl are on PATH.  lean and lake normally come from
+#     elan; the installer the elan README gives today is
+#     https://elan.lean-lang.org/elan-init.sh, and elan picks the toolchain
+#     from protosat/lean-toolchain by walking up from the current directory.
+#   * Mathlib's prebuilt .oleans are already in the workspace, under
+#     .lake/packages/mathlib/.lake/build/lib.  They arrive via
+#     "lake exe cache get", which .github/workflows/ci.yml runs before this
+#     script.  Building Mathlib v4.34.1 from source takes hours, so a run that
+#     starts doing that is an ENVIRONMENT failure, not a build failure, and is
+#     reported as such rather than letting the time budget misreport it.
+#   * The log directory is writable.  Default /tmp; override with PROTSAT_CI_LOGDIR.
+#   * GNU userland is NOT required.  Only portable constructs are used
+#     (date +%s, sed -n 's///p', grep -E/-F/--include, tr -cd, printf), checked
+#     against BSD grep 2.6.0-FreeBSD and bash 3.2 (the macOS /bin/bash) as well
+#     as the GNU coreutils that ubuntu-latest ships.
+#     The one GNU-ism kept from the previous version is grep --include, which
+#     BSD grep 2.6.0-FreeBSD also supports.
+#   * The budgets are developer-machine numbers (see README "Build and run").
+#     A 4-core CI runner is not a 10-core laptop, so every number can be
+#     overridden in the environment without editing this file:
+#     PROTSAT_CI_BUILD_BUDGET, PROTSAT_CI_DEMO_BUDGET, PROTSAT_CI_THEOREM_FLOOR,
+#     PROTSAT_CI_MATHLIB_FLOOR, PROTSAT_CI_COLD_DEPS_MAX, PROTSAT_CI_ALLOW_COLD_MATHLIB.
+#
+# Exit codes: 0 every gate green; 1 a gate failed; 3 the environment is wrong,
+# which means the gates never ran and nothing about the proofs was established.
+# ---------------------------------------------------------------------------
+
 set -u
+export LC_ALL=C
 
 cd "$(dirname "$0")/.." || exit 1
 
-THEOREM_FLOOR=2880
-BUILD_BUDGET=1500
-DEMO_BUDGET=300
+THEOREM_FLOOR=${PROTSAT_CI_THEOREM_FLOOR:-2880}
+BUILD_BUDGET=${PROTSAT_CI_BUILD_BUDGET:-1500}
+DEMO_BUDGET=${PROTSAT_CI_DEMO_BUDGET:-300}
+# How many Mathlib .oleans count as "the cache is in place".  A full Mathlib is ~8.5k.
+MATHLIB_FLOOR=${PROTSAT_CI_MATHLIB_FLOOR:-1000}
+
+LOGDIR=${PROTSAT_CI_LOGDIR:-/tmp}
+BUILD_LOG="$LOGDIR/protosat-ci-build.log"
+DEMO_LOG="$LOGDIR/protosat-ci-demo.log"
+DEMO_ERR="$LOGDIR/protosat-ci-demo.err"
+AUDIT_LOG="$LOGDIR/protosat-ci-audit.log"
 
 pass=0
 fail=0
@@ -31,20 +71,102 @@ no() { printf 'FAIL  %s\n' "$1"; fail=$((fail + 1)); }
 printf 'ProtSat verification gate\n'
 printf '%s\n' '-------------------------'
 
+# An environment problem: the gate never got to test anything, so it must not be
+# reported as a proof failure.  Distinct exit code, and the message says what to
+# do about it.
+env_problem() {
+  printf '\n' >&2
+  printf 'ENVIRONMENT PROBLEM - the gate did not run.\n' >&2
+  printf '%s\n' "$@" >&2
+  printf 'Nothing here says anything about the proofs.  Fix the machine and re-run.\n' >&2
+  printf 'To build Mathlib from source anyway: PROTSAT_CI_ALLOW_COLD_MATHLIB=1 ./scripts/ci.sh\n' >&2
+  exit 3
+}
+
+# 0. environment preflight ---------------------------------------------------
+missing=''
+for tool in lake lean git curl sed grep find date; do
+  command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+done
+if [ -n "$missing" ]; then
+  env_problem "not on PATH:$missing" \
+    "On a CI runner the Lean toolchain comes from elan; see .github/workflows/ci.yml." \
+    "Locally: install elan from https://elan.lean-lang.org/elan-init.sh, then run this from protosat/."
+fi
+if [ ! -w "$LOGDIR" ]; then
+  env_problem "the log directory $LOGDIR is not writable (set PROTSAT_CI_LOGDIR)."
+fi
+# lake --version is the cheapest probe that also makes elan fetch the toolchain.
+if ! lake_ver=$(lake --version 2>&1); then
+  env_problem "lake --version failed; the pinned toolchain is not usable." "$lake_ver"
+fi
+if ! lean_ver=$(lean --version 2>&1); then
+  env_problem "lean --version failed; the pinned toolchain is not usable." "$lean_ver"
+fi
+printf 'ENV   %s\n' "$lake_ver"
+printf 'ENV   %s\n' "$lean_ver"
+
+MATHLIB_SRC=.lake/packages/mathlib
+if [ ! -f "$MATHLIB_SRC/lakefile.lean" ]; then
+  env_problem "Mathlib is not resolved in this workspace ($MATHLIB_SRC/lakefile.lean is missing)." \
+    "Run: cd protosat && lake exe cache get   (lake clones the pinned mathlib4 revision itself)."
+fi
+mathlib_oleans=$(find "$MATHLIB_SRC/.lake/build" -name '*.olean' 2>/dev/null | wc -l | tr -d ' ')
+[ -n "$mathlib_oleans" ] || mathlib_oleans=0
+if [ "$mathlib_oleans" -lt "$MATHLIB_FLOOR" ]; then
+  if [ -n "${PROTSAT_CI_ALLOW_COLD_MATHLIB:-}" ]; then
+    printf 'ENV   Mathlib has only %s prebuilt .oleans (floor %s): building from source, as asked.\n' \
+      "$mathlib_oleans" "$MATHLIB_FLOOR"
+  else
+    env_problem "Mathlib prebuilt .oleans are not in place: found $mathlib_oleans, floor is $MATHLIB_FLOOR." \
+      "lake build would now compile Mathlib from source (hours), which is not what BUILD_BUDGET=$BUILD_BUDGET s assumes." \
+      "Fetch the cache first:  cd protosat && lake exe cache get"
+  fi
+else
+  printf 'ENV   Mathlib prebuilt .oleans present: %s\n' "$mathlib_oleans"
+fi
+
 # 1. clean build -------------------------------------------------------------
 t0=$(date +%s)
-if lake build > /tmp/protosat-ci-build.log 2>&1; then
+if lake build > "$BUILD_LOG" 2>&1; then
   t1=$(date +%s)
   dur=$((t1 - t0))
-  jobs=$(sed -n 's/.*Build completed successfully (\([0-9]*\) jobs).*/\1/p' /tmp/protosat-ci-build.log | tail -1)
+  jobs=$(sed -n 's/.*Build completed successfully (\([0-9]*\) jobs).*/\1/p' "$BUILD_LOG" | tail -1)
+  if [ -z "$jobs" ]; then
+    # lake prints "Nothing to build." when every target trace already matches.
+    if grep -qF 'Nothing to build.' "$BUILD_LOG"; then jobs=0; else jobs='?'; fi
+  fi
+  # Did the build compile a dependency from source?  lake logs one line per
+  # executed job, e.g. "Built Mathlib.Algebra.Group.Basic"; up-to-date jobs are
+  # not logged at the default level, so any such line means the Mathlib cache
+  # was incomplete.  A handful is a partial miss; hundreds means Mathlib is
+  # being rebuilt from source, which is an environment problem, not a proof one.
+  deps_re='Built (Mathlib|Batteries|Aesop|Qq|ImportGraph|ProofWidgets|LeanSearchClient|Plausible|Cli)\b'
+  deps_built=$(grep -cE "$deps_re" "$BUILD_LOG" 2>/dev/null)
+  [ -n "$deps_built" ] || deps_built=0
+  own_built=$(grep -cE 'Built (ProtSat|Main)\b' "$BUILD_LOG" 2>/dev/null)
+  [ -n "$own_built" ] || own_built=0
+  COLD_DEPS_MAX=${PROTSAT_CI_COLD_DEPS_MAX:-200}
+  if [ "$deps_built" -gt 0 ]; then
+    printf 'WARN  %s dependency modules compiled from source (Mathlib cache incomplete; limit %s)\n' \
+      "$deps_built" "$COLD_DEPS_MAX"
+  fi
+  if [ "$deps_built" -gt "$COLD_DEPS_MAX" ] && [ -z "${PROTSAT_CI_ALLOW_COLD_MATHLIB:-}" ]; then
+    sample=$(grep -E "$deps_re" "$BUILD_LOG" | head -5)
+    env_problem "lake build compiled $deps_built dependency modules from source (limit $COLD_DEPS_MAX): the Mathlib cache was not usable." \
+      "That is an environment failure, not a proof failure - the build gate tested nothing." \
+      "Run: cd protosat && lake exe cache get   (then re-run this script)." \
+      "First offending lines:" "$sample"
+  fi
   if [ "$dur" -le "$BUILD_BUDGET" ]; then
-    ok "lake build: $jobs jobs in $dur s (budget $BUILD_BUDGET s)"
+    ok "lake build: $jobs jobs in $dur s (budget $BUILD_BUDGET s; $own_built ProtSat modules re-elaborated)"
   else
     no "lake build exceeded the budget: $dur s > $BUILD_BUDGET s"
+    tail -25 "$BUILD_LOG" | sed 's/^/      /'
   fi
 else
   no "lake build failed"
-  tail -25 /tmp/protosat-ci-build.log | sed 's/^/      /'
+  tail -25 "$BUILD_LOG" | sed 's/^/      /'
 fi
 
 # 2. no admissions -----------------------------------------------------------
@@ -65,14 +187,20 @@ else
 fi
 
 # 3. axiom audit and theorem inventory ---------------------------------------
-audit=$(lake env lean Axioms.lean 2>&1 || true)
-if printf '%s' "$audit" | grep -q 'OK - every theorem depends only'; then
-  ok "axiom audit clean (propext, Classical.choice, Quot.sound only)"
+lake env lean Axioms.lean > "$AUDIT_LOG" 2>&1
+audit=$(cat "$AUDIT_LOG" 2>/dev/null || true)
+if [ -z "$audit" ]; then
+  no "axiom audit produced no output (lake env lean Axioms.lean failed silently)"
+  count=''
 else
-  no "axiom audit flagged something"
-  printf '%s\n' "$audit" | tail -15 | sed 's/^/      /'
+  if printf '%s' "$audit" | grep -q 'OK - every theorem depends only'; then
+    ok "axiom audit clean (propext, Classical.choice, Quot.sound only)"
+  else
+    no "axiom audit flagged something"
+    printf '%s\n' "$audit" | tail -15 | sed 's/^/      /'
+  fi
+  count=$(printf '%s' "$audit" | sed -n 's/.*theorems audited in ProtSat\.\*: *//p' | tr -cd '0-9')
 fi
-count=$(printf '%s' "$audit" | sed -n 's/.*theorems audited in ProtSat\.\*: *//p' | tr -cd '0-9')
 if [ -n "$count" ] && [ "$count" -ge "$THEOREM_FLOOR" ]; then
   ok "theorem inventory: $count (floor $THEOREM_FLOOR)"
 else
@@ -81,11 +209,13 @@ fi
 
 # 4. executability and evidence replay ---------------------------------------
 t0=$(date +%s)
-demo=$(lake exe protosatDemo 2>/dev/null || true)
+if lake exe protosatDemo > "$DEMO_LOG" 2> "$DEMO_ERR"; then demo_status=0; else demo_status=$?; fi
 t1=$(date +%s)
 dur=$((t1 - t0))
+demo=$(cat "$DEMO_LOG" 2>/dev/null || true)
 if [ -z "$demo" ]; then
-  no "the demo produced no output"
+  no "the demo produced no output (lake exe protosatDemo exited $demo_status)"
+  tail -25 "$DEMO_ERR" | sed 's/^/      /'
 elif [ "$dur" -le "$DEMO_BUDGET" ]; then
   ok "demo runs in $dur s (budget $DEMO_BUDGET s)"
 else
@@ -126,5 +256,6 @@ expect 'attackFoundP = false' 'the pruned enumerator decides safety at the model
 
 printf '%s\n' '-------------------------'
 printf '%d passed, %d failed\n' "$pass" "$fail"
+printf 'logs: %s\n' "$BUILD_LOG"
 [ "$fail" -eq 0 ] || exit 1
 printf 'ALL GATES GREEN\n'

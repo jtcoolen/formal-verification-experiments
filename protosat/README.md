@@ -247,8 +247,11 @@ Single-module checking: `lake env lean ProtSat/Encoding.lean`.
 ### Continuous verification
 
 `scripts/ci.sh` is the gate the roadmap asks for. The repository root (one level above this directory)
-carries `.github/workflows/ci.yml`, which runs this script with `working-directory: protosat` -
-nothing runs it for you - so it is one command and it is meant to be run before every commit:
+carries `.github/workflows/ci.yml`, which installs the pinned toolchain with elan, fetches Mathlib's
+prebuilt objects with `lake exe cache get`, and then runs this script from `protosat/`. That workflow
+has never been executed, so its timeouts are estimates; the script exits 3 with `ENVIRONMENT PROBLEM`
+rather than reporting a proof failure when the machine is not the one its budgets assume. Nothing runs
+it for you, so it is meant to be run before every commit - it is one command:
 
 ```sh
 cd protosat && ./scripts/ci.sh

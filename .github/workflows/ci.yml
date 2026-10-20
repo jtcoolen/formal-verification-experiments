@@ -1,7 +1,37 @@
 name: ProtSat verification gate
 
-# The gate script is the real check; this workflow only runs it on a clean machine.
-# See protosat/scripts/ci.sh for what each gate means.
+# What this workflow actually does, stated honestly:
+#
+#   It puts a GitHub-hosted ubuntu-latest runner into the state
+#   protosat/scripts/ci.sh requires - an elan-managed Lean v4.34.1 toolchain and
+#   Mathlib's PREBUILT .oleans - and then runs that script.  The script is the
+#   gate; this file is only the machine setup.
+#
+#   This workflow has not been executed yet.  Every duration below is an
+#   estimate extrapolated from local measurements, not a measured CI time.  If an
+#   assumption fails (no toolchain, no Mathlib cache, unwritable log dir) ci.sh
+#   exits 3 with "ENVIRONMENT PROBLEM" rather than reporting a proof failure, so
+#   a broken setup shows up as a broken setup.
+#
+# Estimated cost of one run on a cold runner with a warm GitHub cache:
+#
+#   checkout + cache restore (~450 MB ltar store + toolchain)      1-4 min
+#   lake clones the pinned mathlib4 revision (~0.5 GB .git)        1-3 min
+#   lake exe cache get: download missing ltars, unpack ~6 GB       5-15 min
+#   lake build of the project's own 41 modules (174 s measured on
+#     a 10-core dev machine; ubuntu-latest is 4 vCPU / 16 GB)      3-10 min
+#   axiom audit + demo (ci.sh budgets 300 s for the demo)          2-6 min
+#   ------------------------------------------------------------------------
+#   estimated total                                               12-38 min
+#
+# timeout-minutes sits above the top of that range.  It is deliberately not
+# sized for a run that rebuilds Mathlib from source - that takes hours, and
+# ci.sh now refuses to start such a build unless PROTSAT_CI_ALLOW_COLD_MATHLIB=1
+# is set.
+#
+# BUILD_BUDGET (1500 s) and DEMO_BUDGET (300 s) inside ci.sh are the developer
+# machine's numbers; they are env-overridable (PROTSAT_CI_BUILD_BUDGET,
+# PROTSAT_CI_DEMO_BUDGET) if the 4-core runner turns out to need different ones.
 
 on:
   push: {}
@@ -11,28 +41,74 @@ on:
 jobs:
   protosat:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: protosat
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install elan (the Lean toolchain manager)
-        run: |
-          curl -sSf https://elan.lean-lang.org/elan-init.sh | sh -s -- -y --default-toolchain none
-          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
-
-      - name: Cache the toolchain and the lake build
+      # Only the toolchain and Mathlib's content-addressed .ltar store are
+      # cached.  protosat/.lake is deliberately NOT cached:
+      #
+      #   * it measures 7.9 GB on a warm tree (6.6 GB of that is Mathlib's
+      #     unpacked .oleans) against GitHub's 10 GB per-repository cache budget
+      #     and the runner's 14 GB of SSD - one such cache would thrash the
+      #     repository's budget and evict itself;
+      #   * the expensive part is Mathlib, and Mathlib already arrives through
+      #     'lake exe cache get' from mathlib's own CDN;
+      #   * caching build outputs is the one way this gate could go stale.  Lake
+      #     re-hashes each module's source text and its imports' traces on every
+      #     build (lake's README: "A target's trace is derived from its various
+      #     inputs (e.g., source file, Lean toolchain, imports, etc.)"), so a
+      #     restored .lake would in practice still rebuild changed modules - but
+      #     the gate's meaning is "the proofs were re-elaborated from source on
+      #     this machine", and there is no reason to rest that claim on a trace
+      #     mechanism or on tar preserving mtimes.  Not caching .lake keeps the
+      #     claim unconditional: every CI run re-elaborates all 41 ProtSat
+      #     modules from source.
+      #
+      # restore-keys: when lean-toolchain or lake-manifest.json changes, fall
+      # back to the newest cache matching a shorter prefix instead of starting
+      # from nothing (the previous version of this step had no restore-keys).
+      - name: Restore the elan toolchain and the Mathlib .ltar store
         uses: actions/cache@v4
         with:
           path: |
             ~/.elan
             ~/.cache/mathlib
-            ${{ github.workspace }}/protosat/.lake
-          key: protosat-${{ runner.os }}-${{ hashFiles('**/lean-toolchain', '**/lake-manifest.json') }}
+          key: protosat-${{ runner.os }}-${{ hashFiles('protosat/lean-toolchain') }}-${{ hashFiles('protosat/lake-manifest.json') }}
+          restore-keys: |
+            protosat-${{ runner.os }}-${{ hashFiles('protosat/lean-toolchain') }}-
+            protosat-${{ runner.os }}-
+
+      - name: Install elan (skipped when the cache already provided it)
+        # https://elan.lean-lang.org/elan-init.sh is the installer the elan
+        # README gives today.  --default-toolchain none: the toolchain comes from
+        # protosat/lean-toolchain, and elan downloads it on first use.
+        run: |
+          if [ -x "$HOME/.elan/bin/elan" ]; then
+            echo "elan restored from the cache"
+          else
+            curl -sSf https://elan.lean-lang.org/elan-init.sh | sh -s -- -y --default-toolchain none
+          fi
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
 
       - name: Show the resolved toolchain
-        working-directory: protosat
         run: lean --version && lake --version
 
+      - name: Fetch Mathlib's prebuilt .oleans
+        # 'lake exe cache get' is the invocation mathlib's own lakefile exports
+        # (lean_exe cache, root Cache.Main) at the pinned v4.34.1 revision, run
+        # in the package directory.  Lake materialises the pinned mathlib4
+        # revision itself (clone + detached checkout) before building the tool,
+        # so no separate resolve step is needed - and this lake version (5.0.0,
+        # Lean 4.34.1) has no 'lake resolve' subcommand at all.  Artifacts are
+        # read from https://cache.mathlib.org (mathlib's Cache/Infra.lean) into
+        # ~/.cache/mathlib, the tool's default cache directory and the path
+        # cached above.
+        run: lake exe cache get
+
       - name: Verification gate (build, axiom audit, inventory, demo, budgets)
-        working-directory: protosat
         run: ./scripts/ci.sh
