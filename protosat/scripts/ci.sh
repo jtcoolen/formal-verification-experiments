@@ -118,6 +118,7 @@ expect 'evidence bound to a different formula rejected: true' 'evidence transpla
 expect 'produced by the engine and checked: true' 'the resolution engine emits a refutation the independent checker accepts'
 expect 'engine output survives serialization: true' 'the engine refutation round-trips through the code format and is still accepted'
 expect 'derived bound ' 'the model-derived step bound is reported next to the bound the query chose'
+expect 'attackFoundP = false' 'the pruned enumerator decides safety at the model-derived bound'
 
 printf '%s\n' '-------------------------'
 printf '%d passed, %d failed\n' "$pass" "$fail"

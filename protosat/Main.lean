@@ -198,6 +198,12 @@ def main : IO Unit := do
       ++ toString Compress.authOrderQ.bounds.steps ++ " steps, derived bound "
       ++ toString (Compress.derivedSteps Compress.authOrderQ))
   IO.println ""
+  IO.println ("    pruned search at the derived bound (" ++ toString
+      (Compress.derivedSteps Compress.secureQ) ++ " events): attackFoundP = "
+      ++ toString (Prune.attackFoundP (Compress.derived Compress.secureQ)))
+  IO.println "    the unpruned search reaches 258 nodes after 3 events and cannot get here;"
+  IO.println "    so this query is now proved safe for executions of EVERY length inside its own"
+  IO.println "    sessions and message universe (Prune.Gates.secureQ_allLengthsSafe)."
   IO.println "SOLVER SANITY CHECKS (all by the kernel, see ProtSat/DPLL.lean)"
   IO.println ("    demoUnit      isSome = " ++ toString ((dpll DPLL.demoUnit).isSome))
   IO.println ("    demoConflict  isSome = " ++ toString ((dpll DPLL.demoConflict).isSome))

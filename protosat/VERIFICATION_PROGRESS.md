@@ -1091,6 +1091,33 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   generic theorem is seen to cover a universe with a real pairing intermediate.
   The deletion of `hsub` from the ~15 signatures is now a one-line substitution at each site and is
   the next step. Build green (1883 jobs), audit clean over 3439 theorems, 25/25 CI gates green.
+* 2026-10-20 (ae) - stage 8, first proved refinement, and it converts stage 9 from a reduction into a
+  decision: `ProtSat/Prune.lean`. The explorer offered `Ev.idle` unconditionally and a deduction for
+  every universe message whether or not it was already known (`Explore.candidates`, and `publish`
+  appends, so a redundant ded is a literally different configuration - the same fact that forced
+  Compress to reason up to `CfgEq`). Pruning exactly those two event kinds gives `candidatesP`, and
+  the refinement is proved, not benchmarked: `explorerAttack_equiv : explorerAttack P B =
+  explorerAttackP P B` and `attackFound_equiv : attackFound q = attackFoundP q`, BOTH directions,
+  unconditionally, all three goals. The hard direction is a new induction `runs_prune` - note the
+  subtlety the agent caught: Compress's `dropRedundant` deletes against the *accumulator*, not
+  `C.kn`, so a message published by an honest send is known but not in the accumulator, and
+  dropRedundant's own auth lemmas do not apply to this deletion; `runs_prune` deletes against `C.kn`
+  directly and carries the insts-record equality itself via `insts_records_cons`, `instRecAt_congr`
+  and `stepOf_pres`, then reuses `agrees_renumber`/`agreesInj_renumber`. Verdict transfer reuses
+  `leaks_congr`/`inBounds_congr`; nothing was re-proved.
+  Measured: secureQ 258 nodes -> 3 nodes, and 3 nodes at the DERIVED bound of 16 events, which the
+  unpruned search cannot reach at all. So `attackFoundP (derived secureQ) = false` decides in 0.06 s
+  of kernel time, and `Prune.Gates.secureQ_allLengthsSafe : allLengthsSafe Compress.secureQ` is
+  proved by the kernel with NO analyst-chosen number in the statement it is applied to. That is the
+  objective's sentence, for a real query, for every execution length inside the query's own
+  sessions and universe. Every unpruned closed answer is restated in Prune.Gates and DERIVED from
+  the pruned gate through the equivalence, so the gates prove agreement rather than assert it.
+  Honest limits in the header: the pruned witness is CfgEq-equal, not literally equal (inherent to
+  list knowledge); the two NS/NSL pruned gates cost 4.2-4.4 s each because every node re-evaluates
+  `Bounded.univ`; and this does NOT make NS-vs-NSL separable at the 13-event bound (~6x10^4 s
+  extrapolating 2.3x per event). R2 (universe as a parameter) was skipped: its 190x win was
+  measured in the evaluator and never demonstrated in the kernel.
+  Build green (1885 jobs), audit clean over 3501 theorems, 26/26 CI gates green.
 * Next - stage 6 is nearly closed: the checker (`Resolution`), the binding of evidence to its
   formula (`checkAgainst`), and the serialization (`Serialize`) are proved, and a checked code now
   reaches `boundedSafeGoals q` (`CheckedSafe.boundedSafe_of_checkedCode`). What is missing is a
