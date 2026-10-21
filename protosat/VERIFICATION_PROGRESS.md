@@ -1494,7 +1494,13 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   `AgreesBaseComplete` first reported as `every_realized_commit_is_unexcused`, and `AuthSelectors.lean`
   is the witness model that forced it: one session claims and commits tag 0, then commits the
   unclaimed tag 1, so reaching the violation requires performing a matched commit first.
-  *Agreement completeness is now unconditional.* `AgreesBaseComplete.encoding_complete_agreement`
+  *Agreement completeness is now unconditional, and the correspondence is two-sided.*
+  `AgreesBaseComplete.encoding_correct_agreement` (line 2287) is the exactness theorem for the agreement
+  goal: `Satisfiable (encodeGoalsOfM P B [Goal.agreement] tripleOnly) <-> boundedAttackGoals
+  (Query.mk P B [Goal.agreement])` under `univClosed`, `authNameable` and `domainGap = false` - the
+  agreement analogue of `Sound.encoding_correct`, and the first time the objective's biconditional has
+  held for a non-secrecy goal. Its completeness half is
+  `AgreesBaseComplete.encoding_complete_agreement`
   (line 2249) takes only `authNameable`, `domainGap = false`, a `BoundedTrace` and an `AuthBreak`,
   and produces satisfiability - the earlier `hall` hypothesis (every committed triple unclaimed) is
   gone, replaced by `unclaimed_occurrence_of_authBreak` plus a selection-aware witness

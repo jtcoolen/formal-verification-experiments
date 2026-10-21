@@ -21,8 +21,8 @@ The repository has two definitions of "this trace breaks non-injective agreement
   that occurs nowhere among the claimed triples. **Unordered**, and it compares only the triple - the
   actor and the position are not in `ProtSat.AuthInst` at all. `ProtSat.Query.Violation
   P Goal.agreement` is this one, so it is the target the CNF route is measured against.
-* `ProtSat.Reference.authBreak` (`ProtSat/Reference.lean:565): `¬ agrees (insts P Cs tr)`, where
-  `Reference.claimMatches` (`ProtSat/Reference.lean:532`) requires the same tag, the same data,
+* `ProtSat.Reference.authBreak` (`ProtSat/Reference.lean:607`): `¬ agrees (insts P Cs tr)`, where
+  `Reference.claimMatches` (`ProtSat/Reference.lean:564`) requires the same tag, the same data,
   the claimer to be the principal the committer believes it talked to, the committer to be the
   principal the claimer believes it talked to, and a **strictly earlier** position. **Ordered** and
   role-crossed. `ProtSat.Reference.Contract.goalViolation P Goal.agreement` is this one.
