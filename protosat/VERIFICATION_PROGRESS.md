@@ -1620,6 +1620,75 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   Audit clean over 4702 theorems; an earlier 31.9 s decide (a 675-clause subset search) was replaced
   by a structural transfer, cutting ~14 s off the file.
 
+* 2026-10-21 (ar) - the snapshot gap now has a guard, and both doors are closed. `ProtSat/SecrecyGuard.lean`
+  (556 lines, 54 theorems) defines `secrecyObligationVisible q`: a purely syntactic test asking whether
+  every `Action.secret e` performed by an instantiated session names a value `P.secrets` also names
+  (closed expression -> in `closedSecretTerms`; `Expr.var x` -> `Secret.store q x` present; anything
+  else uncovered). It reads the `Protocol`, not the encoding, and runs no search.
+  *Why it is not decorative.* `guard_fires_where_the_tool_was_wrong` conjoins three facts: the guard
+  fails on `SnapshotGap.q0`, `boundedSafeGoals q0` holds, and `Reference.Contract.boundedAttack q0`
+  holds - so it fires exactly where the routes disagreed, not somewhere adjacent. And
+  `guard_false_unsat_at_every_bound` proves the vacuity is bound-independent: with `P.secrets = []` and
+  any action-secret occurrence, `encode P B` is unsatisfiable at EVERY bound, so raising the step limit
+  can never make that evidence meaningful. Acceptance is justified too
+  (`mem_closedLeakLits_of_declared`, `mem_storeLeakLits_of_declared`), not just refusal.
+  *Both emitting routes consult it.* `GoalAnalyze.driverGate` gained a sixth test returning
+  `Result.unsupportedGoals [Goal.secrecy]` (`q0_driver_refused` decided), placed last so every existing
+  branch priority and theorem is literally unchanged. The second door was found by the guard's author
+  and closed here: `GoalCompose.composedSafetyTests` was a separate route to `Result.boundedSafe` that
+  did not read the guard, so the tool had one door that refused and one that answered.
+  `composedSafetyTestsGuarded` now gates `composedSafeEvidence`, and `no_composed_evidence_for_q0`
+  states the sharp form - **no certificate at all** produces a verdict for that query, which is what
+  distinguishes a refusal from an accident. Worth being precise about what this is: that theorem was
+  never unsound, and `boundedSafeGoals q0` is genuinely true. What the guard fixes is the *reading*,
+  because `boundedSafeGoals` is a statement about `Operational.runsLeaks`, which has no obligation
+  field. Honesty about the target, not a repair to the proof - the repair is the `vobl` block, and the
+  guard's header names its own retirement condition.
+  *The guard is coarse where the repo is thin, and that is reported, not hidden.* It refuses all eight
+  `Benchmarks` secrecy queries plus `Contract.Gates.secureQ` and `Explore.Gates.secureP`, because each
+  declares its secret only by `Action.secret` with `secrets := []` - the same vacuity. None of those
+  goes through the CNF driver, so no existing gate changed; the advice to their authors is one line:
+  add the matching `Secret` declaration. It passes two positive structural witnesses
+  (`coveredClosedP`, `coveredStoreP`), so it is not 'no action-secrets ever', and refuses
+  `uncoveredCompoundP`, so it is not 'nonempty secrets means pass'. Known blind spot, stated in the
+  header: the timing half of the gap (a declared store secret whose register is overwritten before
+  publication) still passes.
+
+* 2026-10-21 (as) - the third route divergence, proved in the opposite direction:
+  `ProtSat/CredentialGap.lean` (678 lines, 95 declarations) shows the CNF route reporting an ATTACK
+  that the repaired semantics forbids. `leakP` is one role `[Action.send 0 (Expr.privk 1)]`, one
+  session playing agent 0 against peer 1, `secrets := [Secret.closed (Expr.privk 1)]`, nothing
+  compromised, one event. The old semantics lets a session publish any private key because
+  `Expr.eval (privk a)` succeeds for every `a` and `rSend` asks only that (`eval_privk_any_store`,
+  `old_send_no_credential`), so `old_attack` holds and `cnf_reports_attack` - the analyser answers
+  `Verdict.attack`. The repaired semantics gates the step on credential authority (`gate_blocks`), so
+  `run_blocked` and `reference_safe` by exhaustion at 1, 2 and 3 events. Headline:
+  `credential_gap_is_real : boundedAttackGoals q /\ Reference.Contract.boundedSafe q`, with
+  `one_event_two_verdicts` showing the same single event enabled in one transition system and blocked
+  in the other.
+  *The refutation branch was checked first, as instructed, and it failed to hold:*
+  `validator_accepts_the_model : validate q = []` is decided, and `driver_not_permitted_to_refuse`
+  shows the driver may not answer `invalidModel`, `noGoals` or `unsupportedGoals` for this query. The
+  defect is reachable and the tool is entitled to answer. It answers wrongly.
+  *Non-vacuity of the repair:* `provP` is `leakP` played by the key's owner - the repaired route runs
+  it, leaks, and finds the attack (`provisioned_attacked`), with the old route agreeing there. So the
+  credential gate is not 'block everything'.
+  *Direction, stated loudly in the header:* this is a FALSE ATTACK, not a false SAFE. Annoying, not
+  dangerous - a false safe is what ships - and it must not be conflated with `SnapshotGap`, which
+  points the other way. The general negative mirrors the others:
+  `credential_authority_hypothesis_is_needed = not (forall q, boundedAttackGoals q ->
+  Reference.Contract.boundedAttack q)`, and the sharper `certificate_accepted_not_reference_attack`:
+  even the independent certificate checker is not a decision procedure for the repaired semantics.
+  *A cost the author refused to pay, and was right to:* kernel-replaying `DPLL` on the 659-clause
+  formula measured 58.7 s of `decide` and 89 s of type checking, so it is NOT in the file - `cnf_sat`
+  comes from `Correspondence.encoding_complete_gapFree` plus a classical case split at zero kernel
+  cost, and the VM answers SAT in 0.3 s.
+  *What this does not fix:* the encoding addition (gating `actGuard` on key availability) is separate
+  and not purely mechanical - `sat_violation` and `decCfgsFrom_runsLeaks` both read the step clauses,
+  so both directions need re-proving. And no driver-side refusal exists for this class yet; the
+  analogue of the secrecy guard would be a credential-visibility check on `Query`.
+  Audit clean over 4858 theorems; 53 decides totalling 2.8 s, slowest 755 ms.
+
 * Next - in priority order, with the cheap correct fix before the expensive complete one.
   (1) *Per-goal composition* (in progress): the mixed-goal defect is a composition error, not an
   encoding error, and it does not need a disjunctive encoding to fix. `formulaOfGoal q g` per goal,

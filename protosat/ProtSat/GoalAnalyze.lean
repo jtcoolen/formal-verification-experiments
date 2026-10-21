@@ -6,6 +6,7 @@ license information.
 import ProtSat.AgreesBase
 import ProtSat.AnalyzerEvidence
 import ProtSat.AgreementPredicates
+import ProtSat.SecrecyGuard
 
 /-!
 # ProtSat: a goal-indexed analyser with checked evidence
@@ -44,6 +45,11 @@ violation in an agreement-only query.
   total search and can be expensive.
 * `unknown solverFailure`: the agreement annotations fail the decidable nameability condition of
   the decoded-run theorem. The existing answer type has no dedicated reason for this condition.
+* `unsupportedGoals [Goal.secrecy]`: the **secrecy guard**. The query selects secrecy on a model that
+  declares a secret by `Action.secret` without `P.secrets` naming that value, so the violation clause of
+  the formula this driver would build has no literal for it (`ProtSat/SecrecyGuard.lean`). The refusal
+  happens before any formula is built: the driver declines to answer rather than answer a question the
+  encoding cannot state. See section 6.
 * `invalidModel`, `noGoals`, `boundsTooSmall`: the corresponding front-end checks failed.
 
 The mixed secrecy/agreement formula retains `GoalEncode`'s conjunction of violation demands.
@@ -63,12 +69,29 @@ agreement SAFETY verdict now lives (`GoalCompose.agree_boundedSafe`), and
 is attacked. Nothing here changes: `never_boundedSafe_of_agreement` remains true of this driver, and
 this driver remains the whole-list-formula route.
 
+## The secrecy guard
+
+`ProtSat/SnapshotGap.lean` proves that for a model whose only secrecy declaration is an
+`Action.secret`, `Encode.encode P B` contains the empty clause: `ProtSat.Unsat` is then a theorem with
+no solver in it, and the safety bridge would happily consume it. `secrecyObligationVisible` is the
+front-end test that says when that would be a verdict in name only; `driverGate` refuses such a query
+with `unsupportedGoals [Goal.secrecy]` before building anything. The guard is a stopgap: it is retired
+the day the obligation-variable block lands, and `SecrecyGuard.lean`'s header says so.
+
+What it costs: the refusal is at the front end, so a refused query gets no attack search either. That
+is deliberate - an `attack` answer from this route would be a leak of a *declared* secret, and the
+model asked about a secret that is not declared - but it is a cost, and `no_attack_of_not_visible`
+records exactly which answers are withheld. What it does not cost: every query the driver currently
+answers is unaffected (`SecrecyGuard.qg_visible`, `SecrecyGuard.qs_visible`), and the four regression
+gates below still decide to the same answers.
+
 ## Regression gates
 
 `authGap_driver_attack` checks the existing candidate model through the agreement driver.
 `qg_driver_safe` checks the guarded protocol's serialized certificate through the safety driver.
 `qs_driver_safe` checks the producer's zero-fuel example. `injQ_driver_refused` checks the
-injective-goal refusal. All computations used by these proofs are checked by the kernel.
+injective-goal refusal. `q0_driver_refused` checks the secrecy guard on the query `SnapshotGap`
+exhibited. All computations used by these proofs are checked by the kernel.
 -/
 
 namespace ProtSat.GoalAnalyze
@@ -76,6 +99,7 @@ namespace ProtSat.GoalAnalyze
 open ProtSat Term Protocol OneHot Bounded Attacker Encode Encoding Complete Query DPLL Sound
   Represent BoundedExec Certificate Analyzer AuthClauses GoalEncode Refute Serialize Resolution
 open ProtSat.Encoding
+open ProtSat.SecrecyGuard
 open Protocol
 
 /-! ### 1. The decidable side conditions the driver reads -/
@@ -365,11 +389,17 @@ theorem certOf_checked_of_secrecy {P : Protocol} {B : Bounds} {gs : List Goal} {
 
 /-! ### 4. The driver -/
 
-/-- The five Boolean tests the front end runs, in the order it runs them. -/
-def driverGateTests (q : Query) : Bool × Bool × Bool × Bool × Bool :=
+/-- **The six Boolean tests the front end runs, in the order it runs them.** The sixth is
+`ProtSat.SecrecyGuard.secrecyObligationVisible`: the secrecy violation clause of the formula the driver
+is about to build has no literal for a secret the model declares by `Action.secret` unless `P.secrets`
+also names that value. SnapshotGap proves what happens when it does not - `unsat_of_secrets_nil` hands
+the solver an empty clause, so UNSAT is free and a refutation of it is no evidence at all. The guard is
+what stops this driver from turning that free UNSAT into a security verdict. -/
+def driverGateTests (q : Query) : Bool × Bool × Bool × Bool × Bool × Bool :=
   (q.goals.elem Goal.agreementInj, (validate q).isEmpty, q.goals.isEmpty,
     univClosedBool (shapeOf q.protocol q.bounds) q.protocol,
-    q.goals.elem Goal.agreement && ! (authNameableBool (shapeOf q.protocol q.bounds) q.protocol))
+    q.goals.elem Goal.agreement && ! (authNameableBool (shapeOf q.protocol q.bounds) q.protocol),
+    secrecyObligationVisible q)
 
 /-- The driver's front end: 'some r' means the answer is 'r', with no formula built and no solver run.
 'Goal.agreementInj' has the highest-priority refusal, with no hypothesis, because its
@@ -377,12 +407,24 @@ def driverGateTests (q : Query) : Bool × Bool × Bool × Bool × Bool :=
 query that names it. -/
 def driverGate (q : Query) : Option Result :=
   match driverGateTests q with
-  | (true, _, _, _, _) => some (Result.unsupportedGoals (refusedGoals q))
-  | (false, false, _, _, _) => some (Result.invalidModel (validate q))
-  | (false, true, true, _, _) => some Result.noGoals
-  | (false, true, false, false, _) => some Result.boundsTooSmall
-  | (false, true, false, true, true) => some (Result.unknown UnknownReason.solverFailure)
-  | (false, true, false, true, false) => none
+  | (true, _, _, _, _, _) => some (Result.unsupportedGoals (refusedGoals q))
+  | (false, false, _, _, _, _) => some (Result.invalidModel (validate q))
+  | (false, true, true, _, _, _) => some Result.noGoals
+  | (false, true, false, false, _, _) => some Result.boundsTooSmall
+  | (false, true, false, true, true, _) => some (Result.unknown UnknownReason.solverFailure)
+  | (false, true, false, true, false, false) => some (Result.unsupportedGoals [Goal.secrecy])
+  | (false, true, false, true, false, true) => none
+
+/- **Why the sixth branch is 'unsupportedGoals' and not 'invalidModel'.** The answer type is fixed in
+'Query.lean', which this task may not edit, and 'Diagnostic' has no constructor that names this defect:
+the model is not malformed - 'validate' says so - it is *unanswerable by this route*. Inventing a
+diagnostic by reusing 'closedSecretNotClosed' or 'closedSecretUndefined' would misreport the reason, so
+the driver reports the goal it cannot answer instead: 'unsupportedGoals [Goal.secrecy]' means "the
+secrecy question this query asks is not expressible in the CNF of this model". The refused list is
+honest about which goal, and 'SecrecyGuard.uncoveredSecretActions' is the list of which action, for
+whichever front end wants to print it. The natural home of the sharper answer is a new constructor
+'Diagnostic.secretActionNotDeclared (q pc : Nat) (e : Expr)' in 'Query.lean'; that is a one-line change
+to a file this task does not own, and it is reported as such. -/
 
 /-- The front end refuses an 'agreementInj' query, and the refusal names the goals. -/
 theorem driverGate_agreementInj {q : Query} (h : q.goals.elem Goal.agreementInj = true) :
@@ -422,17 +464,31 @@ theorem driverGate_notNameable {q : Query} (h1 : q.goals.elem Goal.agreementInj 
   unfold driverGate driverGateTests
   rw [h1, h2, h3, h4, h5]
 
-/-- The front end lets the query through. -/
+/-- The front end lets the query through - and only when the secrecy guard is satisfied. -/
 theorem driverGate_passes {q : Query} (h1 : q.goals.elem Goal.agreementInj = false)
     (h2 : (validate q).isEmpty = true) (h3 : q.goals.isEmpty = false)
     (h4 : univClosedBool (shapeOf q.protocol q.bounds) q.protocol = true)
     (h5 : (q.goals.elem Goal.agreement && ! (authNameableBool (shapeOf q.protocol q.bounds) q.protocol))
-      = false) :
+      = false) (h6 : secrecyObligationVisible q = true) :
     driverGate q = none := by
   unfold driverGate driverGateTests
-  rw [h1, h2, h3, h4, h5]
+  rw [h1, h2, h3, h4, h5, h6]
 
-/-- Everything the front end guarantees when it lets the driver proceed. -/
+/-- **The guard's refusal, as a theorem.** A query that selects secrecy on a model whose action-declared
+secrets the violation clause cannot name is refused at the front end, with no formula built and no
+solver run. -/
+theorem driverGate_refused_of_not_visible {q : Query} (h1 : q.goals.elem Goal.agreementInj = false)
+    (h2 : (validate q).isEmpty = true) (h3 : q.goals.isEmpty = false)
+    (h4 : univClosedBool (shapeOf q.protocol q.bounds) q.protocol = true)
+    (h5 : (q.goals.elem Goal.agreement && ! (authNameableBool (shapeOf q.protocol q.bounds) q.protocol))
+      = false) (h6 : secrecyObligationVisible q = false) :
+    driverGate q = some (Result.unsupportedGoals [Goal.secrecy]) := by
+  unfold driverGate driverGateTests
+  rw [h1, h2, h3, h4, h5, h6]
+
+/-- Everything the front end guarantees when it lets the driver proceed. Unchanged by the guard: the
+guard adds a refusal, not a hypothesis the search needs, so every theorem downstream of this one is
+literally the theorem it was. -/
 theorem of_driverGate_none {q : Query} (h : driverGate q = none) :
     WellFormed q ∧ q.goals ≠ [] ∧ Goal.agreementInj ∉ q.goals
       ∧ univClosedBool (shapeOf q.protocol q.bounds) q.protocol = true
@@ -445,6 +501,27 @@ theorem of_driverGate_none {q : Query} (h : driverGate q = none) :
           cases h5 : (q.goals.elem Goal.agreement &&
             ! (authNameableBool (shapeOf q.protocol q.bounds) q.protocol)) <;>
             simp_all [driverGate, driverGateTests, WellFormed, Bool.and_eq_true]
+
+/-- **The guard is a front-end refusal, not a hypothesis the search could discharge.** A query whose
+secrecy obligations the CNF cannot name never reaches `driverSearch`: no branch of `driverGate` returns
+`none` when the sixth test is false. -/
+theorem not_visible_imp_driverGate_some {q : Query} (h : secrecyObligationVisible q = false) :
+    driverGate q ≠ none := by
+  intro hn
+  cases h1 : q.goals.elem Goal.agreementInj <;>
+    cases h2 : (validate q).isEmpty <;>
+      cases h3 : q.goals.isEmpty <;>
+        cases h4 : univClosedBool (shapeOf q.protocol q.bounds) q.protocol <;>
+          cases h5 : q.goals.elem Goal.agreement <;>
+            cases h6 : authNameableBool (shapeOf q.protocol q.bounds) q.protocol <;>
+              simp_all [driverGate, driverGateTests]
+
+/-- So a query the front end lets through has visible secrecy obligations. -/
+theorem visible_of_driverGate_none {q : Query} (h : driverGate q = none) :
+    secrecyObligationVisible q = true := by
+  cases h2 : secrecyObligationVisible q with
+  | false => exact absurd h (not_visible_imp_driverGate_some h2)
+  | true => rfl
 
 /-- The front end never produces an attack answer. -/
 theorem driverGate_not_attack {q : Query} {r : Result} (h : driverGate q = some r)
@@ -855,7 +932,97 @@ theorem unsat_of_encodingUnsat {q : Query} {fuel : Nat}
           rw [hr] at h
           cases hm : driverModelStep q cand <;> simp [hm] at h
 
-/-! ### 6. Executable regression gates -/
+/-! ### 6. The secrecy guard at the front end -/
+
+/-- **The safety route is not applicable to a query the guard refuses.** This is the theorem that makes
+the guard meaningful rather than decorative: not "the driver prints a different word", but "the driver
+cannot reach the bridge at all". No refutation, no checked code, no fuel and no candidate hint turns a
+refused query into a `boundedSafe` answer, because the front end returns before `driverSearch` runs. -/
+theorem no_boundedSafe_of_not_visible {q : Query} {fuel : Nat}
+    {cand : Option (List (BVar × Bool))} {code : Option (Nat × List Int)} {e : SafeEvidence}
+    (h : secrecyObligationVisible q = false) :
+    analyzeGoalsOfUsing q fuel cand code ≠ Result.boundedSafe e := by
+  intro hcon
+  unfold analyzeGoalsOfUsing at hcon
+  cases hg : driverGate q with
+  | none => exact absurd hg (not_visible_imp_driverGate_some h)
+  | some r => rw [hg] at hcon; exact driverGate_not_boundedSafe hg e hcon
+
+/-- The refusal withholds the attack answer too: the driver declines the query rather than answer part
+of it. Recorded as a theorem so the conservatism is visible, not hidden in a match arm. -/
+theorem no_attack_of_not_visible {q : Query} {fuel : Nat}
+    {cand : Option (List (BVar × Bool))} {code : Option (Nat × List Int)} {c : Certificate}
+    (h : secrecyObligationVisible q = false) :
+    analyzeGoalsOfUsing q fuel cand code ≠ Result.attack c := by
+  intro hcon
+  unfold analyzeGoalsOfUsing at hcon
+  cases hg : driverGate q with
+  | none => exact absurd hg (not_visible_imp_driverGate_some h)
+  | some r => rw [hg] at hcon; exact driverGate_not_attack hg c hcon
+
+/-- **The driver's contract, strengthened by the guard.** Every safety verdict this driver emits is
+true of the query (`boundedSafeGoals_of_boundedSafe`) *and* about a model whose declared secrets the
+CNF can name. Nothing previously sound became unsound; one more condition is now enforced. -/
+theorem boundedSafe_imp_visible {q : Query} {fuel : Nat}
+    {cand : Option (List (BVar × Bool))} {code : Option (Nat × List Int)} {e : SafeEvidence}
+    (h : analyzeGoalsOfUsing q fuel cand code = Result.boundedSafe e) :
+    secrecyObligationVisible q = true := by
+  cases h2 : secrecyObligationVisible q with
+  | true => rfl
+  | false => exact absurd h (no_boundedSafe_of_not_visible h2)
+
+/-- The same for an attack answer: whatever the driver reports as an attack, it reported about a model
+it could ask about. -/
+theorem attack_imp_visible {q : Query} {fuel : Nat}
+    {cand : Option (List (BVar × Bool))} {code : Option (Nat × List Int)} {c : Certificate}
+    (h : analyzeGoalsOfUsing q fuel cand code = Result.attack c) :
+    secrecyObligationVisible q = true := by
+  cases h2 : secrecyObligationVisible q with
+  | true => rfl
+  | false => exact absurd h (no_attack_of_not_visible h2)
+
+/-- The guard never fires on an agreement-only query, so the agreement half of the driver is untouched
+by construction - which is why `authGap_driver_attack` and `injQ_driver_refused` still decide. -/
+theorem visible_of_no_secrecy {q : Query} (h : Goal.secrecy ∉ q.goals) :
+    secrecyObligationVisible q = true := visible_of_no_secrecy_goal h
+
+set_option maxRecDepth 20000 in
+/-- **The guard fires on the query `SnapshotGap` exhibited.** `SnapshotGap.the_tool_says_safe` recorded
+that the contract's own `analyzeQuery` answers `encodingUnsat` for `SnapshotGap.q0` while the repaired
+contract proves a bounded attack on it. This driver now refuses the same query outright, before
+building a formula or running a solver: the wrong verdict is not merely unproved anywhere here, it is
+not an answer the tool can produce. -/
+theorem q0_driver_refused :
+    analyzeGoalsOf SnapshotGap.q0 0 = Result.unsupportedGoals [Goal.secrecy] := by
+  rw [analyzeGoalsOf, analyzeGoalsOfUsing,
+    driverGate_refused_of_not_visible (by decide) (by decide) (by decide)
+      ((univClosedBool_iff (shapeOf SnapshotGap.P0 SnapshotGap.B) SnapshotGap.P0).mpr SnapshotGap.hU0)
+      (by decide) ProtSat.SecrecyGuard.guard_false_q0]
+
+/-- The refusal is not a security claim: `securityResult` says so. -/
+theorem q0_not_security : securityResult (analyzeGoalsOf SnapshotGap.q0 0) = false := by
+  rw [q0_driver_refused]
+  rfl
+
+/-- No safety evidence and no attack certificate is reachable for the refused query, whatever the fuel
+and whatever hints are supplied: the refusal is at the front end, ahead of both searches. -/
+theorem q0_no_verdict (e : SafeEvidence) (c : Certificate)
+    (fuel : Nat) (cand : Option (List (BVar × Bool))) (code : Option (Nat × List Int)) :
+    analyzeGoalsOfUsing SnapshotGap.q0 fuel cand code ≠ Result.boundedSafe e ∧
+      analyzeGoalsOfUsing SnapshotGap.q0 fuel cand code ≠ Result.attack c :=
+  ⟨no_boundedSafe_of_not_visible ProtSat.SecrecyGuard.guard_false_q0,
+    no_attack_of_not_visible ProtSat.SecrecyGuard.guard_false_q0⟩
+
+/-- **The headline, at the driver.** The guard is false, the driver refuses, and the repaired contract
+still proves the leak on the same query: the guard fires exactly where the tool was wrong, and nowhere
+else that the tool was right. -/
+theorem guard_blocks_the_wrong_verdict :
+    analyzeGoalsOf SnapshotGap.q0 0 = Result.unsupportedGoals [Goal.secrecy] ∧
+      secrecyObligationVisible SnapshotGap.q0 = false ∧
+      Reference.Contract.boundedAttack SnapshotGap.q0 :=
+  ⟨q0_driver_refused, ProtSat.SecrecyGuard.guard_false_q0, SnapshotGap.attacked_for_secrecy0⟩
+
+/-! ### 7. Executable regression gates -/
 
 set_option maxRecDepth 100000 in
 set_option maxHeartbeats 2000000 in

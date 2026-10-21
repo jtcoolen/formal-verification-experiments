@@ -315,27 +315,61 @@ theorem boundedSafeGoals_of_composedSafetyTests {q : Query}
     ((secretsOKStoreBool_iff _ _).mp h.1.1.2)
     h.1.2 h.2
 
+/-- **The same door, guarded.** `GoalAnalyze.driverGate` refuses a secrecy query whose declared
+  secrets the CNF clause cannot name (`ProtSat/SecrecyGuard.lean`), so the composed route must refuse
+  it too - otherwise the tool has one door that says `unsupportedGoals` and another that emits a
+  verdict for the same query. Note this is a policy about what the DRIVER emits, not a repair to the
+  theorem above: `boundedSafeGoals_of_composedSafetyTests` is sound, and `boundedSafeGoals q0` is
+  genuinely true for the action-secret model. What is false is the reading - `boundedSafeGoals` is a
+  statement about `Operational`'s `runsLeaks`, which has no obligation field, so it does not mean
+  declared-value secrecy. Refusing to emit it is honesty about the target, not a fix to the proof.
+  The fix to the target is the `vobl` block named in `SnapshotGap`'s header. -/
+def composedSafetyTestsGuarded (q : Query) (ev : Goal -> Option (Nat × List Int)) : Bool :=
+  composedSafetyTests q ev && SecrecyGuard.secrecyObligationVisible q
+
+/-- A guarded pass is a pass, so the security conclusion is unchanged - only its availability narrows. -/
+theorem boundedSafeGoals_of_composedSafetyTestsGuarded {q : Query}
+    {ev : Goal -> Option (Nat × List Int)}
+    (h : composedSafetyTestsGuarded q ev = true) : boundedSafeGoals q := by
+  rw [composedSafetyTestsGuarded, Bool.and_eq_true] at h
+  exact boundedSafeGoals_of_composedSafetyTests ev h.1
+
 /-- The evidence record: a `SafeEvidence` whose query is the query it was asked about. -/
 def composedSafeEvidence (q : Query) (ev : Goal → Option (Nat × List Int)) :
     Option SafeEvidence :=
-  if h : composedSafetyTests q ev = true then
-    some (SafeEvidence.mk q (boundedSafeGoals_of_composedSafetyTests ev h))
+  if h : composedSafetyTestsGuarded q ev = true then
+    some (SafeEvidence.mk q (boundedSafeGoals_of_composedSafetyTestsGuarded h))
   else none
+
+/-- **The refusal is visible.** When the guard does not hold, no evidence at all produces a
+  `SafeEvidence` - the route declines rather than answering. -/
+theorem composedSafeEvidence_none_of_not_visible {q : Query}
+    {ev : Goal -> Option (Nat × List Int)} (h : SecrecyGuard.secrecyObligationVisible q = false) :
+    composedSafeEvidence q ev = none := by
+  have hfalse : ¬ (composedSafetyTestsGuarded q ev = true) := by
+    simp [composedSafetyTestsGuarded, h]
+  unfold composedSafeEvidence
+  exact dite_eq_right hfalse
 
 /-- The verdict, when it is `boundedSafe`, is true. -/
 theorem boundedSafeGoals_of_composedSafeEvidence {q : Query}
     {ev : Goal → Option (Nat × List Int)} {e : SafeEvidence}
     (h : composedSafeEvidence q ev = some e) : boundedSafeGoals q := by
-  by_cases hs : composedSafetyTests q ev = true
+  by_cases hs : composedSafetyTestsGuarded q ev = true
   · have : composedSafeEvidence q ev =
-        some (SafeEvidence.mk q (boundedSafeGoals_of_composedSafetyTests ev hs)) :=
+        some (SafeEvidence.mk q (boundedSafeGoals_of_composedSafetyTestsGuarded hs)) :=
       dite_eq_left hs
     rw [this] at h
     cases h
-    exact boundedSafeGoals_of_composedSafetyTests ev hs
+    exact boundedSafeGoals_of_composedSafetyTestsGuarded hs
   · rw [composedSafeEvidence, dite_eq_right hs] at h
     cases h
-
+/-- **No evidence at all produces a safety verdict for the action-secret model.** Not a missing
+  certificate: the route declines for every possible one, which is what distinguishes a refusal from
+  an accident. -/
+theorem no_composed_evidence_for_q0 (ev : Goal -> Option (Nat × List Int)) :
+    composedSafeEvidence SnapshotGap.q0 ev = none :=
+  composedSafeEvidence_none_of_not_visible SecrecyGuard.guard_false_q0
 /-- The composed safe-side verdict: evidence if the per-goal bridge accepts, otherwise the formula
 fact and nothing more. -/
 def composedSafeVerdict (q : Query) (ev : Goal → Option (Nat × List Int)) : Result :=
