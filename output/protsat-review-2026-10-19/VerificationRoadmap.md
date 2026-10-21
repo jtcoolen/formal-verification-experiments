@@ -289,3 +289,43 @@ hypothesis is dropped. Closing it needs three things, in order:
 Explicitly dropped as not worth the kernel cost, recorded so it is not retried: a two-principal NS
 model (850-variable CNF, kernel replay over 600 s), and the universe-as-parameter refinement (a 190x
 evaluator win that never materialised in the kernel).
+## Third addendum, 2026-10-21
+
+Two of the four gaps recorded on 2026-10-20 evening are closed, and two new ones were found by
+applying the project's own method to the repaired semantics. Inventory 4518 to 4857 theorems; 30/30
+gates green throughout.
+
+* Closed - mixed-goal composition (282da4e, GoalCompose.lean). Goals are composed at the level of
+  results, not clauses: attack from some goal satisfiable, safety from every goal refuted by checked
+  evidence. The old conjunction is now a proved defect: mixed_goal_conjunction_is_stricter gives
+  boundedAttackGoals mixQ and Unsat (formulaOfGoals mixQ) together, and
+  conjunction_refutation_is_not_safety refutes the invalid rule outright. First agreement safety
+  verdict on the CNF route (agree_boundedSafe), with its limitation stated: the kernel re-runs a
+  checked-core DPLL proof rather than consuming a linear checkCode artifact, because no proved-sound
+  producer refutes an agreement formula at affordable fuel.
+* Found and guarded - the snapshot gap (db19cde, 6b4f63e). Action.secret generates no clauses
+  (actionClauses_secret is rfl) and every secrecy literal reads the configuration at its own step
+  (violationLits_shapes), so a declared value whose register is later scrubbed is invisible to the CNF
+  route while Reference snapshots it into Cfg.oblig and detects the leak. snapshot_gap_is_real proves
+  boundedSafeGoals q0 together with Reference.Contract.boundedAttack q0 - a false SAFE, in the goal
+  the tool always claimed to support. SecrecyGuard.secrecyObligationVisible now makes both emitting
+  routes refuse such a query, and no_composed_evidence_for_q0 states the sharp form: no certificate at
+  all produces a verdict. The real repair (an obligation variable block) is blocked on a design
+  decision, recorded below.
+* Found - the credential gap, in the opposite direction (923cfa9). A session may publish any private
+  key under the old semantics (Expr.eval (privk a) succeeds for every a), so the CNF route reports an
+  ATTACK the repaired semantics forbids: credential_gap_is_real. The validator accepts the model
+  (validator_accepts_the_model), so this is a reachable wrong answer, not a refusal. A false attack is
+  annoying rather than dangerous, and the file says so to stop it being conflated with the snapshot
+  gap.
+* Divergence map (read-only audit, recorded in the progress log): of the seven repaired Reference
+  features, five require new encoding, one requires new semantics the old vocabulary cannot express
+  (ordered agreement - authBreak_carries_too_little), and one is mechanical (validator diagnostics).
+  The two freshness disciplines are incomparable, so there is no subset lemma to lean on when porting.
+  The reference route already has an ordered monitor, an injective monitor, snapshot secrecy, a total
+  enumerator and a witness re-checker; the CNF route has the proofs and the encoding.
+
+**Decision the maintainers owe, blocking the real fix:** Operational.Leak has no obligation field.
+Either the old semantics grows one (invalidating much of the correspondence development) or
+boundedSafeGoals gains an obligation-aware variant and the CNF bridge is restated against it. Until
+then the guard keeps the tool honest about a verdict it cannot mean.
