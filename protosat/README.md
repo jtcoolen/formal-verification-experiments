@@ -107,6 +107,24 @@ Regressions.Bounds.hwb_fails :
     ¬ (∀ tr Cs, BoundedTrace P B tr Cs -> WithinBounds P B (cfgAt Cs) (evAt tr))
 ```
 
+**And `Goal.secrecy` has a gap of the same kind, found the same way.** `Action.secret` is a real
+constructor of the protocol language, but the CNF encoding gives it no clauses at all
+(`SnapshotGap.actionClauses_secret` is `rfl`: the case falls into `actionClauses`' catch-all), and
+every secrecy violation literal reads the configuration *at the step it is indexed by
+(`violationLits_shapes`) - there is nowhere in the clause to put a persistent obligation. The repaired
+reference semantics instead snapshots the declared value into `Cfg.oblig` and still detects the leak
+after the register is overwritten. So a model that declares its secret by an action and then scrubs the
+register gets `boundedSafeGoals` from the CNF route while the reference route proves the value
+leaked: `SnapshotGap.snapshot_gap_is_real`, and `the_tool_says_safe` adds the analyser's own
+`encodingUnsat` answer to the same query. `two_semantics_one_run` is the sharpest form - the *same
+four events* are a permitted run under both semantics, non-leaking under the old one and leaking
+under the new. Worse, `unsat_of_secrets_nil` proves that for ANY protocol with `P.secrets = []` the
+generated formula contains the empty clause, so UNSAT is free and cannot even question the model
+(this includes the repair's own `Reference.Gates.snapshotP`). The non-vacuous version - a register-
+declared secret the CNF *can* name - is proved too, but its safety half is stated as a conditional:
+kernel-replaying `DPLL` on the 961-variable formula ran 43 minutes without finishing, while compiled
+runtime decides it in about a second. **Until an obligation variable block exists, a CNF `secrecy`
+verdict means register-named secrecy, not declared-value secrecy.**
 **`Goal.agreement` does not name one predicate in this repository, and the difference is proved, not
 rhetorical.** `Query.Violation P Goal.agreement` is `ProtSat.AuthBreak` - a commit whose
 `(tag, peer, value)` triple was never claimed, UNORDERED - while the reference route's
@@ -661,6 +679,7 @@ and the tenth is not enabled.
 | `ProtSat/AgreesBaseComplete.lean` | — | `assignOfSelected` extends the characteristic run assignment with one violating commit; `encoding_complete_agreement` and `encoding_correct_agreement` prove agreement-only completeness and correspondence under their explicit bounds and naming hypotheses. |
 | `ProtSat/AuthSelectors.lean` | — | Kernel-checked SAT witnesses with a matched commit left unselected and a later unmatched commit selected, for both matching policies. |
 | `ProtSat/GoalAnalyze.lean` | — | The goal-indexed driver, selected-goal attack/certificate soundness, conservative checked-code safety, refusal gates and concrete end-to-end regression gates. |
+| `ProtSat/SnapshotGap.lean` | 617 | the second live gap, proved: `Action.secret` is invisible to the CNF encoding, so a scrubbed-register secret is SAFE on the CNF route and ATTACK on the repaired one - same shape as `AuthGap`, in the goal the tool always claimed to support |
 | `ProtSat/Closure.lean` | 85 | narrative and instances for the universe being subterm-closed by construction; the lemma itself is `Complete.univSub_shapeOf` |
 | `ProtSat/Prune.lean` | 829 | stage 8 proved refinement: pruning idle and redundant deductions, `explorerAttack_equiv` both ways, and `secureQ_allLengthsSafe` decided by the kernel |
 | `ProtSat/Compress.lean` | 2629 | stage 9: the step bound derived from the model - `compress_secrecy`, `compress_agreement`, `compress_agreementInj`, and `safe_at_derived_bound_full`: safety at the derived bound is safety at every length, for every goal (straight-line roles only) |

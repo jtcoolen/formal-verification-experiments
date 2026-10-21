@@ -1527,6 +1527,57 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   searches without a budget.
   State: build green (1905 jobs), axiom audit clean over 4518 theorems, 30/30 CI gates green.
 
+* 2026-10-21 (ap) - **the second live unsoundness, and it is in the goal the tool always claimed to
+  support.** `ProtSat/SnapshotGap.lean` (617 lines, 76 theorems) proves that `Action.secret` is
+  invisible to the CNF route. The audit predicted it from reading `Clauses.lean`; this file turns it
+  into kernel evidence, and the reality is worse than the prediction in one respect.
+  *The mechanism.* `actionClauses_secret : Encode.actionClauses sh P i q c (Action.secret e) = [] :=
+  rfl` - the constructor falls into the catch-all. And `violationLits_shapes` proves every literal of
+  the secrecy violation clause is a `vkn` (attacker knows at step i) or a `vau` (register x holds u at
+  step i): both read the configuration AT the indexed step, so there is no place in the clause to put
+  a persistent obligation. The repaired `Reference` semantics has exactly that: `Cfg.oblig`,
+  `declareObl`, and `Gates.snapshot_obligation_kept` deciding that the obligation survives the
+  overwrite while `snapshot_leaks` decides the leak.
+  *The gap, decided.* Model `P0`: load `sk(0)` into a register, `Action.secret` it, overwrite the
+  register with `K(0,0)`, publish `sk(0)`; bounds 4 events. `snapshot_gap_is_real :`
+  `boundedSafeGoals q0 /\ Reference.Contract.boundedAttack q0`, with the safety side going through
+  `Correspondence.boundedSafe_of_unsat_gapFree` and every side condition decided, and the attack side
+  both constructed and re-derived from `Prune.attackFoundP q0 = true`. `the_tool_says_safe` adds the
+  analyser's own `analyzeQuery q0 = Result.encodingUnsat` to the same query, and
+  `reference_semantics_hypothesis_is_needed` mirrors `AuthGap.goal_hypothesis_is_needed`: there is no
+  theorem lifting a CNF safety verdict to the repaired contract's safety, because the universal
+  statement is false and this query witnesses it. The sharpest form is `two_semantics_one_run`: the
+  SAME four events are a permitted run under both semantics, non-leaking under the old one and
+  leaking under the new - the routes disagree about one execution, not about wording.
+  *The refinement that makes it worse.* `unsat_of_secrets_nil`: for ANY protocol and ANY bounds,
+  `P.secrets = []` puts the empty clause into `encode P B`, so UNSAT is free. A model that declares
+  its secret only by an action therefore gets a SAFE the encoding cannot even question - including
+  the repair's own `Reference.Gates.snapshotP` (`snapshot_violationLits_empty`, `snapshot_unsat`). This
+  is the same failure mode `AuthGap.empty_clause_in_encode` recorded for agreement, now in secrecy.
+  *Non-vacuity was done properly and it is where the budget broke.* The non-vacuous model `P = P0 +
+  [Secret.store 0 0]` has a register-declared secret the CNF CAN name: `violationLits_nonempty` (20
+  literals), `no_empty_clause`, the honest run reaching the secret action, and `Contract.boundedAttack
+  q` decided. But `boundedSafeGoals q` needs `Unsat (encode P B)` and the kernel replay of
+  `DPLL.dpll (encode P B) = none` (961 variables, 1261 clauses) ran **43 minutes** without finishing;
+  compiled runtime decides it in ~1 s. So the non-vacuous gap theorem is stated with the formula fact
+  as its single hypothesis - the `EndToEnd.lean` pattern for an unaffordable replay - and the reason is
+  structural: a snapshot gap needs at least four events (load, declare, scrub, publish, with publication
+  after the scrub), where AuthGap's non-vacuous witness fitted in one event and 410 variables.
+  Negative results recorded so nobody re-tries them: `unitRefutationCodeOf` returns none at fuel 1, 3
+  and 8 (unit propagation cannot refute this instance - the refutation needs case splits on the
+  schedule); greedy UNSAT-core minimisation ran 56 min and 39 min before being killed; z3 is the only
+  installed solver and emits no LRAT, so Mathlib reconstruction stays unavailable.
+  *What must change, and it is a decision before it is a proof.* The fix is an obligation variable
+  block (`vobl`) plus a third secrecy violation family plus re-proving `Complete.sat_violation` AND
+  `Complete.violation_leak` / `Sound.decCfgsFrom_runsLeaks` - the audit's note that the 78-lemma
+  decoding cone does not read `sat_violation` is true only for the run->assignment direction. But
+  `Operational.Leak` / `Bounded.runsLeaks` - what `Query.Violation .. Goal.secrecy` unfolds to - has
+  no obligation field at all, so either the old semantics grows one (invalidating the correspondence
+  development) or `boundedSafeGoals` gains an obligation-aware variant and the CNF bridge is restated
+  against it. Until that is decided, **a CNF `secrecy` verdict means register-named secrecy, not
+  declared-value secrecy**, and the README now says so.
+  Audit clean over 4596 theorems, only the three standard axioms; slowest decide 412 ms.
+
 * Next - in priority order, with the cheap correct fix before the expensive complete one.
   (1) *Per-goal composition* (in progress): the mixed-goal defect is a composition error, not an
   encoding error, and it does not need a disjunctive encoding to fix. `formulaOfGoal q g` per goal,
