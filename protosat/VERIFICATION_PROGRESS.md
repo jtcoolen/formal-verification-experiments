@@ -1578,6 +1578,48 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   declared-value secrecy**, and the README now says so.
   Audit clean over 4596 theorems, only the three standard axioms; slowest decide 412 ms.
 
+* 2026-10-21 (aq) - **the mixed-goal composition defect is fixed, and the first agreement safety
+  verdict exists on the CNF route.** `ProtSat/GoalCompose.lean` (975 lines, 105 theorems) closes the
+  gap by composing *results*, not clauses - no disjunctive encoding was invented.
+  *Why the conjunction was wrong.* `encodeGoalsOf P B [secrecy, agreement]` conjoins the two
+  violation groups, so its models are executions violating BOTH goals, while `boundedAttackGoals q`
+  asks for some selected goal violated by some permitted execution. The composed formula is strictly
+  stronger than the property, which means a refutation of it was being read as safety. That is now a
+  theorem, not an observation: `mixed_goal_conjunction_is_stricter` exhibits `mixQ` (two sessions,
+  one event: session 0 publishes the declared secret, session 1 commits an unclaimed triple) with
+  `boundedAttackGoals mixQ /\ Unsat (formulaOfGoals mixQ)`, and `conjunction_refutation_is_not_safety`
+  proves the negation of the invalid rule `forall q, Unsat (formulaOfGoals q) -> boundedSafeGoals q`.
+  The UNSAT side is proved by `no_run_does_both`, a case analysis over `Runs`/`Rel` for a one-event
+  trace - no solver is involved on either side.
+  *The correct composition.* `formulaOfGoal q g := encodeGoalsOfM q.protocol q.bounds [g] tripleOnly`
+  - one formula per goal, reusing the existing encoding. Attack composes existentially
+  (`boundedAttackGoals_of_exists_sat`), safety composes universally
+  (`boundedSafeGoals_of_forall_unsat`): under `univClosed`, `authNameable`, `SecretsOKStore` and
+  `domainGap = false`, if every selected goal's formula is unsatisfiable then `boundedSafeGoals q`.
+  It is the contrapositive of per-goal completeness, each goal discharged under the hypotheses its own
+  theorem needs - secrecy via `Complete.encoding_complete`, agreement via
+  `AgreesBaseComplete.encoding_complete_agreement`. No goal-exclusion hypothesis is needed, and the
+  reason is better than a guard: an unsupported goal's formula is `baseEncode`, which is satisfiable
+  (`satisfiable_baseEncode`, from the empty bounded trace), so `agreementInj` makes the universal
+  hypothesis *unmeetable* rather than making the verdict vacuous.
+  *The first agreement safety verdict.* `agree_boundedSafe : boundedSafeGoals agreeQ` on the honest
+  claim-then-commit model `Reference.Contract.Gates.authOrderP` - non-vacuous, the commits are
+  reached. Stated honestly in its doc comment: this is kernel-checked and solver-independent in the
+  sense that the kernel re-runs a checked-core `DPLL` proof and transfers it by clause inclusion, but
+  it is NOT the linear `checkCode` proof the secrecy route has with `AnalyzerEvidence.qgCode`. Neither
+  proved-sound producer refutes the agreement formula at affordable fuel (unit propagation returns
+  none at fuel 1; saturation probes were killed), so the `allGoalsRefuted` checkCode socket is proved
+  and waiting for a producer. That is a real gap, recorded rather than papered over.
+  *Goal-set laws, so the composition cannot depend on how goals were written down:*
+  `encodeGoalsOfM_perm`, `_cons_dup`, `_append_self`, `_agreementInj_cons` and the driver-level
+  mirrors, all following from `violationGroups_eq_of_elem` (the formula reads the list only through
+  two `elem` tests). Decided end-to-end gates close it out: `mix_agr_modelOK` and `mix_sec_modelOK`
+  re-check 490 and 486 clauses in the kernel (3.8 s, 4.0 s), `mix_composed_verdict_attack` decides the
+  composed verdict, and `mix_composed_cert_checked` shows the independent certificate checker accepts
+  the attack the composed route returned.
+  Audit clean over 4702 theorems; an earlier 31.9 s decide (a 675-clause subset search) was replaced
+  by a structural transfer, cutting ~14 s off the file.
+
 * Next - in priority order, with the cheap correct fix before the expensive complete one.
   (1) *Per-goal composition* (in progress): the mixed-goal defect is a composition error, not an
   encoding error, and it does not need a disjunctive encoding to fix. `formulaOfGoal q g` per goal,

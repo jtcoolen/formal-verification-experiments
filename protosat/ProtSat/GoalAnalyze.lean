@@ -50,6 +50,19 @@ The mixed secrecy/agreement formula retains `GoalEncode`'s conjunction of violat
 It can find an execution violating both goals, but it can miss executions violating only one.
 The driver never promotes a refutation of that stronger formula to a safety verdict.
 
+## Update: the mixed-goal gap is closed one level up, in `ProtSat/GoalCompose.lean`
+
+The three sentences above still describe THIS driver, which builds one formula per goal list and is
+therefore conservative about it. The composition defect they describe is fixed in
+`ProtSat/GoalCompose.lean`: `formulaOfGoal q g` asks each selected goal separately, and the verdicts
+are composed at the level of results rather than of clauses - `boundedAttackGoals_of_exists_sat` for
+the attack, `boundedSafeGoals_of_forall_unsat` for safety, the latter driven by
+`Serialize.checkCode` and `modelOK` evidence rather than by a solver answer. That is where an
+agreement SAFETY verdict now lives (`GoalCompose.agree_boundedSafe`), and
+`GoalCompose.mixQ` is the decided-on-proof model where the conjunction is refutable while the query
+is attacked. Nothing here changes: `never_boundedSafe_of_agreement` remains true of this driver, and
+this driver remains the whole-list-formula route.
+
 ## Regression gates
 
 `authGap_driver_attack` checks the existing candidate model through the agreement driver.

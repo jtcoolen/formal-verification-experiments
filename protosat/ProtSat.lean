@@ -47,3 +47,4 @@ import ProtSat.AgreesBaseComplete
 import ProtSat.AuthSelectors
 import ProtSat.GoalAnalyze
 import ProtSat.SnapshotGap
+import ProtSat.GoalCompose
