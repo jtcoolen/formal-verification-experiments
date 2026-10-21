@@ -49,3 +49,4 @@ import ProtSat.GoalAnalyze
 import ProtSat.SnapshotGap
 import ProtSat.GoalCompose
 import ProtSat.SecrecyGuard
+import ProtSat.CredentialGap

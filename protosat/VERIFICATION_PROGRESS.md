@@ -1687,7 +1687,7 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   and not purely mechanical - `sat_violation` and `decCfgsFrom_runsLeaks` both read the step clauses,
   so both directions need re-proving. And no driver-side refusal exists for this class yet; the
   analogue of the secrecy guard would be a credential-visibility check on `Query`.
-  Audit clean over 4858 theorems; 53 decides totalling 2.8 s, slowest 755 ms.
+  Audit clean over 4857 theorems; 53 decides totalling 2.8 s, slowest 755 ms.
 
 * Next - in priority order, with the cheap correct fix before the expensive complete one.
   (1) *Per-goal composition* (in progress): the mixed-goal defect is a composition error, not an
