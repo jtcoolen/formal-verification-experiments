@@ -925,7 +925,6 @@ theorem actionUsable_congr {P : Protocol} {C D : RCfg} (h : CfgEq C D) (q : Nat)
     ProtSat.Reference.actionUsable P C q act = ProtSat.Reference.actionUsable P D q act := by
   unfold ProtSat.Reference.actionUsable ProtSat.Reference.canUse
   refine List.all_congr rfl (fun e => ?_)
-  unfold ProtSat.Reference.requiredPrivKeys
   rw [availableKeys_congr h q]
 
 /-- The authentication annotation of a step depends only on the extensional configuration. -/
@@ -1100,20 +1099,27 @@ theorem stepOf_pres {P : Protocol} {C D : RCfg} {e : ProtSat.Reference.Ev} {C' :
 /-- Leaking is a property of the extensional configuration. -/
 theorem leaks_congr {P : Protocol} {C D : RCfg} (h : CfgEq C D) :
     ProtSat.Reference.leaks P C ↔ ProtSat.Reference.leaks P D := by
-  unfold ProtSat.Reference.leaks ProtSat.Reference.declaredSecrets
-  refine ⟨?_, ?_⟩
+  have hstore : ProtSat.Reference.storeSecretTerms P C =
+      ProtSat.Reference.storeSecretTerms P D := by
+    unfold ProtSat.Reference.storeSecretTerms
+    congr 1
+    funext s
+    cases s with
+    | closed _ => rfl
+    | store q x =>
+        change readVar x (ProtSat.Reference.storeOf C q) =
+          readVar x (ProtSat.Reference.storeOf D q)
+        rw [storeOf_congr h q]
+  have hdecl : ProtSat.Reference.declaredSecrets P C =
+      ProtSat.Reference.declaredSecrets P D := by
+    unfold ProtSat.Reference.declaredSecrets
+    rw [hstore, h.2.2.1]
+  unfold ProtSat.Reference.leaks
+  constructor
   · rintro ⟨s, hs, hk⟩
-    rw [List.mem_append] at hs
-    obtain h1 | h2 := hs
-    · exact ⟨s, List.mem_append_left _ h1, (h.2.2.2 s).mp hk⟩
-    · rw [← h.2.2.1]
-      exact ⟨s, List.mem_append_right _ h2, (h.2.2.2 s).mp hk⟩
+    exact ⟨s, hdecl ▸ hs, (h.2.2.2 s).mp hk⟩
   · rintro ⟨s, hs, hk⟩
-    rw [List.mem_append] at hs
-    obtain h1 | h2 := hs
-    · exact ⟨s, List.mem_append_left _ h1, (h.2.2.2 s).mpr hk⟩
-    · rw [h.2.2.1]
-      exact ⟨s, List.mem_append_right _ h2, (h.2.2.2 s).mpr hk⟩
+    exact ⟨s, hdecl.symm ▸ hs, (h.2.2.2 s).mpr hk⟩
 
 /-- Being inside the public bounds is a property of the extensional configuration. -/
 theorem inBounds_congr {P : Protocol} {B : Bounded.Bounds} {C D : RCfg} (h : CfgEq C D) :
@@ -1829,11 +1835,10 @@ theorem key_congr {a b : Inst} (h : instRec a = instRec b) :
     ProtSat.Reference.key a = ProtSat.Reference.key b := by
   have h1 : a.isCommit = b.isCommit := congrArg InstRec.isCommit h
   have h2 : a.tag = b.tag := congrArg InstRec.tag h
-  have h3 : a.role = b.role := congrArg InstRec.role h
   have h4 : a.self = b.self := congrArg InstRec.self h
   have h5 : a.peer = b.peer := congrArg InstRec.peer h
   have h6 : a.data = b.data := congrArg InstRec.data h
-  simp [ProtSat.Reference.key, h1, h2, h3, h4, h5, h6]
+  simp [ProtSat.Reference.key, h1, h2, h4, h5, h6]
 
 theorem claimMatches_congr {a b a' b' : Inst}
     (h1 : instRec a = instRec a') (h2 : instRec b = instRec b')

@@ -240,6 +240,22 @@ Also new: `ProtSat/ExprDomain.lean` gives each expression its own finite domain 
 
 ## Build and run
 
+The reference semantics checks both forms of secrecy declaration: `Secret.store q x` protects the
+current value of the named register, while an action-level `secret e` creates a snapshot that persists
+after registers change. `Reference.leaks_of_storeSecret` states the register guarantee. Its credential
+check covers private and shared keys; receiving a hash or ciphertext grants no access to hidden keys,
+and explicit decryption can still transport a key. The injective-agreement consumption budget is
+shared by all commits that can match the same claim (`Reference.key_eq_of_shared_claim`), including
+commits in different roles. The regression gates in `Reference` and `Contract` cover these cases.
+
+Agreement violation selectors imply that the selected commit happened; performed commits may remain
+unselected. `AgreesBaseComplete.encoding_correct_agreement` proves the resulting equivalence between
+the agreement-only CNF and `Query`'s **unordered** agreement goal, assuming `univClosed`, nameable
+annotations and a gap-free expression domain. `AuthSelectors` checks a run with both a matched commit
+and an unmatched commit. The ordered reference monitor and mixed-goal conjunction are separate;
+this theorem does not identify them with the unordered goal. `GoalAnalyze` remains conservative about
+safety verdicts and proves its selected-goal attack and checked-code safety conclusions explicitly.
+
 ```sh
 cd protosat
 export ELAN_HOME=$PWD/../.elan          # or install elan system-wide
@@ -641,7 +657,10 @@ and the tenth is not enabled.
 | `ProtSat/AgreesBase.lean` | 2789 | agreement SOUND: the decoding cone restated over the ten semantic groups (`rel_agrees_b` and 68 siblings), the claim/commit reflection bridge proved (`commitsReflect_of_sat`, `claimsReflect_of_sat`), `DecodedRun` discharged, and a kernel-decided instance on the AuthGap model |
 | `ProtSat/Sound.lean` | 384 | the soundness half: decoded values are universe values, `decoding_runsInUniverse`, and the two-sided `encoding_correct` |
 | `ProtSat/AuthGap.lean` | 524 | the authentication gap as a theorem: safe for secrecy and attacked for agreement at one protocol and one bound (`auth_gap_is_real`, `goal_hypothesis_is_needed`), plus a second model where the secret is real (`auth_gap_is_real_nonvacuous`) |
-| `ProtSat/AuthClauses.lean` | 593 | **prototype, not wired into the analyser**: agreement as CNF clauses - claim/commit read from the model as data, goal-indexed `encodeGoals`, the negative result that the naive conjunction cannot work (`authEncode_not_sat`), and three `Diff` gates cross-checking the CNF verdict against the enumeration verdict. Neither SOUND nor COMPLETE is proved |
+| `ProtSat/AuthClauses.lean` | — | Agreement selectors and clause groups; `sat_authSelectorClauses` states selection implies occurrence. The unordered agreement-only soundness and completeness proofs are in `AgreesBase` and `AgreesBaseComplete`; ordered-reference integration and mixed-goal completeness remain separate. |
+| `ProtSat/AgreesBaseComplete.lean` | — | `assignOfSelected` extends the characteristic run assignment with one violating commit; `encoding_complete_agreement` and `encoding_correct_agreement` prove agreement-only completeness and correspondence under their explicit bounds and naming hypotheses. |
+| `ProtSat/AuthSelectors.lean` | — | Kernel-checked SAT witnesses with a matched commit left unselected and a later unmatched commit selected, for both matching policies. |
+| `ProtSat/GoalAnalyze.lean` | — | The goal-indexed driver, selected-goal attack/certificate soundness, conservative checked-code safety, refusal gates and concrete end-to-end regression gates. |
 | `ProtSat/Closure.lean` | 85 | narrative and instances for the universe being subterm-closed by construction; the lemma itself is `Complete.univSub_shapeOf` |
 | `ProtSat/Prune.lean` | 829 | stage 8 proved refinement: pruning idle and redundant deductions, `explorerAttack_equiv` both ways, and `secureQ_allLengthsSafe` decided by the kernel |
 | `ProtSat/Compress.lean` | 2629 | stage 9: the step bound derived from the model - `compress_secrecy`, `compress_agreement`, `compress_agreementInj`, and `safe_at_derived_bound_full`: safety at the derived bound is safety at every length, for every goal (straight-line roles only) |

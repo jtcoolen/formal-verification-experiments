@@ -13,122 +13,61 @@ import ProtSat.Contract
 import ProtSat.AuthGap
 
 /-!
-# ProtSat/AuthClauses.lean - agreement in the CNF (prototype, roadmap stage 4)
+# Agreement violation clauses
 
-## What this file is
+`Encode.encode` asks only whether a declared secret leaks. This module supplies a separate
+agreement violation group and combines it with the ten semantic groups in `agreementEncode`.
+`encodeGoals` chooses the violation groups from a goal list; selecting secrecy alone reproduces
+`Encode.encode` definitionally.
 
-`ProtSat.Encode.violationLits` (ProtSat/Clauses.lean:679) is built only from `closedLeakLits` and
-`storeLeakLits`, so the generated formula demands a **secrecy** violation and nothing else.
-`ProtSat.AuthGap` proves the consequence: the same protocol and bounds are reported safe by the CNF
-route (`safe_for_secrecy2`) while an agreement attack is permitted by the reference semantics
-(`attacked_for_agreement2`), and `goal_hypothesis_is_needed` proves the goal hypothesis cannot be
-dropped. This file is the prototype that closes that gap: it adds the agreement violation demand to
-the formula, as clauses, without touching a single existing line.
+## Occurrences and selectors
 
-## What was built
+`authPositions P` reads each claim and commit directly from the instantiated protocol. `authOccs`
+names its possible occurrences, one per bounded step, when the peer and data annotations are closed
+constants in the message universe. `authOccLits` gives the four literals stating that an occurrence
+happens: the session acts, its program counter names that action, and its two annotations have the
+recorded values.
 
-* `authPositions P` - the claim and commit annotations the model itself declares: every session,
-  every program counter whose action is `Action.claim` or `Action.commit`, with its tag, its peer
-  expression and its data expression. **This is the claim/commit specification, and it is data.**
-  It is not a proof hypothesis and not an extra argument the caller has to get right: it is read out
-  of the same `Protocol` record the reference monitor reads (`ProtSat.Reference.insts`), so the CNF
-  and the monitor are asked about the same events by construction. The design choice the task asked
-  about: no new specification object was invented, because `Protocol` already carries one.
-* `authOccs sh P commit` - the *named occurrences* of those events: one per position, per step,
-  with the value numbers its peer and data expressions denote. A position is enumerated only when
-  its annotations are closed constants naming universe messages (`authNameable`); see "the
-  restriction" below.
-* `authOccLits` - the four literals that say "this occurrence happens": the session acts, its
-  program counter is the position's, and the two annotation expressions evaluate to the two values.
-* `authViolationLits` - the demand: **some commit occurrence happens**.
-* `authExcuseClauses m` - for every commit occurrence `c` and every claim occurrence `k` that could
-  excuse it, the clause "not both `c` is the violation and `k` happens". With `m := orderAware` the
-  excuse relation is `ProtSat.Reference.claimMatches` (same tag, same data, strictly earlier, the
-  claimer is the principal the committer believes it talked to and vice versa); with
-  `m := tripleOnly` it is the older, unordered, triple-only membership test of `ProtSat.AuthBreak`.
-  Both are provided because the two monitors the project uses disagree, and the difference is a
-  property of the clauses rather than of a proof.
-* `agreementEncode P B m` - `baseEncode P B` (the ten semantic groups, unchanged) conjoined with the
-  agreement demand. `authEncode P B m` - `encode P B` conjoined with it, exactly as the task asked.
+`authOccVar` is a selector for a violating commit. `authAuxClauses` requires a selected occurrence to
+happen; it does not require every performed commit to be selected. `authViolationLits` demands some
+selected commit, and `authExcuseClauses` prevents a selected commit from having a performed matching
+claim. Thus a matched commit may coexist with another, selected unmatched commit. The implication
+is characterized by `sat_authSelectorClauses`; `ProtSat/AuthSelectors.lean` checks the permanent
+claim-0, commit-0, commit-1 regression with both commits present and only the last selected.
 
-## The obstruction found, and why it is the interesting result
+## The two matching relations
 
-`authEncode P B := encode P B ++ <new clauses>` **cannot work on the AuthGap model**, and the reason
-is not the new clauses: it is the old ones. `Authentication.P` declares no secret, so
-`violationLits` is the empty list and `encode P B` contains the empty clause
-(`AuthGap.empty_clause_in_encode`). A conjunction with an unsatisfiable formula is unsatisfiable, so
-the agreement clauses could never be satisfied no matter how good they are. `authEncode_empty_clause`
-and `authEncode_not_sat` state this for the model the task named. The fix is not to weaken the
-secrecy clause but to make the violation group **goal-indexed**: the formula must demand the
-violation of the goal the query selected, not always secrecy. That is what `encodeGoals` below
-prototypes, and it is the first item of the integration list at the end of this header.
+* `Matching.tripleOnly` matches any claim with the same tag, peer and value, wherever it occurs.
+  It corresponds to the older `ProtSat.AuthBreak`, which is `Query.Violation P Goal.agreement`.
+* `Matching.orderAware` requires a strictly earlier claim with matching tag and value, made by
+  the intended peer and addressed to the committer. It mirrors `Reference.claimMatches`.
 
-## The restriction, stated honestly
+The default remains `orderAware`. The correspondence to the query's unordered agreement predicate
+uses the explicit `tripleOnly` argument. The two monitors differ, so the ordered clauses do not
+inherit a correspondence to the repaired reference execution semantics from the unordered theorem.
 
-The prototype enumerates only authentication positions whose peer and data expressions are *closed
-constants* (`Expr.constVal` names them) whose values the universe contains. The hypothesis
-`authNameable (shapeOf P B) P` says that is every position of the model. It is a condition on the
-model and the bounds - decidable, and satisfied by every agreement model in this repository
-(`Authentication.P`, `AuthGap.P2`, `Contract.Gates.authOrderP`/`authSwappedP`) - and it is what
-lets a single pair of value literals name an authentication event. Dropping it means the data of a
-claim is whatever a store slot happens to hold, so the occurrence cannot be pinned to a fixed value
-index: the clauses must keep the `vxe` group literal for the data and let the solver choose it, and
-the excuse clauses must then be generated for *every* value index rather than one. That is a bigger
-formula, not a different idea; the machinery is already in `authOccLits`, which keeps all four
-literals whether or not they are pinned.
+## Proved correspondence and its scope
 
-## What is NOT proved in this run
+`ProtSat/AgreesBase.lean` proves that a model of the agreement-only, triple-only formula decodes to a
+bounded agreement attack, assuming `univClosed (shapeOf P B) P` and `authNameable (shapeOf P B) P`.
+`ProtSat/AgreesBaseComplete.lean` proves the converse by extending the characteristic assignment
+with a selector for one unmatched commit. Its `encoding_correct_agreement` states the equivalence
+with `boundedAttackGoals (Query.mk P B [Goal.agreement])`, assuming those two conditions and
+`domainGap P B = false`. The latter condition ensures the bounded run is representable by the
+expression value domains. Completeness does not require every commit to be unmatched.
 
-No direction of the correspondence is proved here, and the reason is structural rather than a matter
-of effort: every decoding lemma of `ProtSat.Encoding` (`agrees_decRun`, `decRun_trace`,
-`decodePc_of_true`, `kn_sound`) takes its hypothesis as `Sat a (encode P B)` - the *whole*
-formula, secrecy violation clause included. A satisfying assignment of the agreement-only encoding
-does not provide one, and on the AuthGap model none exists. So:
+`authNameable` is a restriction: this encoding names only authentication annotations that are closed
+constants whose values occur in the universe. Store-dependent annotations need an expanded
+occurrence enumeration. There is no ordered-monitor completeness theorem here.
 
-* **SOUND** (a model of the agreement encoding decodes to a run whose agreement monitor fails) needs
-  either the goal-indexed `encode` of item 1 below, or the group-level re-statement of the
-  `Encoding` decoding lemmas. The pieces that are missing and are not deep: the two trace-index
-  lemmas (`(decEvsFrom P B a n).get i = decEv \u27e8...\u27e9 (steps - n + i)` and its twin for
-  `decCfgsFrom`), a lemma recovering `decCode P B a i = 1 + q` from the decoded event being
-  `Ev.act q m d`, and the observation that under `authNameable` the annotations of a claim are
-  closed constants, so `xe_konst` plus `decXe_some_vxe` turn "the decoded run has a claim of
-  triple t" into "all four literals of that claim occurrence are true" - which is what the excuse
-  clause contradicts.
-* **COMPLETE** (a permitted agreement attack yields a model) is the direction that makes a UNSAT
-  verdict mean safety, and it is the cheaper one to state: the `Complete` group lemmas are already
-  phrased per group over `RunOK`, so what is missing is `RunOK`-driven lemmas that the
-  `assignOf` assignment makes the selector auxiliary true exactly when the run has that commit,
-  plus the two trace-index lemmas above.
-* What *is* proved instead is the pair of kernel-decided gates: an explicit verified model of the
-  agreement encoding on the AuthGap attack model (`gate_agreement_attack_found`), and an explicit
-  kernel refutation of the agreement encoding on a model where agreement holds (`gate_order_unsat`,
-  via the subformula `orderCore`), each cross-checked against the reference enumeration in the
-  `Diff` namespace.
+## Combining goals
 
-## What is still needed to make this the DEFAULT encoding
-
-1. **Goal-indexed `violationLits`.** Replace `Encode.violationLits sh P` by
-   `Encode.violationLits sh P gs`, where `gs : List Goal` is the query's selected goals, with
-   `violationLits sh P [secrecy]` reducing definitionally to today's list and
-   `violationLits sh P []` reducing to `[]` (no demand clause at all, rather than an empty one).
-   `encodeGoals` below is the prototype of that step and proves the equation that makes the
-   regression gate hold: `encodeGoals P B [secrecy] = encode P B`.
-2. **The `Complete`/`Encoding` re-indexing.** `Complete.sat_violation` and
-   `Encoding.violationLits_cases`/`violation_leak` are stated for the secrecy literals only. Each
-   needs a twin for the agreement literals (`authViolationLits_cases`, `violation_authBreak`), and
-   `Encoding.encoding_sound` needs to return the goal it found a violation of rather than `Or.inl`.
-3. **The honest-execution hypothesis.** The soundness direction needs the decoded run to be a run of
-   the semantics the monitor is defined over. For `orderAware` that is `ProtSat.Reference.Rel`, which
-   differs from `ProtSat.Rel` in freshness history, credential provisioning and the blocking of
-   malformed annotations; the bridge is a hypothesis on today's models ("the decoded run is also a
-   reference run") and a theorem once the reference semantics replaces the old one.
-4. **Variable allocation.** The new auxiliaries live above `Encode.nVarsAll sh`. Making the encoding
-   default means moving `bsAuth` into `Clauses` next to `bsAu`/`szPb` so that
-   `Complete.assignOf` knows the block, and extending `Complete.WithinBounds` with the condition
-   that makes an authentication occurrence nameable (`authNameable`).
-5. **The contract socket.** `Query.encodedGoals` is `[Goal.secrecy]`; it grows to
-   `[secrecy, agreement]` when (1) lands, and `Query.analyzeQuery` stops refusing agreement
-   queries. Until then this file is additive and nothing that imports it changes its answer.
+`authEncode` conjoins the secrecy formula with the agreement demand, and selecting both goals in
+`encodeGoals` does the same. This requires both violations in one execution; it does not encode the
+query predicate that some selected goal is violated. On the AuthGap model, secrecy has no violation
+candidate and contributes the empty clause, so the conjunction is unsatisfiable regardless of its
+agreement clauses (`authEncode_not_sat`). The agreement-only formula avoids that obstruction.
+These definitions do not by themselves extend `Query.encodedGoals` or its public analyzer support.
 -/
 
 namespace ProtSat.AuthClauses
@@ -249,7 +188,7 @@ def bsAuth (sh : Shape) : Nat := nVarsAll sh
 /-- The auxiliary variable of agreement occurrence number `k`. -/
 def vauth (sh : Shape) (k : Nat) : BVar := bsAuth sh + k
 
-/-- The auxiliary variable defining the conjunction "commit occurrence `o` happens". -/
+/-- The selector naming commit occurrence `o` as the agreement violation. -/
 def authOccVar (sh : Shape) (P : Protocol) (o : AuthOcc) : BVar :=
   vauth sh (ixOf o (authOccs sh P true))
 
@@ -267,13 +206,38 @@ def claimExcuses (m : Matching) (sh : Shape) (P : Protocol) (c k : AuthOcc) : Bo
         k.step < c.step && sessSelf P k.pos.sess == agentAt sh c.peerVal &&
           agentAt sh k.peerVal == sessSelf P c.pos.sess
 
-/-- The Tseitin definitions of the commit-occurrence conjunctions: one `andNDef` block per commit
-occurrence, exactly like `ProtSat.Encode.leakAuxClauses` does for the leak conjunctions. -/
-def authAuxClauses (sh : Shape) (P : Protocol) : List (List Lit) :=
-  (authOccs sh P true).flatMap fun o => (andNDef (authOccVar sh P o) (authOccLits sh P o)).clauses
+/-- Selecting a candidate requires every literal of its occurrence. The reverse implication is
+deliberately absent: a performed, matched commit must be allowed to remain unselected. -/
+def authSelectorClauses (selector : BVar) (occurrence : List Lit) : CNF :=
+  cnfOf (occurrence.map fun l => [neg selector, l])
 
-/-- **The agreement violation literals**: one per way a commit can happen at all. The clause built
-from them demands that some commit occurrence is present in the run. -/
+/-- The selector clauses express precisely the implication from selection to occurrence. -/
+theorem sat_authSelectorClauses {a : Assignment} {selector : BVar} {occurrence : List Lit} :
+    Sat a (authSelectorClauses selector occurrence) ↔
+      (a selector = true → ∀ l ∈ occurrence, l.eval a = true) := by
+  constructor
+  · intro h hs l hl
+    have hc := h [neg selector, l] (List.mem_map.mpr ⟨l, hl, rfl⟩)
+    simpa [Clause.eval, neg_eval, hs] using hc
+  · intro h cl hcl
+    obtain ⟨l, hl, rfl⟩ := List.mem_map.mp hcl
+    by_cases hs : a selector = true
+    · simp [Clause.eval, neg_eval, hs, h hs l hl]
+    · simp [Clause.eval, neg_eval, hs]
+
+/-- An unselected candidate places no restriction on whether its occurrence happens. -/
+theorem sat_authSelectorClauses_of_false {a : Assignment} {selector : BVar}
+    {occurrence : List Lit} (hs : a selector = false) :
+    Sat a (authSelectorClauses selector occurrence) :=
+  sat_authSelectorClauses.mpr (by simp [hs])
+
+/-- One implication block per candidate: selecting the candidate requires the commit to happen. -/
+def authAuxClauses (sh : Shape) (P : Protocol) : List (List Lit) :=
+  (authOccs sh P true).flatMap fun o =>
+    (authSelectorClauses (authOccVar sh P o) (authOccLits sh P o)).clauses
+
+/-- **The agreement violation literals**: one selector per candidate commit occurrence. The clause
+built from them demands that some occurrence is selected as the violation. -/
 def authViolationLits (sh : Shape) (P : Protocol) : List Lit :=
   (authOccs sh P true).map fun o => pos (authOccVar sh P o)
 

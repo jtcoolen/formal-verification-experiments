@@ -614,7 +614,7 @@ def describe : Result -> String
         " selected): the encoding cannot represent their violation"
   | Result.boundsTooSmall => "BOUNDS TOO SMALL (univClosed fails: raise Bounds.rounds)"
   | Result.encodingUnsat =>
-      "ENCODING UNSAT (no model of the generated CNF: no bounded secret leak)"
+      "ENCODING UNSAT (the generated CNF has no satisfying assignment)"
   | Result.attack c => "ATTACK (" ++ toString c.steps.length ++ " events); certificate accepted"
   | Result.unknown UnknownReason.resourceExhausted => "UNKNOWN (resource exhausted)"
   | Result.unknown UnknownReason.solverFailure => "UNKNOWN (solver failure)"

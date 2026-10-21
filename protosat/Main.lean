@@ -32,7 +32,7 @@ def showVerdict (P : Protocol) (v : Verdict) : String :=
   match v with
   | Verdict.boundsTooSmall => "BOUNDS TOO SMALL (univClosed fails: raise Bounds.rounds)"
   | Verdict.encodingUnsat =>
-      "ENCODING UNSAT (no model of the generated CNF: no bounded *secret leak*; see ProtSat.Query)"
+      "ENCODING UNSAT (the generated CNF has no satisfying assignment; see ProtSat.Query)"
   | Verdict.attack c =>
       "ATTACK (" ++ toString c.steps.length ++ " events); certificate accepted: "
         ++ toString (checkCertificate P c)

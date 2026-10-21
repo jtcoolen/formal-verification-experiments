@@ -5,6 +5,34 @@ This file tracks progress against
 It is a running log, not a marketing document: every claim below names the Lean declaration that
 backs it, and every gap names the witness that shows it is a gap.
 
+## Review corrections, 21 Oct 2026
+
+The reference semantics now honors `Secret.store` declarations (`storeSecretTerms`,
+`leaks_of_storeSecret`) alongside persistent action-level snapshots. Credentials include shared-key
+constants; `keysIn` exposes pair projections while hashes and ciphertexts remain opaque. Injective
+agreement shares a claim-consumption budget across roles (`key_eq_of_shared_claim`). Permanent
+`Reference.ReviewGates` and `Reference.Contract.ReviewGates` witnesses cover the corrected behavior,
+including ATTACK verdicts for the formerly false-safe register leak and cross-role replay.
+
+Agreement auxiliary variables are violation selectors with one-way occurrence implications
+(`AuthClauses.sat_authSelectorClauses`). `AuthSelectors.witness_satisfies` checks a run containing
+both a matched commit and an unmatched commit for both matching policies. The existing completeness
+construction is extended with `AgreesBaseComplete.assignOfSelected`:
+`encoding_complete_agreement` needs one unclaimed commit rather than the old all-unclaimed condition,
+and `encoding_correct_agreement` proves the agreement-only SAT/attack equivalence under explicit
+universe, annotation-nameability and domain hypotheses. Its goal is the unordered `Query` monitor;
+the ordered reference monitor and mixed-goal completeness are separate.
+
+`GoalAnalyze`'s driver proofs now elaborate and export selected-goal attack/certificate soundness,
+checked-code safety and its refusal policies. The repaired modules are imported by `ProtSat.lean`,
+so the default build and namespace-wide axiom audit include them. UNSAT display text now states only
+that the generated formula has no satisfying assignment.
+
+Validation: `scripts/ci.sh` passed all 30 gates with zero failures. The default build completed
+1,905 jobs in 209 seconds (10 project modules re-elaborated), the demo ran in 6 seconds, and the
+axiom audit covered 4,518 imported theorems using only `propext`, `Classical.choice`, and `Quot.sound`.
+The source scans found no admitted proofs, compiler-only decision proofs, or user-declared axioms.
+
 ## Where the project actually stands (baseline, 19 Oct 2026)
 
 The build is green (1841 jobs), there are no `sorry`s and no user-declared axioms

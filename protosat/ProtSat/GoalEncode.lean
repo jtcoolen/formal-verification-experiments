@@ -73,7 +73,7 @@ supports. Retargeting `Query.Violation` (or adding a fourth `Goal`) is a change 
 | `boundedAttackGoals_of_sat_both` | SOUND for the two-goal query, unconditionally (the secrecy half feeds the old chain) |
 | `no_attack_without_goals`, `empty_goals_are_strictly_weaker` | what the empty goal list means, and that it is not a security answer |
 | `Diff.diff_*_goals` | the three `AuthClauses.Diff` differential gates, restated about `encodeGoalsOf` |
-| `exists_commit_candidate`, `authOccLits_true`, `authNoExcuse` | the agreement clauses do their job: demand satisfied, Tseitin definitions correct, no excusing claim complete - all with no `Sat a (encode P B)` |
+| `exists_commit_candidate`, `authOccLits_true`, `authNoExcuse` | the agreement clauses do their job: demand satisfied, selector implications correct, no excusing claim complete - all with no `Sat a (encode P B)` |
 | `boundedAttackGoals_of_sat_agreement` | **SOUND for the agreement goal**, modulo `DecodedRun` - which `ProtSat/AgreesBase.lean` now discharges (`decodedRun_of_sat_agreement`), making the soundness direction unconditional apart from two shape hypotheses |
 | `no_transport_from_base` | the obstruction: the bridge cannot be a one-line transport, because that transport is FALSE |
 | `decodedTrace_of_sat_encode`, `decodedTrace_of_sat_goals` | the trace half of `DecodedRun` for the old formula, and for any secrecy-selecting goal list |
@@ -513,7 +513,7 @@ theorem exists_commit_candidate {P : Protocol} {B : Bounds} {gs : List Goal} {m 
   obtain ⟨o, ho, rfl⟩ := hl
   exact ⟨o, ho, by simpa using hal⟩
 
-/-- **The Tseitin definitions do their job.** If a commit occurrence's auxiliary variable is true,
+/-- **The selector implications do their job.** If a commit occurrence's selector variable is true,
 all four literals that name the occurrence are true: the session acts, its program counter is the
 position's, and the two annotation expressions evaluate to the recorded messages. -/
 theorem authOccLits_true {P : Protocol} {B : Bounds} {gs : List Goal} {m : Matching}
@@ -523,11 +523,12 @@ theorem authOccLits_true {P : Protocol} {B : Bounds} {gs : List Goal} {m : Match
     ∀ l ∈ authOccLits (shapeOf P B) P o, l.eval a = true := by
   have hs : Sat a (authViolationClauses m (shapeOf P B) P) :=
     sat_authViolationClauses_of_sat hag h
-  have haux : Sat a (andNDef (authOccVar (shapeOf P B) P o) (authOccLits (shapeOf P B) P o)) := by
+  have haux : Sat a (authSelectorClauses (authOccVar (shapeOf P B) P o)
+      (authOccLits (shapeOf P B) P o)) := by
     intro cl hcl
     have hmem : cl ∈ authAuxClauses (shapeOf P B) P := List.mem_flatMap.mpr ⟨o, ho, hcl⟩
     exact hs cl (List.mem_append_right _ hmem)
-  exact ((sat_andNDef).mp haux).1 ha
+  exact (sat_authSelectorClauses.mp haux) ha
 
 /-- **No excusing claim is complete.** For a commit occurrence whose auxiliary variable is true,
 every claim occurrence that could excuse it under the chosen monitor has at least one false
@@ -728,7 +729,7 @@ theorem claimExcuses_tripleOnly {sh : Shape} {P : Protocol}
 /-- **SOUND, agreement goal, modulo the decoded-run bridge.** A model of the goal-indexed formula
 that selects the agreement goal, together with the decoded-run bridge, is a bounded attack on the
 agreement goal of the query. Everything the *clauses* have to do is done here: the demand clause
-supplies a commit candidate, the Tseitin definitions make its four literals true, the excuse
+supplies a commit candidate, the selector implications make its four literals true, the excuse
 clauses make sure no claim occurrence with all its literals true excuses it, and `ClaimsReflect`
 turns "the run has a claim of that triple" into "some claim occurrence has all its literals true" -
 contradiction. The only assumption is `DecodedRun`, and it is no longer an assumption in substance:

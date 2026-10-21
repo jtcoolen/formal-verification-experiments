@@ -73,7 +73,7 @@ open ProtSat.Reference.Explore
 /-! ### Which executions violate which goal -/
 
 /-- **Goal-indexed violation over the repaired semantics.** Secrecy is "some configuration of the
-trace knows a declared secret" (long-term declarations plus snapshot obligations); agreement is
+trace knows a declared secret" (closed declarations, current declared registers and snapshot obligations); agreement is
 "some commit has no matching earlier claim". Both are propositions about the reference semantics
 alone: no CNF, no variable numbering and no solver appears here. -/
 def goalViolation (P : Protocol) (g : Goal) (Cs : List Cfg) (tr : List Ev) : Prop :=
@@ -1189,5 +1189,70 @@ theorem replayInjQ_cnf_refused :
   rw [this]
 
 end Gates
+
+/-! ### Verdict regressions for the corrected reference semantics -/
+
+namespace ReviewGates
+
+def storeDeclaredQ : Query :=
+  Query.mk ProtSat.Reference.ReviewGates.storeP { steps := 2, rounds := 0 } [Goal.secrecy]
+
+def storeDeclaredNode : Node :=
+  let P := storeDeclaredQ.protocol
+  let tr := ProtSat.Reference.ReviewGates.storeTrace
+  let Cs := ProtSat.Reference.Gates.visit P tr
+  { cfg := Cs.getLastD (initCfg P), tr := tr, Cs := Cs }
+
+theorem store_declared_witness_checks : checkWitness storeDeclaredQ storeDeclaredNode = true := by
+  decide
+
+theorem store_declared_attack : boundedAttack storeDeclaredQ :=
+  checkWitness_sound store_declared_witness_checks
+
+/-- A query that previously returned bounded safety after publishing its declared register now
+returns an attack. The verdict follows from the replayed witness, without replaying the search. -/
+theorem store_declared_verdict : ∃ x, analyze storeDeclaredQ = Verdict.attack x :=
+  analyze_attack storeDeclaredQ (by decide) (by decide)
+    (attackFound_of_boundedAttack storeDeclaredQ store_declared_attack)
+
+/-- The ciphertext is published after the claim. Both receiver roles can commit only after
+receiving that ciphertext, so the defect is reuse of the claim across roles, not a missing claim. -/
+def crossRoleReplayP : Protocol :=
+  { roles := [{ acts := [Action.claim 0 (Expr.agent 1) (Expr.agent 0),
+                         Action.send 1 (Expr.encS (Expr.agent 0) (Expr.shrk 0 1))] },
+              { acts := [Action.recv 0 0,
+                         Action.commit 0 (Expr.agent 0) (Expr.decS (Expr.var 0) (Expr.shrk 0 1))] },
+              { acts := [Action.recv 0 0,
+                         Action.commit 0 (Expr.agent 0) (Expr.decS (Expr.var 0) (Expr.shrk 0 1))] }]
+    sessions := [{ role := 0, self := 0, peer := 1 }, { role := 1, self := 1, peer := 0 },
+                 { role := 2, self := 1, peer := 0 }]
+    agents := [0, 1], nonceDomain := [], compromised := [], secrets := [], auths := [{ tag := 0 }] }
+
+def crossRoleReplayQ : Query :=
+  Query.mk crossRoleReplayP { steps := 6, rounds := 0 } [Goal.agreementInj]
+
+def crossRoleReplayTrace : List Ev :=
+  let ct := Term.encS (Term.agent 0) (Key.shrk 0 1)
+  [Ev.act 0, Ev.act 0, Ev.recv 1 ct, Ev.act 1, Ev.recv 2 ct, Ev.act 2]
+
+def crossRoleReplayNode : Node :=
+  let Cs := ProtSat.Reference.Gates.visit crossRoleReplayP crossRoleReplayTrace
+  { cfg := Cs.getLastD (initCfg crossRoleReplayP), tr := crossRoleReplayTrace, Cs := Cs }
+
+theorem cross_role_replay_witness_checks :
+    checkWitness crossRoleReplayQ crossRoleReplayNode = true := by decide
+
+theorem cross_role_replay_noninjective_agreement :
+    goalViolationBool crossRoleReplayP Goal.agreement crossRoleReplayNode.Cs crossRoleReplayTrace =
+      false := by decide
+
+theorem cross_role_replay_attack : boundedAttack crossRoleReplayQ :=
+  checkWitness_sound cross_role_replay_witness_checks
+
+theorem cross_role_replay_verdict : ∃ x, analyze crossRoleReplayQ = Verdict.attack x :=
+  analyze_attack crossRoleReplayQ (by decide) (by decide)
+    (attackFound_of_boundedAttack crossRoleReplayQ cross_role_replay_attack)
+
+end ReviewGates
 
 end ProtSat.Reference.Contract

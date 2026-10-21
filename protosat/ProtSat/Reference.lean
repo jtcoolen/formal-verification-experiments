@@ -45,9 +45,8 @@ here rather than comments there.
 
 ## What is not here yet
 
-Secret obligations with snapshot persistence, role parameterisation by self/peer, and the
-credential-provisioning discipline for decryption (roadmap stage 2b), and any connection to the
-encoding: the correspondence between this semantics and the CNF is what stages 3-4 build. Nothing
+Role parameterisation by self/peer and any connection to the encoding: the correspondence between
+this semantics and the CNF is what stages 3-4 build. Nothing
 here imports `ProtSat.CNF`, `Encode`, `Encoding`, `Complete` or `DPLL`.
 -/
 
@@ -148,6 +147,17 @@ def requiredPrivKeys (e : Expr) : List Agent :=
     | Expr.decA _ a => some a
     | _ => none).eraseDups
 
+/-- The non-public credentials an expression names. A symmetric-key constant requires the same
+authority as a private-key constant; asymmetric decryption additionally names its private key
+implicitly. Keys computed through variables and explicit destructors are already values held by the
+session and need no additional constant-lookup privilege. -/
+def requiredKeys (e : Expr) : List Key :=
+  (e.subexpressions.filterMap fun
+    | Expr.shrk a b => some (Key.shrk a b)
+    | Expr.privk a => some (Key.priv a)
+    | Expr.decA _ a => some (Key.priv a)
+    | _ => none).eraseDups
+
 /-- The keys a session holds by right of its role: its own private key and the long-term keys of
 its conversation. -/
 def provisioned (P : Protocol) (q : Nat) : List Key :=
@@ -155,11 +165,17 @@ def provisioned (P : Protocol) (q : Nat) : List Key :=
   | none => []
   | some s => Key.priv s.self :: [Key.shrk s.self s.peer, Key.shrk s.peer s.self]
 
-/-- Every key appearing anywhere in a message. -/
-def keysIn : Term -> List Key :=
-  fun t => (Bounded.subtermsL t).filterMap fun
-    | Term.key k => some k
-    | _ => none
+/-- Keys available through public pair projections. Hash preimages, encrypted plaintexts and
+encryption keys are opaque: a session must explicitly decrypt a ciphertext and store its plaintext
+before that plaintext can authorize a named credential. -/
+def keysIn : Term -> List Key
+  | Term.key k => [k]
+  | Term.pair x y => keysIn x ++ keysIn y
+  | _ => []
+
+@[simp] theorem keysIn_hash (t : Term) : keysIn (Term.hash t) = [] := rfl
+@[simp] theorem keysIn_encS (t : Term) (k : Key) : keysIn (Term.encS t k) = [] := rfl
+@[simp] theorem keysIn_encA (t : Term) (a : Agent) : keysIn (Term.encA t a) = [] := rfl
 
 /-- The keys a session may use: its credentials plus every key it has received or stored. -/
 def availableKeys (P : Protocol) (C : Cfg) (q : Nat) : List Key :=
@@ -167,7 +183,7 @@ def availableKeys (P : Protocol) (C : Cfg) (q : Nat) : List Key :=
 
 /-- May this session evaluate this expression? -/
 def canUse (P : Protocol) (C : Cfg) (q : Nat) (e : Expr) : Bool :=
-  (requiredPrivKeys e).all fun a => Key.priv a ∈ availableKeys P C q
+  (requiredKeys e).all fun k => k ∈ availableKeys P C q
 
 /-- Is every expression the action reads within the session's authority? This is the gate that
 `stepOf` applies before executing a deterministic action. -/
@@ -450,14 +466,30 @@ theorem kn_mono {P : Protocol} {C C' : Cfg} {e : Ev} (h : Rel P C e C') :
 
 /-! ### What a run must not reveal -/
 
-/-- The secrets a configuration must keep: the protocol's static closed secrets, and every value
-snapshotted by a `secret` action so far. The second part is what `ProtSat.Secret.store` cannot
-express: it re-reads the register at every configuration, so overwriting the register retires the
-promise. -/
-def declaredSecrets (P : Protocol) (C : Cfg) : List Term := P.closedSecretTerms ++ C.oblig
+/-- Values currently held in registers named by `Secret.store`. An unbound register contributes no
+value. This preserves the protocol declaration's original meaning; use an action-level `secret`
+snapshot when the obligation must survive overwriting the register. -/
+def storeSecretTerms (P : Protocol) (C : Cfg) : List Term :=
+  P.secrets.filterMap fun
+    | Secret.store q x => readVar x (storeOf C q)
+    | Secret.closed _ => none
+
+/-- The secrets a configuration must keep: closed declarations, current values of declared store
+registers, and persistent values snapshotted by `secret` actions. -/
+def declaredSecrets (P : Protocol) (C : Cfg) : List Term :=
+  P.closedSecretTerms ++ storeSecretTerms P C ++ C.oblig
 
 /-- A configuration leaks when the attacker knows one of the declared secrets. -/
 def leaks (P : Protocol) (C : Cfg) : Prop := ∃ s ∈ declaredSecrets P C, s ∈ C.kn
+
+/-- A declared register whose current value is known really is a secrecy violation. -/
+theorem leaks_of_storeSecret {P : Protocol} {C : Cfg} {q : Nat} {x : Var} {v : Term}
+    (hsecret : Secret.store q x ∈ P.secrets)
+    (hvalue : readVar x (storeOf C q) = some v) (hknown : v ∈ C.kn) : leaks P C := by
+  refine ⟨v, ?_, hknown⟩
+  have hstore : v ∈ storeSecretTerms P C :=
+    List.mem_filterMap.mpr ⟨Secret.store q x, hsecret, hvalue⟩
+  exact List.mem_append_left _ (List.mem_append_right _ hstore)
 
 /-- The executable form. -/
 def leaksBool (P : Protocol) (C : Cfg) : Bool :=
@@ -537,9 +569,19 @@ def claimMatches (c r : Inst) : Bool :=
 def agrees (ls : List Inst) : Prop :=
   ∀ c ∈ ls, c.isCommit → ∃ r ∈ ls, claimMatches c r = true
 
-/-- The identity of a claim or commit for injective-matching purposes. -/
-def key (a : Inst) : Bool × Nat × Nat × Agent × Agent × Term :=
-  (a.isCommit, a.tag, a.role, a.self, a.peer, a.data)
+/-- Commits sharing possible matching claims share one consumption budget. Their role index is
+deliberately absent: `claimMatches` does not distinguish it, so splitting the budget by role would
+allow the same claim to justify several commits. -/
+def key (a : Inst) : Bool × Nat × Agent × Agent × Term :=
+  (a.isCommit, a.tag, a.self, a.peer, a.data)
+
+theorem key_set_role (a : Inst) (role : Nat) : key { a with role := role } = key a := rfl
+
+/-- Two commits that can consume the same claim must draw from the same budget. This is the
+invariant that prevents a role index from allowing the claim to be consumed twice. -/
+theorem key_eq_of_shared_claim {c d r : Inst} (hc : c.isCommit = true) (hd : d.isCommit = true)
+    (hcr : claimMatches c r = true) (hdr : claimMatches d r = true) : key c = key d := by
+  simp_all [claimMatches, key]
 
 /-- **Injective agreement**: at each commit, the claims that could match it outnumber the commits
 that already consumed them, so distinct commits need distinct earlier claims. -/
@@ -893,5 +935,97 @@ theorem snapshot_leaks :
     traceLeaksBool snapshotP (visit snapshotP snapshotTrace) = true := by decide
 
 end Gates
+
+/-! ### Regression gates for credential, declaration and injectivity checks -/
+
+namespace ReviewGates
+
+/-- A register declaration is sufficient to protect the generated value; no extra `secret` action
+is required to make the declaration effective. -/
+def storeP : Protocol :=
+  { roles := [{ acts := [Action.fresh 0 0, Action.send 0 (Expr.var 0)] }]
+    sessions := [{ role := 0, self := 0, peer := 0 }]
+    agents := [0], nonceDomain := [7], compromised := []
+    secrets := [Secret.store 0 0], auths := [] }
+
+def storeTrace : List Ev := [Ev.generate 0 7, Ev.act 0]
+
+theorem store_run : run storeP (initCfg storeP) storeTrace ≠ none := by decide
+
+theorem store_leak_detected :
+    traceLeaksBool storeP (Gates.visit storeP storeTrace) = true := by decide
+
+/-- Principal 0 is not provisioned with the shared key of principals 1 and 2. -/
+def sharedP : Protocol :=
+  { roles := [{ acts := [Action.send 1 (Expr.shrk 1 2)] }]
+    sessions := [{ role := 0, self := 0, peer := 1 }]
+    agents := [0, 1, 2], nonceDomain := [], compromised := []
+    secrets := [Secret.closed (Expr.shrk 1 2)], auths := [] }
+
+theorem unrelated_shared_key_blocked :
+    stepOf sharedP (initCfg sharedP) (Ev.act 0) = none := by decide
+
+theorem own_shared_key_usable :
+    canUse sharedP (initCfg sharedP) 0 (Expr.shrk 0 1) = true := by decide
+
+/-- Merely receiving a hash of a private key cannot confer authority to publish the key. -/
+def hiddenP : Protocol :=
+  { roles := [{ acts := [Action.send 0 (Expr.hash (Expr.privk 1))] },
+              { acts := [Action.recv 1 0, Action.send 0 (Expr.privk 1)] }]
+    sessions := [{ role := 0, self := 1, peer := 0 }, { role := 1, self := 0, peer := 1 }]
+    agents := [0, 1], nonceDomain := [], compromised := []
+    secrets := [Secret.closed (Expr.privk 1)], auths := [] }
+
+def hiddenPrefix : List Ev := [Ev.act 0, Ev.recv 1 (Term.hash (Term.key (Key.priv 1)))]
+
+theorem hash_received : run hiddenP (initCfg hiddenP) hiddenPrefix ≠ none := by decide
+
+theorem hash_does_not_reveal_key :
+    run hiddenP (initCfg hiddenP) (hiddenPrefix ++ [Ev.act 1]) = none := by decide
+
+/-- Ciphertexts are opaque too; explicitly decrypting one into a register makes its plaintext
+available. This positive control prevents the credential gate from banning key transport. -/
+def transportP : Protocol :=
+  { roles := [{ acts := [Action.send 0 (Expr.encA (Expr.privk 1) 0)] },
+              { acts := [Action.recv 1 0, Action.assign 1 (Expr.decA (Expr.var 0) 0),
+                          Action.send 0 (Expr.privk 1)] }]
+    sessions := hiddenP.sessions
+    agents := [0, 1], nonceDomain := [], compromised := []
+    secrets := [], auths := [] }
+
+def transportPrefix : List Ev := [Ev.act 0, Ev.recv 1 (Term.encA (Term.key (Key.priv 1)) 0)]
+
+theorem ciphertext_received : run transportP (initCfg transportP) transportPrefix ≠ none := by decide
+
+theorem ciphertext_key_unavailable :
+    canUse transportP (Gates.nthCfg transportP transportPrefix 2) 1 (Expr.privk 1) = false := by
+  decide
+
+theorem explicit_decryption_transports_key :
+    run transportP (initCfg transportP) (transportPrefix ++ [Ev.act 1, Ev.act 1]) ≠ none := by
+  decide
+
+/-- One claim shared by commits in two roles is a replay, just as two commits in one role are. -/
+def crossRoleP : Protocol :=
+  { roles := [{ acts := [Action.claim 0 (Expr.agent 1) (Expr.agent 0)] },
+              { acts := [Action.commit 0 (Expr.agent 0) (Expr.agent 0)] },
+              { acts := [Action.commit 0 (Expr.agent 0) (Expr.agent 0)] }]
+    sessions := [{ role := 0, self := 0, peer := 1 }, { role := 1, self := 1, peer := 0 },
+                 { role := 2, self := 1, peer := 0 }]
+    agents := [0, 1], nonceDomain := [], compromised := [], secrets := [], auths := [{ tag := 0 }] }
+
+def crossRoleTrace : List Ev := [Ev.act 0, Ev.act 1, Ev.act 2]
+
+theorem cross_role_run : run crossRoleP (initCfg crossRoleP) crossRoleTrace ≠ none := by decide
+
+theorem cross_role_noninjective_agreement :
+    agreesBool (insts crossRoleP (Gates.visit crossRoleP crossRoleTrace) crossRoleTrace) = true := by
+  decide
+
+theorem cross_role_replay_rejected :
+    agreesInjBool (insts crossRoleP (Gates.visit crossRoleP crossRoleTrace) crossRoleTrace) = false := by
+  decide
+
+end ReviewGates
 
 end ProtSat.Reference

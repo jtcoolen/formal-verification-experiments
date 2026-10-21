@@ -43,3 +43,6 @@ import ProtSat.DecodeIndex
 import ProtSat.GoalEncode
 import ProtSat.AgreementPredicates
 import ProtSat.AgreesBase
+import ProtSat.AgreesBaseComplete
+import ProtSat.AuthSelectors
+import ProtSat.GoalAnalyze
