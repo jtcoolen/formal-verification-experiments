@@ -1474,15 +1474,71 @@ is accepted really refutes the target. Callers pass `encode P B`, which ties evi
   GoalEncode's header and the doc comment on `boundedAttackGoals_of_sat_agreement` are corrected in
   the same commit: their caveats had become false as prose while the theorems stayed correct.
   Build green (1899 jobs), audit clean over 4138 theorems, 30/30 CI gates green.
-* Next - the remaining work is now all about the headline, not about hypotheses. (1) *Goal-indexed
-  `encode`*: `Encode.violationLits` names leak literals only, so `encode P B` is secrecy-specific by
-  construction; the fix is `violationLits sh P gs` plus `encodeGroups` and a `Complete` that is
-  complete per goal (~160 call sites in 15 files), gated by a byte-identical-formula regression check
-  for `[Goal.secrecy]`. (2) *The xe stride flip* onto `Shape.V` (`szXe`, `szAxe`, `vxe`, `axe`, `xeOh`,
-  `f1`, `f2`, `evalGate`, `evalLeafGate`), after which `domainGap` stops restricting the protocol and
-  `Residual` is empty - it is the only hypothesis still separating the CNF route from an
-  unconditional statement; needs `Represent.exprVals` Nodup fixed first. (3) *Agreement violation
-  clauses in the CNF*, so `AuthGap`'s gap closes and a CNF `boundedSafe` stops meaning secrecy-only.
-  (4) *Wire the analyzer to emit evidence*: `Analyzer` still returns a bare verdict, while
-  `Refute.refutationOf` + `Serialize` + `CheckedSafe.boundedSafe_of_checkedCode` already give a
-  kernel-checked certificate for any formula - the plumbing is a call away..
+* 2026-10-21 (ao) - the seven reported semantic defects are fixed in `fd7bde9`, and this entry records
+  what is actually in that commit as re-verified against the tree (not from the report that produced
+  it), because the log had fallen behind the code.
+  *Reference semantics, repaired.* Credential authority is now independent of the evaluator:
+  `Reference.requiredKeys` / `keysIn` define which keys a term demands, with `keysIn_hash`,
+  `keysIn_encS`, `keysIn_encA` pinning that a key buried under a hash or a ciphertext grants nothing
+  - decided by `hash_does_not_reveal_key` and `unrelated_shared_key_blocked` against
+  `own_shared_key_usable`. Declared secrets became persistent obligations:
+  `storeSecretTerms` / `declaredSecrets` snapshot a declared value so overwriting its register does
+  not erase the requirement (`leaks_of_storeSecret`, with the `storeP` / `store_leak_detected`
+  witness). Injective matching was repaired so a shared claim key cannot pair two commits
+  (`key_set_role`, `key_eq_of_shared_claim`), and the new `Contract.crossRoleReplayQ` gate decides a
+  cross-role replay that breaks injective agreement while leaving non-injective agreement intact -
+  the example the roadmap asked for to separate the two notions.
+  *The agreement encoding stopped over-demanding.* `authSelectorClauses` now carries only the
+  implication selector -> occurrence (its own doc says the reverse is deliberately absent), so a
+  performed-and-matched commit may stay unselected. That was the fix for the obstruction
+  `AgreesBaseComplete` first reported as `every_realized_commit_is_unexcused`, and `AuthSelectors.lean`
+  is the witness model that forced it: one session claims and commits tag 0, then commits the
+  unclaimed tag 1, so reaching the violation requires performing a matched commit first.
+  *Agreement completeness is now unconditional.* `AgreesBaseComplete.encoding_complete_agreement`
+  (line 2249) takes only `authNameable`, `domainGap = false`, a `BoundedTrace` and an `AuthBreak`,
+  and produces satisfiability - the earlier `hall` hypothesis (every committed triple unclaimed) is
+  gone, replaced by `unclaimed_occurrence_of_authBreak` plus a selection-aware witness
+  `assignOfSelected`. Getting there needed a bound nobody had proved: `below N L` plus `sat_congr`,
+  then `below_*` for all ten semantic groups (~700 lines), because the agreement auxiliaries live
+  above `nVarsAll` and `assignOf` sets them false by construction (`assignOf_not_a_model_of_
+  agreement`, unconditional).
+  *A goal-indexed driver exists.* `GoalAnalyze.lean` (877 lines) validates the model, refuses
+  `agreementInj` explicitly (because `Query.Violation P Goal.agreementInj = True` - see (am)),
+  checks `univClosed` / `SecretsOKStore` / `authNameable` as decidable gates, and states its contract
+  as `attack_sound`, `boundedSafeGoals_of_boundedSafe` and `unsat_of_encodingUnsat`. It pairs
+  agreement with `Matching.tripleOnly` on purpose, and says why: `encodeGoalsOf`'s default is
+  `orderAware`, which does not match `Query.Violation`.
+  *The demo label was corrected.* `ENCODING UNSAT` no longer claims 'no bounded secret leak'; it now
+  says 'the generated CNF has no satisfying assignment', which is what the theorem actually gives
+  for a mixed-goal query.
+  *What is still open, and it is now a short list.* (1) The mixed-goal formula CONJOINS the violation
+  groups, so a query selecting both secrecy and agreement asks for one execution violating both,
+  while the contract asks for some goal violated by some execution - the composition is stricter than
+  the property. (2) The CNF correspondence targets the older `Operational` semantics, not the repaired
+  `Reference` semantics, so freshness, credentials, snapshots and ordered agreement are not what the
+  CNF theorems speak about. (3) `GoalAnalyze` withholds agreement SAFETY and injective agreement, and
+  supports only constant annotations. (4) Fuel bounds the refutation producer while DPLL still
+  searches without a budget.
+  State: build green (1905 jobs), axiom audit clean over 4518 theorems, 30/30 CI gates green.
+
+* Next - in priority order, with the cheap correct fix before the expensive complete one.
+  (1) *Per-goal composition* (in progress): the mixed-goal defect is a composition error, not an
+  encoding error, and it does not need a disjunctive encoding to fix. `formulaOfGoal q g` per goal,
+  then attack from 'some goal satisfiable' and safety from 'every goal unsatisfiable by checked
+  evidence'. That also unlocks agreement SAFETY in the driver, because
+  `AgreesBaseComplete.encoding_complete_agreement` is now unconditional. Prove the goal-set laws
+  (permutation, duplication, unsupported-goal neutrality) while there.
+  (2) *Semantics divergence map* (in progress): for each repaired `Reference` feature - allocation
+  history, action-specific events, credential authority, persistent snapshots, ordered and
+  injective agreement - say whether the `Operational` target models it, whether the CNF constrains
+  it, and what specifically must be re-proved to move the correspondence. Without that map, stage 3
+  of the roadmap ('retarget the encoding') is an unbounded project.
+  (3) *Budget the search that is still unbudgeted*: DPLL runs unrestricted in the reference path
+  while the refutation producer takes fuel. A production driver must return `unknown` on exhaustion
+  and never a verdict.
+  (4) *Store-dependent annotations*: `authNameable` restricts claim/commit peer and data to closed
+  constants naming universe messages. It is decided for every model in the repo, and it is the
+  hypothesis that makes the agreement bridge go through, so removing it is real work (the value
+  literals must stay free and the excuse clauses must range over value indices).
+  (5) *The xe stride flip* onto `Shape.V`, after which `domainGap` stops restricting the protocol.
+  Needs `Represent.exprVals` Nodup fixed first.
